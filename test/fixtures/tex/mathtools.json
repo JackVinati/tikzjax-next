@@ -1,0 +1,1 @@
+{ "dataset": { "texPackages": { "mathtools": "" } }, "note": "expl3-dependent. BACKLOG.md calls this permanently impossible; this fixture is the test." }

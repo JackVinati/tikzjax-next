@@ -104,6 +104,7 @@ for (const name of names) {
 	const metaPath = join(FIXTURES, `${name}.json`);
 	const meta = existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, 'utf8')) : {};
 	const expectFailure = meta.expect === 'failure';
+	const expectUnsupported = meta.expect === 'unsupported';
 
 	const reply = await send({
 		type: 'render',
@@ -118,7 +119,12 @@ for (const name of names) {
 	let ok;
 	let detail;
 
-	if (expectFailure) {
+	if (expectUnsupported) {
+		// A documented boundary. It must still fail CLEANLY — a classified error the user can read,
+		// never a crash and never a silent blank — so the assertion is on the shape of the failure.
+		ok = reply.type === 'error' && !!reply.message;
+		detail = `limit: ${reply.type === 'error' ? reply.message : 'unexpectedly rendered'}`;
+	} else if (expectFailure) {
 		// The point of the failure fixture is a classified, explainable diagnostic — not a hang
 		// and not a broken-image marker. Whether a diagram also comes out is a separate question:
 		// under \nonstopmode TeX usually recovers and renders what it can, so this accepts either

@@ -38,6 +38,7 @@ RUN if [ "$TEXLIVE" = "apt" ]; then \
         apt-get update \
         && apt-get install -y --no-install-recommends --no-install-suggests \
             texlive texlive-latex-extra texlive-latex-recommended texlive-plain-generic \
+            texlive-science texlive-pictures texlive-fonts-extra \
         && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* ; \
     fi
 

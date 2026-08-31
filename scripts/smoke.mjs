@@ -5,18 +5,24 @@
  *
  * This exists to answer, with evidence rather than argument, the questions docs/DECISIONS.md D8
  * opened: does pgfplots compile, does expl3 actually run on this engine, does a broken source
- * produce a diagnosable error instead of hanging. It runs the UNMODIFIED upstream library.js, so
- * a failure here is upstream's, not ours — which is the whole point of running it before forking.
+ * produce a diagnosable error instead of hanging.
  *
- * It is also the harness the golden corpus will use: same inputs, same engine, byte-comparable
- * output.
+ * It runs OUR fork (engine-src/library.ts), not the upstream copy. It used to run upstream, on the
+ * argument that a failure would then be upstream's rather than ours — but the fork now deliberately
+ * FIXES upstream behaviour (a font outside dvi2html's built-in metric table threw out of openSync,
+ * across the wasm frames, and killed the run; a single \mathfrak took the engine down). Measuring
+ * against an engine we no longer ship would report our fixes as failures. `verify-fork.mjs` is what
+ * proves fork and upstream agree wherever upstream works at all.
+ *
+ * It is also the harness the golden corpus uses: same inputs, same engine, byte-comparable output.
  */
 import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join, basename } from 'node:path';
 import { Writable } from 'node:stream';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import esbuild from 'esbuild';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const OUT = join(root, 'engine-build', 'out');
@@ -31,12 +37,23 @@ for (const p of [join(OUT, 'tex.wasm'), join(OUT, 'core.dump'), join(DIST, 'tex_
 	}
 }
 
-// library.js calls postMessage() for every line of TeX stdout. In a worker that is the log
-// channel; here it is the transcript we assert against.
+// The fork takes its log sink by injection rather than reaching for postMessage.
 let transcript = [];
-globalThis.postMessage = (line) => transcript.push(String(line));
 
-const library = await import('../engine-src/upstream/library.js');
+// Transpiled into node_modules/.cache so that `@drgrice1/dvi2html`, left external, still resolves.
+const cacheDir = join(root, 'node_modules', '.cache', 'tikz-smoke');
+mkdirSync(cacheDir, { recursive: true });
+const forkPath = join(cacheDir, 'library.mjs');
+await esbuild.build({
+	entryPoints: [join(root, 'engine-src', 'library.ts')],
+	outfile: forkPath,
+	bundle: true,
+	format: 'esm',
+	platform: 'node',
+	external: ['@drgrice1/dvi2html'],
+	logLevel: 'warning',
+});
+const library = await import(pathToFileURL(forkPath).href);
 const { dvi2html } = await import('@drgrice1/dvi2html');
 
 const code = new WebAssembly.Module(readFileSync(join(OUT, 'tex.wasm')));
@@ -48,29 +65,25 @@ if (coredump.length !== library.pages * 65536) {
 }
 
 /**
- * Mirrors run-tex.js's loadDecompress, reading from disk instead of fetch().
+ * The bundled TeX inputs, as the plugin ships them.
  *
  * Every miss is recorded. TeX probes for files it does not need (see pgfplots'
  * \pgfplots@iffileexists, which \openin's a name precisely to find out whether it exists), so a
  * miss is not by itself a fault — but when a fixture fails, the miss list is the first place the
  * cause shows up, and it is the raw material for the plugin's "package X is not bundled" error.
  */
-let requested = [];
 let missed = [];
-const fileLoader = async (file) => {
-	requested.push(file);
-	const p = join(DIST, file);
-	if (!existsSync(p)) {
-		missed.push(file.replace(/^tex_files\//, '').replace(/\.gz$/, ''));
-		throw new Error(`not bundled: ${file}`);
-	}
-	return gunzipSync(readFileSync(p));
-};
+const bundled = new Map();
+for (const entry of readdirSync(join(DIST, 'tex_files'))) {
+	if (entry.endsWith('.gz')) bundled.set(entry.slice(0, -3), new Uint8Array(readFileSync(join(DIST, 'tex_files', entry))));
+}
+library.setBundledFiles(bundled, (gz) => new Uint8Array(gunzipSync(gz)));
+library.setLogSink((line) => transcript.push(line));
+library.setMissingFileSink((name) => missed.push(name));
 
 /** The body of run-tex.js's texify(), with the network removed. */
 async function texify(source, dataset = {}) {
 	transcript = [];
-	requested = [];
 	missed = [];
 
 	const texPackages = dataset.texPackages ?? {};
@@ -91,7 +104,6 @@ async function texify(source, dataset = {}) {
 
 	library.setMemory(memory.buffer);
 	library.setInput('input.tex\n\\end\n');
-	library.setFileLoader(fileLoader);
 
 	// `code` is a pre-compiled WebAssembly.Module, so instantiate() resolves to the Instance
 	// itself — not the { module, instance } pair you get when passing bytes. Upstream passes
@@ -129,6 +141,7 @@ const names = readdirSync(FIXTURES)
 mkdirSync(RESULTS, { recursive: true });
 
 let failures = 0;
+let passes = 0;
 for (const name of names) {
 	const source = readFileSync(join(FIXTURES, `${name}.tex`), 'utf8');
 	const metaPath = join(FIXTURES, `${name}.json`);
@@ -147,15 +160,29 @@ for (const name of names) {
 	const texError = log.find((l) => l.startsWith('! '));
 	const wroteDvi = log.some((l) => l.includes('Output written on'));
 	const expectFailure = meta.expect === 'failure';
+	// A documented boundary rather than a regression. It still RUNS — so the day the limit is
+	// lifted the suite says so instead of quietly continuing to skip it — but it does not fail the
+	// build, and it is printed differently so it can never be mistaken for a pass.
+	const expectUnsupported = meta.expect === 'unsupported';
 
 	// A run "succeeded" if TeX wrote a DVI and dvi2html produced an <svg>. Structural, not heuristic.
 	const gotSvg = !!result?.svg && result.svg.includes('<svg');
-	const passed = expectFailure ? !!texError : !error && wroteDvi && gotSvg;
+	const succeeded = !error && wroteDvi && gotSvg;
+	const passed = expectFailure ? !!texError : expectUnsupported ? true : succeeded;
 
 	if (result?.svg) writeFileSync(join(RESULTS, `${name}.svg`), result.svg);
 	writeFileSync(join(RESULTS, `${name}.log`), log.join('\n'));
 
-	const mark = passed ? '\x1b[32mPASS\x1b[0m' : '\x1b[31mFAIL\x1b[0m';
+	// A documented limit is never printed as a pass. If one starts succeeding, that is news, and
+	// LIFTED says so — a suite that silently absorbs a fixed limitation stops being a record of
+	// what the engine can do.
+	const mark = expectUnsupported
+		? succeeded
+			? '\x1b[36mLIFTED\x1b[0m'
+			: '\x1b[33mLIMIT \x1b[0m'
+		: passed
+			? '\x1b[32mPASS\x1b[0m'
+			: '\x1b[31mFAIL\x1b[0m';
 	console.log(
 		`${mark}  ${name.padEnd(24)} ${String(ms).padStart(6)} ms  ` +
 			`${gotSvg ? `${result.svg.length} B svg` : 'no svg'}` +
@@ -163,6 +190,7 @@ for (const name of names) {
 			`${error ? `  \x1b[31m${error.message}\x1b[0m` : ''}`,
 	);
 	if (meta.note) console.log(`      ${meta.note}`);
+	if (passed && !expectUnsupported) passes++;
 	if (!passed) {
 		failures++;
 		if (missed.length) {

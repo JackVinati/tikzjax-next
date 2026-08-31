@@ -50,6 +50,11 @@ for tex in "$FIXTURES"/*.tex; do
     # Reproduce exactly the document the engine builds: the format dump already provides
     # \documentclass[margin=0pt]{standalone}, the ximera pgfsys driver, xcolor and tikz, so the
     # preamble here must mirror initex.js or the recorded closure will not match what runs.
+    # Prefixed, and NOT named after the fixture. kpathsea searches the working directory first,
+    # so a generated `chemfig.tex` is what chemfig.sty's own `\input chemfig.tex` resolves to —
+    # the package silently loads our test document instead of itself, and the run dies on a second
+    # \documentclass. Any fixture sharing a name with a TeX input would do the same.
+    job="job-$name"
     node -e "
       const fs = require('fs');
       const meta = fs.existsSync('$meta') ? JSON.parse(fs.readFileSync('$meta','utf8')) : {};
@@ -58,7 +63,7 @@ for tex in "$FIXTURES"/*.tex; do
         .map(([n,o]) => '\\\\usepackage' + (o ? '['+o+']' : '') + '{'+n+'}').join('');
       const libs = d.tikzLibraries ? '\\\\usetikzlibrary{'+d.tikzLibraries+'}' : '';
       const body = fs.readFileSync('$tex','utf8');
-      fs.writeFileSync('$name.tex',
+      fs.writeFileSync('$job.tex',
         '\\\\documentclass[margin=0pt]{standalone}\n' +
         '\\\\def\\\\pgfsysdriver{pgfsys-ximera.def}\n' +
         '\\\\usepackage[svgnames]{xcolor}\n\\\\usepackage{tikz}\n' +
@@ -68,16 +73,16 @@ for tex in "$FIXTURES"/*.tex; do
 
     # Judge on the artifact, not the exit code: latex exits non-zero for any error in the log
     # while still writing a perfectly good DVI, so `latex && [ -f dvi ]` reports false failures.
-    latex -recorder -interaction=nonstopmode "$name.tex" >/dev/null 2>&1 || true
+    latex -recorder -interaction=nonstopmode "$job.tex" >/dev/null 2>&1 || true
 
     # A DVI is not proof of health: under nonstopmode TeX recovers from most errors and writes one
     # anyway. Report the transcript's first `!` separately — that is what distinguishes "the engine
     # is missing something" from "the fixture is wrong", and it is exactly how a mistyped `\\` row
     # separator in the tikz-cd fixture masqueraded for hours as an engine defect.
-    first_error=$(grep -m1 '^!' "$name.log" 2>/dev/null || true)
-    if [ -f "$name.dvi" ] && [ -z "$first_error" ]; then
-        ok "$name -> $(stat -c%s "$name.dvi") B dvi"
-    elif [ -f "$name.dvi" ]; then
+    first_error=$(grep -m1 '^!' "$job.log" 2>/dev/null || true)
+    if [ -f "$job.dvi" ] && [ -z "$first_error" ]; then
+        ok "$name -> $(stat -c%s "$job.dvi") B dvi"
+    elif [ -f "$job.dvi" ]; then
         failed+=("$name")
         printf '    \033[33m! %s produced a dvi but real LaTeX reported: %s\033[0m\n' "$name" "$first_error"
     else
@@ -85,7 +90,7 @@ for tex in "$FIXTURES"/*.tex; do
         printf '    \033[31m! %s produced no dvi: %s\033[0m\n' "$name" "${first_error:-unknown}"
     fi
 
-    [ -f "$name.fls" ] && grep '^INPUT ' "$name.fls" | cut -d' ' -f2- >> all-inputs.txt
+    [ -f "$job.fls" ] && grep '^INPUT ' "$job.fls" | cut -d' ' -f2- >> all-inputs.txt
 done
 
 log "Reducing recorded inputs"
@@ -100,9 +105,12 @@ for (const p of lines) {
     if (!p.includes("texmf")) continue;
     const base = p.split("/").pop();
 
-    // .tfm metrics are supplied by dvi2html'"'"'s built-in tfmData(), not by the virtual filesystem
-    // (see library.js openSync), so bundling them would be dead weight.
-    if (base.endsWith(".tfm")) continue;
+    // .tfm metrics ARE bundled, contrary to the obvious assumption. dvi2html carries a built-in
+    // table, but it covers only Computer Modern and THROWS on anything else — which took the whole
+    // engine down on a single \mathfrak. library.ts now tries the built-in table first and falls
+    // back to the bundle, so the metrics for eufm / eusm / msam / msbm have to be here for those
+    // fonts to work at all (upstream #55, #84, #113). They are ~1.5 KB each.
+    if (base.endsWith(".pk") || base.endsWith(".gf")) continue;
     // Font maps/encodings are a dvips concern; this engine emits SVG.
     if (/\.(map|enc|pfb|vf|fd_)$/.test(base)) continue;
     // The format itself is in the core dump.

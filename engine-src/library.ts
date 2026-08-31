@@ -157,8 +157,25 @@ const openSync = (filename: string, mode: 'r' | 'w'): number => {
 	if (filesystem[filename]) {
 		buffer = filesystem[filename];
 	} else if (filename.endsWith('.tfm')) {
-		// Font metrics come from dvi2html's built-in table, never from the bundle.
-		buffer = Uint8Array.from(tfmData(filename.replace(/\.tfm$/, '')) as ArrayLike<number>);
+		// dvi2html carries a built-in metric table. It is tried FIRST so every font the engine
+		// already rendered keeps rendering byte-identically — but it covers only the Computer
+		// Modern set, and it THROWS on anything else. That throw escaped openSync, crossed the
+		// wasm frames and killed the whole run: a single `\mathfrak` took the engine down rather
+		// than producing an error anyone could read.
+		//
+		// So: built-in first, then the bundle, then not-found. The bundled fallback is what makes
+		// eufm/eusm/msam/msbm usable at all — their WOFF2 faces were always in the font set;
+		// only the metrics were missing (upstream #55, #84, #113).
+		try {
+			buffer = Uint8Array.from(tfmData(filename.replace(/\.tfm$/, '')) as ArrayLike<number>);
+		} catch {
+			buffer = resolveBundled(filename);
+			if (!buffer) {
+				missingSink?.(filename);
+				files.push({ filename, erstat: 1, eof: true });
+				return files.length - 1;
+			}
+		}
 	} else if (mode === 'r') {
 		buffer = resolveBundled(filename);
 

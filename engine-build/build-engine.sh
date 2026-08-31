@@ -184,6 +184,21 @@ gzip -9 -c web2js/tex.wasm  > tikzjax/tex.wasm.gz
 gzip -9 -c web2js/core.dump > tikzjax/core.dump.gz
 cp web2js/initex-files.json tikzjax/ 2>/dev/null || true
 
+log "Patching genTexFiles.js to read files as bytes"
+# Upstream does `pako.gzip(fs.readFileSync(sysFile, 'utf8'))` — every bundled file read as UTF-8
+# TEXT. That is harmless for .sty and .code.tex and silently destroys anything binary: every byte
+# >= 0x80 becomes U+FFFD. It never mattered upstream because upstream bundles no binaries, and it
+# surfaces the moment you bundle a .tfm — TeX reports `Bad metric (TFM file)` for a file that is
+# demonstrably present, which is a considerably worse symptom than a missing one.
+#
+# Asserted rather than assumed, like the worker patches: a silent no-op here would ship corrupt
+# font metrics.
+grep -q "readFileSync(sysFile, 'utf8')" tikzjax/genTexFiles.js \
+    || die "genTexFiles.js no longer reads with 'utf8'; re-check the patch before removing it"
+sed -i "s/readFileSync(sysFile, 'utf8')/readFileSync(sysFile)/" tikzjax/genTexFiles.js
+grep -q "readFileSync(sysFile)" tikzjax/genTexFiles.js || die "the genTexFiles.js patch did not apply"
+ok "binary-safe"
+
 log "Computer Modern Type1 fonts"
 # Baked into the image so a run needs no network at all.
 cp /opt/src/bakoma.zip tikzjax/bakoma.zip

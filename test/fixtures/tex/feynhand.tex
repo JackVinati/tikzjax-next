@@ -1,0 +1,8 @@
+\begin{tikzpicture}
+\begin{feynhand}
+\vertex (a) at (-2,1); \vertex (b) at (-2,-1); \vertex (c) at (0,0); \vertex (d) at (2,0);
+\propag[fermion] (a) to (c);
+\propag[anti fermion] (b) to (c);
+\propag[boson] (c) to (d);
+\end{feynhand}
+\end{tikzpicture}

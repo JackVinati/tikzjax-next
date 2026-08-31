@@ -164,6 +164,14 @@ for (const name of names) {
 	const meta = existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, 'utf8')) : {};
 	const dataset = meta.dataset ?? {};
 
+	// Fixtures marked `unsupported` are the ones where the fork deliberately DIVERGES: upstream
+	// throws out of openSync and takes the whole run down, the fork reports a readable error.
+	// Comparing them would be comparing a crash to a diagnosis.
+	if (meta.expect === 'unsupported') {
+		console.log(`[36mSKIP[0m  ${name.padEnd(24)} fork diverges by design (documented limit)`);
+		continue;
+	}
+
 	let a, b, t0, t1, t2;
 	try {
 		t0 = Date.now();

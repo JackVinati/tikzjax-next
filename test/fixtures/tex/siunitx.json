@@ -1,0 +1,9 @@
+{
+  "dataset": {
+    "texPackages": {
+      "siunitx": ""
+    }
+  },
+  "note": "upstream #30. expl3 v3 package; needs texlive-science in the build image. KNOWN LIMIT: TeX loads the metric (it is bundled) and the WOFF2 face exists, but dvi2html calls tfmData() itself when parsing the DVI and its built-in table covers only Computer Modern. Fixing this means extending or vendoring @drgrice1/dvi2html.",
+  "expect": "unsupported"
+}

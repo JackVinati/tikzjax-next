@@ -214,6 +214,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 
 	let svg = '';
 	let wroteDvi = false;
+	let convertError: string | undefined;
 	try {
 		const instance = await WebAssembly.instantiate(texModule, {
 			library,
@@ -224,8 +225,14 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 		const dvi = library.readFileSync('input.dvi');
 		wroteDvi = dvi.byteLength > 0;
 		if (wroteDvi) svg = await dviToSvg(dvi);
-	} catch {
-		// readFileSync throws when TeX never wrote a DVI. That is a diagnosis input, not a crash.
+	} catch (error) {
+		// Two very different things land here, and telling them apart is the difference between a
+		// useful message and a shrug:
+		//   - readFileSync throws when TeX never wrote a DVI at all;
+		//   - dvi2html throws when the DVI names a font its built-in metric table does not carry
+		//     (eufm10, rsfs10, tcrm1000 ...), which is a SUCCESSFUL TeX run we cannot draw.
+		// Swallowing both produced "TeX produced no output" for a compile that worked perfectly.
+		if (wroteDvi) convertError = error instanceof Error ? error.message : String(error);
 	} finally {
 		library.deleteEverything();
 	}
@@ -236,6 +243,23 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 
 	// Output decides success; the transcript decides what to say about it. Under \nonstopmode a
 	// mistyped macro usually yields BOTH a diagram and an error, and the user needs both.
+	if (convertError !== undefined) {
+		const font = /Could not find font (\S+)/.exec(convertError)?.[1];
+		return {
+			type: 'error',
+			id,
+			kind: 'missing-file',
+			message: font
+				? `The font ${font} is not supported by the SVG converter.`
+				: `The diagram compiled but could not be converted: ${convertError}`,
+			firstError: transcript.firstError,
+			line: transcript.line,
+			log,
+			missing,
+			durationMs,
+		};
+	}
+
 	if (!wroteDvi || !gotSvg) {
 		return { type: 'error', id, ...diagnose(transcript, missing), log, missing, durationMs };
 	}
