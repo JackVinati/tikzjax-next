@@ -111,10 +111,37 @@ export class TikzBlock extends MarkdownRenderChild {
 
 	// -------------------------------------------------------------------------------------------
 
+	/**
+	 * Events are queued, never interleaved.
+	 *
+	 * An effect handler is allowed to dispatch — `addClasses` decides the block is empty, or probes
+	 * L1 and finds it — but the events it raises MUST NOT run before the rest of the batch that
+	 * produced them. Running them inline reorders the DOM against the machine's intent: `load`
+	 * emits `[addClasses, paintPlaceholder]`, so an L1 hit dispatched from inside `addClasses`
+	 * mounted the diagram and then the loop carried on and painted a spinner underneath it, which
+	 * nothing would ever remove. Every reopened note with a cached diagram grew a spinner.
+	 *
+	 * The machine cannot prevent this — it is pure and correct — so the invariant belongs here:
+	 * one batch of effects runs to completion before the next event is reduced.
+	 */
+	private dispatching = false;
+	private readonly queued: Event[] = [];
+
 	private dispatch(event: Event): void {
-		const [next, effects] = reduce(this.state, event);
-		this.state = next;
-		for (const effect of effects) this.run(effect);
+		this.queued.push(event);
+		if (this.dispatching) return;
+
+		this.dispatching = true;
+		try {
+			for (let next = this.queued.shift(); next !== undefined; next = this.queued.shift()) {
+				const [state, effects] = reduce(this.state, next);
+				this.state = state;
+				for (const effect of effects) this.run(effect);
+			}
+		} finally {
+			this.dispatching = false;
+			this.queued.length = 0;
+		}
 	}
 
 	private run(effect: Effect): void {
@@ -126,6 +153,9 @@ export class TikzBlock extends MarkdownRenderChild {
 				return;
 
 			case 'paintPlaceholder':
+				// Defence in depth against the reordering the dispatch queue now prevents: a
+				// placeholder painted after the diagram is already up is a spinner nobody removes.
+				if (this.body.querySelector('svg') || this.placeholder) return;
 				this.placeholder = renderPlaceholder(this.body, this.deps.cache.peekSize(this.spec.key));
 				return;
 
@@ -312,6 +342,16 @@ export class TikzBlock extends MarkdownRenderChild {
 			}
 
 			this.failure = error instanceof TexError ? error : new TexError('tex-error', [], String(error));
+
+			// `err` is a COMPILING event. If the job never started — the runner threw before
+			// calling onStart, or the queue failed for a reason of its own — we are still in
+			// SCHEDULING, where `err` is a no-op and the block would sit unsettled forever.
+			// Route it through `rejected`, which SCHEDULING does handle. Found by a test that
+			// stubbed a queue rejecting without ever starting the job.
+			if (this.state.phase === 'SCHEDULING') {
+				this.dispatch({ type: 'rejected', reason: this.failure.kind });
+				return;
+			}
 			this.dispatch({ type: 'err', reason: this.failure.kind });
 		}
 	}
