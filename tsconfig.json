@@ -25,5 +25,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "types/**/*.d.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "engine-src/**/*.ts", "types/**/*.d.ts", "test/**/*.ts"]
 }

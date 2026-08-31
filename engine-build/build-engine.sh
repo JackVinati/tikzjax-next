@@ -172,6 +172,11 @@ log "Collecting artifacts into $OUT"
 
 cp web2js/tex.wasm web2js/core.dump "$OUT/"
 cp tikzjax/tex.wasm.gz tikzjax/core.dump.gz "$OUT/"
+# `cp -r src dst` NESTS when dst already exists (dst/src), so a second run into a non-empty /out
+# silently leaves the first run's stale dist in place while writing the new one underneath it.
+# That cost three rebuilds of chasing a phantom asyncify bug — the file was bundled, just not
+# where anything read it.
+rm -rf "$OUT/dist"
 cp -r tikzjax/dist "$OUT/dist"
 cp tikzjax/tex_files.json "$OUT/"
 cp tikzjax/initex-files.json "$OUT/" 2>/dev/null || true   # `[ -f ] && cp` would trip `set -e`

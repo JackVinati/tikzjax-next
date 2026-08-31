@@ -47,16 +47,31 @@ if (coredump.length !== library.pages * 65536) {
 	process.exit(2);
 }
 
-/** Mirrors run-tex.js's loadDecompress, reading from disk instead of fetch(). */
+/**
+ * Mirrors run-tex.js's loadDecompress, reading from disk instead of fetch().
+ *
+ * Every miss is recorded. TeX probes for files it does not need (see pgfplots'
+ * \pgfplots@iffileexists, which \openin's a name precisely to find out whether it exists), so a
+ * miss is not by itself a fault — but when a fixture fails, the miss list is the first place the
+ * cause shows up, and it is the raw material for the plugin's "package X is not bundled" error.
+ */
+let requested = [];
+let missed = [];
 const fileLoader = async (file) => {
+	requested.push(file);
 	const p = join(DIST, file);
-	if (!existsSync(p)) throw new Error(`not bundled: ${file}`);
+	if (!existsSync(p)) {
+		missed.push(file.replace(/^tex_files\//, '').replace(/\.gz$/, ''));
+		throw new Error(`not bundled: ${file}`);
+	}
 	return gunzipSync(readFileSync(p));
 };
 
 /** The body of run-tex.js's texify(), with the network removed. */
 async function texify(source, dataset = {}) {
 	transcript = [];
+	requested = [];
+	missed = [];
 
 	const texPackages = dataset.texPackages ?? {};
 	const preamble =
@@ -150,6 +165,9 @@ for (const name of names) {
 	if (meta.note) console.log(`      ${meta.note}`);
 	if (!passed) {
 		failures++;
+		if (missed.length) {
+			console.log(`      [33mnot bundled (${missed.length}):[0m ${[...new Set(missed)].join(', ')}`);
+		}
 		for (const l of log.slice(-12)) console.log(`      | ${l}`);
 	}
 }

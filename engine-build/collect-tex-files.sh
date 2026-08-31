@@ -69,11 +69,20 @@ for tex in "$FIXTURES"/*.tex; do
     # Judge on the artifact, not the exit code: latex exits non-zero for any error in the log
     # while still writing a perfectly good DVI, so `latex && [ -f dvi ]` reports false failures.
     latex -recorder -interaction=nonstopmode "$name.tex" >/dev/null 2>&1 || true
-    if [ -f "$name.dvi" ]; then
+
+    # A DVI is not proof of health: under nonstopmode TeX recovers from most errors and writes one
+    # anyway. Report the transcript's first `!` separately — that is what distinguishes "the engine
+    # is missing something" from "the fixture is wrong", and it is exactly how a mistyped `\\` row
+    # separator in the tikz-cd fixture masqueraded for hours as an engine defect.
+    first_error=$(grep -m1 '^!' "$name.log" 2>/dev/null || true)
+    if [ -f "$name.dvi" ] && [ -z "$first_error" ]; then
         ok "$name -> $(stat -c%s "$name.dvi") B dvi"
+    elif [ -f "$name.dvi" ]; then
+        failed+=("$name")
+        printf '    \033[33m! %s produced a dvi but real LaTeX reported: %s\033[0m\n' "$name" "$first_error"
     else
         failed+=("$name")
-        printf '    \033[33m! %s did not produce a dvi; its inputs are still recorded\033[0m\n' "$name"
+        printf '    \033[31m! %s produced no dvi: %s\033[0m\n' "$name" "${first_error:-unknown}"
     fi
 
     [ -f "$name.fls" ] && grep '^INPUT ' "$name.fls" | cut -d' ' -f2- >> all-inputs.txt
