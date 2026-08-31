@@ -46,8 +46,15 @@ jobs:
         # the engine runs entirely offline and the only outbound call upstream ever made was a
         # broken-image marker fetched from a third-party domain on every failed render.
         run: |
-          if grep -rnE "\b(fetch|XMLHttpRequest|sendBeacon|WebSocket)\s*\(" src/ engine-src/ \
-               --include='*.ts' | grep -v '^engine-src/upstream/'; then
+          # Comment lines are excluded, or this fails on the comment in engine-src/library.ts
+          # explaining that upstream's `fetch(filename)` fallback is the thing we removed.
+          # engine-src/upstream/ is the pristine reference copy and is never bundled.
+          hits=$(grep -rnE "\b(fetch|XMLHttpRequest|sendBeacon|WebSocket)\s*\(" src/ engine-src/ \
+                   --include='*.ts' \
+                 | grep -v '^engine-src/upstream/' \
+                 | grep -vE ':[[:space:]]*(\*|//|/\*)' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
             echo "::error::a network call reached the plugin source"
             exit 1
           fi
