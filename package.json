@@ -23,7 +23,7 @@
     "build": "npm run typecheck && node scripts/esbuild.config.mjs production",
     "typecheck": "node node_modules/tsgo/bin/tsc --noEmit",
     "typecheck:legacy": "tsc --noEmit",
-    "lint": "oxlint src scripts engine-src test",
+    "lint": "oxlint src scripts engine-src test --ignore-pattern \"engine-src/upstream/**\"",
     "lint:store": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
