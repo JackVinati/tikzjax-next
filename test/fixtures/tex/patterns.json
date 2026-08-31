@@ -1,0 +1,1 @@
+{ "dataset": { "tikzLibraries": "patterns" }, "note": "upstream #59 — library loads but the pgfsys driver may emit no <pattern>." }

@@ -1,0 +1,1 @@
+{ "dataset": { "texPackages": { "xparse": "" } }, "note": "modern xparse is expl3-based; if this compiles, expl3 really runs." }

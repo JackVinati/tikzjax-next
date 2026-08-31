@@ -1,0 +1,30 @@
+[
+  "//",
+  "// Files added to upstream's tex_files.json. Each name is resolved by kpsewhich against the",
+  "// distribution in the image; build-engine.sh fails the build if any of them is unresolvable,",
+  "// so this list can never silently ship short.",
+  "//",
+  "// \\usepgfplotslibrary{X} inputs tikzlibrarypgfplots.X.code.tex (and, in pgf mode,",
+  "// pgflibrarypgfplots.X.code.tex). Upstream ships pgfplots itself but none of its libraries,",
+  "// which is the whole of upstream issues #28 and #79 — verified by the pgfplots-fillbetween",
+  "// smoke fixture, which failed with `I can't find file pgflibrarypgfplots.fillbetween.code.tex`.",
+  "//",
+
+  "tikzlibrarypgfplots.clickable.code.tex",
+  "tikzlibrarypgfplots.colormaps.code.tex",
+  "tikzlibrarypgfplots.dateplot.code.tex",
+  "tikzlibrarypgfplots.decorations.softclip.code.tex",
+  "tikzlibrarypgfplots.fillbetween.code.tex",
+  "tikzlibrarypgfplots.groupplots.code.tex",
+  "tikzlibrarypgfplots.patchplots.code.tex",
+  "tikzlibrarypgfplots.polar.code.tex",
+  "tikzlibrarypgfplots.smithchart.code.tex",
+  "tikzlibrarypgfplots.statistics.code.tex",
+  "tikzlibrarypgfplots.ternary.code.tex",
+  "tikzlibrarypgfplots.units.code.tex",
+
+  "pgflibrarypgfplots.colorbrewer.code.tex",
+  "pgflibrarypgfplots.colortol.code.tex",
+
+  "pgfplotstable.sty"
+]

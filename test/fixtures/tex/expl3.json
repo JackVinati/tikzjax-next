@@ -1,0 +1,4 @@
+{
+  "dataset": { "texPackages": { "expl3": "" } },
+  "note": "THE decisive test: expl3 needs the \\expanded primitive, which plain e-TeX lacks. See docs/DECISIONS.md D8."
+}

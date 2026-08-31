@@ -1,0 +1,7 @@
+\ExplSyntaxOn
+\tl_new:N \l_tikzjax_probe_tl
+\tl_set:Nn \l_tikzjax_probe_tl { expl3~works }
+\ExplSyntaxOff
+\begin{tikzpicture}
+\node at (0,0) {\ExplSyntaxOn \tl_use:N \l_tikzjax_probe_tl \ExplSyntaxOff};
+\end{tikzpicture}

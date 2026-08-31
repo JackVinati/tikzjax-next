@@ -1,0 +1,7 @@
+{
+  "dataset": {
+    "texPackages": { "pgfplots": "" },
+    "addToPreamble": "\\pgfplotsset{compat=1.16}"
+  },
+  "note": "The headline goal: pgfplots must render."
+}

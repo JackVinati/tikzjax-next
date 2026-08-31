@@ -1,28 +1,68 @@
 {
-	"name": "obsidian-tikzjax",
-	"version": "0.5.2",
-	"description": "Render LaTeX and TikZ diagrams in your notes",
-	"main": "main.js",
-	"scripts": {
-		"dev": "node esbuild.config.mjs",
-		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-		"version": "node version-bump.mjs && git add manifest.json versions.json"
-	},
-	"keywords": [],
-	"author": "",
-	"license": "MIT",
-	"devDependencies": {
-		"@types/node": "^16.11.6",
-		"@typescript-eslint/eslint-plugin": "^5.2.0",
-		"@typescript-eslint/parser": "^5.2.0",
-		"builtin-modules": "^3.2.0",
-		"esbuild": "0.13.12",
-		"obsidian": "latest",
-		"pako": "^2.0.4",
-		"@types/pako": "^1.0.3",
-		"tslib": "2.3.1",
-		"typescript": "4.4.4",
-		"esbuild-plugin-inline-import": "^1.0.1",
-		"localforage": "^1.9.0"
-	}
+  "name": "tikzjax-next",
+  "version": "0.1.0",
+  "description": "Render TikZ and LaTeX diagrams in your notes",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "//": [
+    "Two TypeScripts, deliberately. See docs/DECISIONS.md D5.",
+    "  typescript 5.9.3  exists ONLY to satisfy typescript-eslint, whose peer range caps at <6.1.0",
+    "                    and which imports the classic compiler API that TypeScript 7 replaced with",
+    "                    ./unstable/*. It never typechecks this project.",
+    "  tsgo              is the real typechecker: an alias for typescript@7.0.2, the native Go",
+    "                    compiler. Aliased so it does not collide with the above; `npm run",
+    "                    typecheck` invokes it by path because both packages ship a `tsc` bin.",
+    "When typescript-eslint supports TS 7: delete the alias, bump typescript, drop typecheck:legacy."
+  ],
+  "scripts": {
+    "dev": "node scripts/esbuild.config.mjs",
+    "build": "npm run typecheck && node scripts/esbuild.config.mjs production",
+    "typecheck": "node node_modules/tsgo/bin/tsc --noEmit",
+    "typecheck:legacy": "tsc --noEmit",
+    "lint": "oxlint src scripts engine-src test",
+    "lint:store": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:golden": "RUN_GOLDEN=1 vitest run",
+    "smoke": "node scripts/smoke.mjs",
+    "engine:image": "docker build -t tikzjax-engine:apt --build-arg TEXLIVE=apt engine-build",
+    "engine:image:latest": "docker build -t tikzjax-engine:net --build-arg TEXLIVE=net engine-build",
+    "engine:build": "docker run --rm -v \"$PWD/engine-build/out:/out\" tikzjax-engine:apt",
+    "engine:build:latest": "docker run --rm -v \"$PWD/engine-build/out:/out\" tikzjax-engine:net"
+  },
+  "dependencies": {
+    "@drgrice1/dvi2html": "0.0.7-beta4",
+    "idb": "8.0.3",
+    "pako": "3.0.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.4.0",
+    "@vitest/coverage-v8": "4.1.11",
+    "esbuild": "0.28.2",
+    "eslint": "10.9.1",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-obsidianmd": "0.4.2",
+    "happy-dom": "20.12.0",
+    "obsidian": "1.13.1",
+    "oxlint": "1.80.0",
+    "prettier": "3.9.6",
+    "svgo": "4.1.0",
+    "tsgo": "npm:typescript@7.0.2",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.68.0",
+    "vitest": "4.1.11"
+  },
+  "overrides": {
+    "eslint-plugin-obsidianmd": {
+      "obsidian": "$obsidian",
+      "@eslint/js": "$@eslint/js"
+    }
+  }
 }

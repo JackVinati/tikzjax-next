@@ -1,0 +1,7 @@
+{
+  "dataset": {
+    "texPackages": { "pgfplots": "" },
+    "addToPreamble": "\\pgfplotsset{compat=1.16}\\usepgfplotslibrary{fillbetween}"
+  },
+  "note": "Upstream #28/#79 — the \\usepgfplotslibrary files may not be in tex_files.json."
+}

@@ -1,0 +1,7 @@
+\begin{tikzpicture}
+\begin{axis}[width=8cm, height=6cm]
+\addplot[name path=A, domain=0:3, samples=40] {x};
+\addplot[name path=B, domain=0:3, samples=40] {0.5*x^2};
+\addplot[gray, opacity=0.4] fill between[of=A and B];
+\end{axis}
+\end{tikzpicture}
