@@ -22,3 +22,11 @@ declare module 'virtual:engine' {
 	export const WORKER_SOURCE: string;
 	export const ENGINE_ID: string;
 }
+
+declare module 'virtual:fonts' {
+	/**
+	 * The 140 TeX faces that do NOT ship in styles.css, as @font-face rules with base64 WOFF2.
+	 * Injected per-Document on first mount; see scripts/gen-styles.mjs for why they are split.
+	 */
+	export const COLD_FONT_CSS: string;
+}

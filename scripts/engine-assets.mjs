@@ -16,7 +16,21 @@ export function engineIsBuilt(root) {
 	return existsSync(join(out, 'tex.wasm.gz')) && existsSync(join(out, 'dist', 'tex_files'));
 }
 
-/** Package versions, parsed from what the build image actually resolved via kpsewhich. */
+/**
+ * Package versions, from what the build image actually resolved via kpsewhich.
+ *
+ * The contract matters more than it looks. An earlier version of this function keyed the table by
+ * FILE name and used the literal string 'absent' as a value, which meant every consumer had to
+ * know two conventions to answer "is this bundled?" — and two of them got it wrong in opposite
+ * directions, one reading 'absent' as proof of presence. So:
+ *
+ *   - keys are BARE package names ('pgfplots', not 'pgfplots.sty');
+ *   - values are version strings and nothing else;
+ *   - a package the build could not resolve is simply ABSENT FROM THE TABLE.
+ *
+ * `INVENTORY.files` remains the authoritative answer to "is it bundled" — it is the tex_files list,
+ * which is exactly what the virtual filesystem can serve. This table only answers "which version".
+ */
 function readVersions(out) {
 	const path = join(out, 'tex-versions.txt');
 	if (!existsSync(path)) return {};
@@ -24,11 +38,10 @@ function readVersions(out) {
 	for (const line of readFileSync(path, 'utf8').split('\n')) {
 		const m = /^(\S+)\s+(.*)$/.exec(line.trim());
 		if (!m) continue;
-		const [, file, version] = m;
-		// build-engine.sh records the raw \ProvidesPackage argument, which for the PGF family is
-		// itself a macro (`\pgfplotsversion`) rather than a number. Report it as unknown rather
-		// than surfacing `\pgfplotsversiondate\space v...` in an error message.
-		packages[file] = /^[\d]/.test(version) ? version : version === 'absent' ? 'absent' : 'unknown';
+		const [, file, raw] = m;
+		const version = raw.trim();
+		if (!version || version === 'absent' || version === 'unknown') continue;
+		packages[file.replace(/\.(sty|cls|def|tex)$/, '')] = version;
 	}
 	return packages;
 }

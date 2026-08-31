@@ -40,10 +40,15 @@
    outside Obsidian an unresolvable var() is invalid-at-computed-value-time and `fill` falls back
    to BLACK, not white — which is why diagrams copied out of the app come out wrong today
    (upstream #21 #97). */
-.tikzjax-figure svg .tz-paper-fill {
+.tikzjax-figure svg .tz-paper-fill,
+/* The root <svg> can carry the paint itself — SVGO's moveElemsAttrsToGroup hoists a fill shared by
+   every child, and optimize runs before colors — so the descendant selector alone would silently
+   leave the author's white as theme ink. Found in review. */
+.tikzjax-figure svg.tz-paper-fill {
 	fill: var(--tikz-paper);
 }
-.tikzjax-figure svg .tz-paper-stroke {
+.tikzjax-figure svg .tz-paper-stroke,
+.tikzjax-figure svg.tz-paper-stroke {
 	stroke: var(--tikz-paper);
 }
 

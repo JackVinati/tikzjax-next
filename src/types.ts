@@ -93,6 +93,18 @@ export interface KeyInputs {
 	engineId: string;
 	/** Enumerated in settings/schema.ts. Excludes theme, scale, alignment, timeouts. */
 	artifactRevision: string;
+	/**
+	 * Per-block flags that change the STORED artifact rather than how it is displayed.
+	 *
+	 * `artifactRevision` covers the same ground for the GLOBAL settings, but `raw` and `fast` can
+	 * also be set per block via `%!tikz`, and neither reaches the key through `baked` — they change
+	 * the pipeline, not the TeX. Without them here, a block toggled to `fast` collides with its own
+	 * full-quality artifact and serves whichever was stored first. Found in review.
+	 *
+	 * Intended: a fast artifact and a full artifact are different keys and coexist, so switching
+	 * back and forth costs no recompile in either direction.
+	 */
+	pipeline: { raw: boolean; fast: boolean; svgo: SvgoMode };
 }
 
 // -------------------------------------------------------------------------------------------
@@ -115,15 +127,27 @@ export interface TexResult {
 }
 
 export class TexError extends Error {
+	// Explicit fields rather than constructor parameter properties: `erasableSyntaxOnly` forbids
+	// those, being the one piece of TypeScript class syntax that emits runtime code instead of
+	// being erased.
+	readonly kind: TexErrorKind;
+	readonly log: string[];
+	readonly firstError: string | undefined;
+	readonly line: number | undefined;
+
 	constructor(
-		readonly kind: TexErrorKind,
-		readonly log: string[],
-		readonly firstError?: string | undefined,
-		readonly line?: number | undefined,
+		kind: TexErrorKind,
+		log: string[],
+		firstError?: string | undefined,
+		line?: number | undefined,
 		message?: string,
 	) {
 		super(message ?? firstError ?? kind);
 		this.name = 'TexError';
+		this.kind = kind;
+		this.log = log;
+		this.firstError = firstError;
+		this.line = line;
 	}
 }
 

@@ -48,13 +48,46 @@ done
 # ---------------------------------------------------------------------------------------------
 log "Recording package versions (this is what the engine will actually ship)"
 
+# Resolve a package version to a COMPARABLE number wherever possible.
+#
+# The naive approach — echo the \ProvidesPackage bracket — fails for the whole PGF family, because
+# they write \ProvidesPackage{pgfplots}[\pgfplotsversiondate\space v\pgfplotsversion ...]: the
+# bracket contains macros, not digits. Emitting that string put `\pgfplotsversiondate\space v...`
+# into the shipped inventory, which made the #110 compat lint dead code — it compared a version
+# number against a macro name and never fired. So: look in the package's revision file first,
+# where the version is \def'd literally.
 version_of() {
-    local file="$1" path
+    local file="$1" base path rev macro
+    base="${file%.*}"
     path=$(kpsewhich "$file" 2>/dev/null || true)
     [ -n "$path" ] || { echo "absent"; return; }
-    # Most PGF-family packages carry \ProvidesPackage{...}[<date> <version> ...]
-    grep -ohE '\\Provides(Package|File|Class)\{[^}]*\}\s*\[[^]]*\]' "$path" 2>/dev/null \
-        | head -1 | sed -E 's/.*\[([^]]*)\].*/\1/' || echo "unknown"
+
+    # The version lives in a revision file as a macro definition. Both the assignment form and the
+    # file name vary across the family, and getting either wrong silently yields "unknown":
+    #   pgf.revision.tex       \def\pgfversion{3.1.10}
+    #   pgfplots.revision.tex  \gdef\pgfplotsversion{1.18.1}   <- \gdef, inside a \begingroup
+    # tikz ships with pgf and has no version of its own, so it borrows pgf's.
+    local family="$base"
+    [ "$base" = "tikz" ] && family="pgf"
+
+    for rev in "${family}.revision.tex" "${family}revision.tex"; do
+        macro=$(kpsewhich "$rev" 2>/dev/null || true)
+        [ -n "$macro" ] || continue
+        local v
+        v=$(grep -ohE "\\\\(g|x|e)?def\\\\${family}version\\{[^}]*\\}" "$macro" 2>/dev/null \
+            | head -1 | sed -E 's/.*\{([^}]*)\}.*/\1/')
+        [ -n "$v" ] && { echo "$v"; return; }
+    done
+
+    # Otherwise take the \ProvidesPackage bracket, but only if it actually starts with a digit —
+    # a date or a version. Anything else is a macro and is more misleading than "unknown".
+    local bracket
+    bracket=$(grep -ohE '\\Provides(Package|File|Class)\{[^}]*\}\s*\[[^]]*\]' "$path" 2>/dev/null \
+        | head -1 | sed -E 's/.*\[([^]]*)\].*/\1/')
+    case "$bracket" in
+        [0-9]*) echo "$bracket" ;;
+        *) echo "unknown" ;;
+    esac
 }
 
 : > "$OUT/tex-versions.txt"

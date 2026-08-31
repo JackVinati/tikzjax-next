@@ -209,6 +209,30 @@ Before 2025-08 pgfplots had been frozen since 2020, so the gap the bundled engin
 six years wide, not one. This is the argument for E1 and it belongs in the README rather than
 being rediscovered later.
 
+**Update, 2026-08-31 — what our own build actually ships.** The right-hand column above described
+artisticat's 2022 blob. Now that the engine is built here, the shipped versions are read out of the
+image at build time (`tex-versions.txt`) and are not what the backlog assumed:
+
+| Package | Backlog assumed | **Actually shipped** |
+|---|---|---|
+| pgfplots | 1.16 | **1.18.1** |
+| pgf / TikZ | ~3.1.x (2019) | **3.1.10** |
+| tikz-cd | — | 1.0 (2021) |
+| amsmath | — | 2.17o (2023) |
+| siunitx | absent | still absent (not in `tex_files.json`) |
+
+This matters beyond bookkeeping: `BACKLOG.md` gives **"pgfplots 1.16"** as the *reason* #108 and
+#110 are unfixable. On 1.18.1 that reason is gone, and both need retesting rather than closing —
+the same correction D8 applied to the expl3 partition, from the same cause: a version table read
+off the old blob and never re-derived.
+
+Getting the numbers out at all took two passes. The naive read — echo the `\ProvidesPackage`
+bracket — yields `\pgfplotsversiondate\space v\pgfplotsversion` for the whole PGF family, because
+the bracket contains macros rather than digits; and the revision files disagree on the assignment
+form (`\def\pgfversion` but `\gdef\pgfplotsversion`, the latter inside a `\begingroup`). Each near
+miss produced a plausible-looking `unknown`, which is exactly how the #110 compat lint became dead
+code in the first place.
+
 ## D8 — We build the engine ourselves, from current upstream, and it is in scope
 
 **Supersedes `DESIGN.md` §1.2's "Rebuilding `tex.wasm` / `core.dump` before 1.0" non-goal, §12's
