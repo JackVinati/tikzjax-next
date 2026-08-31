@@ -1,9 +1,9 @@
 import { builtinModules } from 'node:module';
-import { createHash } from 'node:crypto';
 import { mkdir, copyFile, writeFile, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import process from 'node:process';
 import esbuild from 'esbuild';
+import { engineAssetsPlugin, buildEngineAssets, engineIsBuilt } from './engine-assets.mjs';
 
 const prod = process.argv[2] === 'production';
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
@@ -48,8 +48,16 @@ async function buildWorker() {
 	try {
 		await access(entry);
 	} catch {
-		// The worker source lands with the engine work; until then the plugin builds without it.
 		return { source: '', engineId: 'unbuilt' };
+	}
+
+	if (!engineIsBuilt(root)) {
+		// Refuse rather than emit a plugin whose engine is an empty string: that would install
+		// cleanly and then fail at the first diagram with something unhelpful.
+		throw new Error(
+			'engine-build/out/ is missing or incomplete.\n' +
+				'Build the TeX engine first:  npm run engine:image && npm run engine:build',
+		);
 	}
 
 	const result = await esbuild.build({
@@ -62,12 +70,17 @@ async function buildWorker() {
 		minify: prod,
 		sourcemap: false,
 		legalComments: 'none',
-		logLevel: 'info',
+		logLevel: 'warning',
+		plugins: [engineAssetsPlugin(root)],
 	});
 
 	const source = result.outputFiles[0].text;
-	const engineId = createHash('sha256').update(source).digest('hex');
-	console.log(`  worker: ${source.length} bytes, ENGINE_ID ${engineId.slice(0, 16)}…`);
+	const { engineId, stats } = buildEngineAssets(root);
+	const mb = (n) => `${(n / 1048576).toFixed(2)} MB`;
+	console.log(
+		`  worker ${mb(source.length)}  (wasm ${mb(stats.wasmGz)} + dump ${mb(stats.dumpGz)} gz, ` +
+			`${stats.texFiles} tex files ${mb(stats.texFilesBytes)} b64)  ENGINE_ID ${engineId.slice(0, 12)}…`,
+	);
 	return { source, engineId };
 }
 

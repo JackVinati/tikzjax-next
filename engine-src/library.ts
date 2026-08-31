@@ -144,6 +144,13 @@ export const readFileSync = (filename: string): Uint8Array => {
 /** Extensions for which "not found" is a real error TeX should see, rather than an empty file. */
 const ERRSTAT_EXTENSIONS = /\.(aux|log|dvi|tex|sty|def|cls|cfg|ltx|fd|clo)$/;
 
+/**
+ * Job-local files TeX opens as a matter of course. LaTeX probes input.aux on every single run to
+ * discover that it does not exist yet; reporting that as "a package is not bundled" would put a
+ * confident, wrong diagnosis in front of the user on a perfectly good render.
+ */
+const JOB_LOCAL = /\.(aux|log|dvi|toc|out|nav|snm)$/;
+
 const openSync = (filename: string, mode: 'r' | 'w'): number => {
 	let buffer: Uint8Array | undefined;
 
@@ -165,7 +172,7 @@ const openSync = (filename: string, mode: 'r' | 'w'): number => {
 				// This path is HOT and mostly benign: TeX probes for files precisely to discover
 				// whether they exist — pgfplots' \pgfplots@iffileexists \openin's a name for that
 				// reason alone. So a miss is recorded for diagnostics but is never itself an error.
-				if (ERRSTAT_EXTENSIONS.test(filename)) missingSink?.(filename);
+				if (ERRSTAT_EXTENSIONS.test(filename) && !JOB_LOCAL.test(filename)) missingSink?.(filename);
 				files.push({
 					filename,
 					erstat: ERRSTAT_EXTENSIONS.test(filename) ? 1 : 0,
