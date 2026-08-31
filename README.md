@@ -1,177 +1,178 @@
-<img width=275 align="right" src="./imgs/screenshot.png">
+# TikZJax Next
 
-# Obsidian TikZJax
+Renders TikZ and LaTeX diagrams inside Obsidian notes. TeX runs locally, compiled to WebAssembly.
+Nothing is uploaded and nothing is fetched at runtime.
 
-A plugin for Obsidian that lets you render LaTeX and TikZ diagrams in your notes.
-
-You can render graphs, figures, circuits, chemical diagrams, commutative diagrams, and more.
-
-The following packages are available in `\usepackage{}`:
-- chemfig
-- tikz-cd
-- circuitikz
-- pgfplots
-- array
-- amsmath
-  - amstext
-- amsfonts
-- amssymb
-- tikz-3dplot
-
-## Usage
-Content inside of `tikz` code blocks will be rendered by TikZJax.
-
-- Remember to load any packages you need with `\usepackage{}`, and include `\begin{document}` and `\end{document}`.
-
-- The standalone document class is used (`\documentclass{standalone}`).
-
-
-### Examples
-<img width=300 align="right" src="./imgs/img1.png">
-
-````latex
+````markdown
 ```tikz
-\begin{document}
-  \begin{tikzpicture}[domain=0:4]
-    \draw[very thin,color=gray] (-0.1,-1.1) grid (3.9,3.9);
-    \draw[->] (-0.2,0) -- (4.2,0) node[right] {$x$};
-    \draw[->] (0,-1.2) -- (0,4.2) node[above] {$f(x)$};
-    \draw[color=red]    plot (\x,\x)             node[right] {$f(x) =x$};
-    \draw[color=blue]   plot (\x,{sin(\x r)})    node[right] {$f(x) = \sin x$};
-    \draw[color=orange] plot (\x,{0.05*exp(\x)}) node[right] {$f(x) = \frac{1}{20} \mathrm e^x$};
-  \end{tikzpicture}
-\end{document}
-```
-````
-
-<img width=325 align="right" src="./imgs/img2.png">
-
-````latex
-```tikz
-\usepackage{circuitikz}
-\begin{document}
-
-\begin{circuitikz}[american, voltage shift=0.5]
-\draw (0,0)
-to[isource, l=$I_0$, v=$V_0$] (0,3)
-to[short, -*, i=$I_0$] (2,3)
-to[R=$R_1$, i>_=$i_1$] (2,0) -- (0,0);
-\draw (2,3) -- (4,3)
-to[R=$R_2$, i>_=$i_2$]
-(4,0) to[short, -*] (2,0);
-\end{circuitikz}
-
-\end{document}
-```
-````
-
-<img width=375 align="right" src="./imgs/img3.png">
-
-````latex
-```tikz
-\usepackage{pgfplots}
-\pgfplotsset{compat=1.16}
-
-\begin{document}
-
 \begin{tikzpicture}
-\begin{axis}[colormap/viridis]
-\addplot3[
-	surf,
-	samples=18,
-	domain=-3:3
-]
-{exp(-x^2-y^2)*x};
-\end{axis}
+  \draw (0,0) circle (1cm);
+  \node at (0,-1.6) {hello};
 \end{tikzpicture}
-
-\end{document}
 ```
 ````
 
-<img width=400 align="right" src="./imgs/img4.png">
+This is a fork of [artisticat1/obsidian-tikzjax](https://github.com/artisticat1/obsidian-tikzjax),
+which had not been updated since 2022. It is not a drop-in replacement: the plugin id is different,
+so the two can be installed side by side, though not enabled at the same time.
 
-````latex
+## What is different
+
+The original plugin created a `<script type="text/tikz">` element and let a bundled script scan the
+document for it. That meant it held no handle on anything it started, so per-diagram timeouts,
+cancellation, caching, error reporting and PDF export were not so much unimplemented as
+unreachable. This fork owns the whole path from the code fence to the SVG.
+
+**Cached diagrams appear instantly.** A diagram you have seen before is a hash lookup and one string
+replacement, done before the code block processor returns, so it paints in the same frame as the
+surrounding text with no spinner and no layout shift. Diagrams are cached by a hash of their source,
+so nothing recompiles unless you change it. Switching theme, resizing a diagram or changing its
+alignment costs no recompilation at all, because none of those are part of the cache key.
+
+**Errors say what went wrong.** The old plugin's only failure path was a broken-image icon (and an
+HTTP request to a third-party domain on every failure, in a plugin whose selling point was working
+offline). This one reports the TeX error and the line, and where possible what to do about it. A
+mistyped macro usually renders the rest of the diagram and tells you what it dropped.
+
+**A bad diagram cannot take the rest with it.** TeX is fed `\nonstopmode`, so an error is logged
+instead of stopping at an interactive prompt. If a diagram exceeds its time budget the worker is
+terminated and restarted, and only that diagram fails. In the original, one bad diagram blocked
+every later one until Obsidian was restarted.
+
+**Diagrams render when they scroll into view**, one or two at a time, so a note with thirty of them
+does not lock up the editor.
+
+**PDF export waits for the diagrams.** The processor returns a promise, which is what Obsidian
+actually awaits before taking the print snapshot. Colours are pinned to black on white for print
+regardless of your theme.
+
+**Dark mode is handled in CSS, not by rewriting the SVG.** The old plugin string-replaced `black`
+and `white` inside the markup, which could not tell TeX's default ink from a colour you chose, and
+baked CSS variables into presentation attributes so a copied SVG rendered wrong outside Obsidian.
+Here the stored diagram is theme-neutral and CSS does the work.
+
+**The TeX engine is built from source**, in a container, from pinned upstream commits, rather than
+vendored as an opaque 7 MB file. That is what made it possible to find out what is actually inside
+it, and to fix things that were previously assumed to be immovable.
+
+## Installing
+
+Not yet in the community plugin browser. Until then, download `main.js`, `manifest.json` and
+`styles.css` from a [release](../../releases) and put them in
+`<vault>/.obsidian/plugins/tikzjax-next/`, then enable the plugin in Settings.
+
+Disable the original TikZJax plugin first if you have it. Both register the `tikz` code block, so
+both would render every diagram twice. The plugin checks for this and refuses to start rather than
+doing it quietly.
+
+If you had the original installed, its rendered diagrams are reused instead of being recompiled.
+Its cache is only read, never modified, so it keeps working if you go back to it.
+
+## Per-block options
+
+Options go in the block body, as `%!tikz` lines. They are stripped before the source reaches TeX.
+
+````markdown
 ```tikz
-\usepackage{tikz-cd}
-
-\begin{document}
-\begin{tikzcd}
-
-    T
-    \arrow[drr, bend left, "x"]
-    \arrow[ddr, bend right, "y"]
-    \arrow[dr, dotted, "{(x,y)}" description] & & \\
-    K & X \times_Z Y \arrow[r, "p"] \arrow[d, "q"]
-    & X \arrow[d, "f"] \\
-    & Y \arrow[r, "g"]
-    & Z
-
-\end{tikzcd}
-
-\quad \quad
-
-\begin{tikzcd}[row sep=2.5em]
-
-A' \arrow[rr,"f'"] \arrow[dr,swap,"a"] \arrow[dd,swap,"g'"] &&
-  B' \arrow[dd,swap,"h'" near start] \arrow[dr,"b"] \\
-& A \arrow[rr,crossing over,"f" near start] &&
-  B \arrow[dd,"h"] \\
-C' \arrow[rr,"k'" near end] \arrow[dr,swap,"c"] && D' \arrow[dr,swap,"d"] \\
-& C \arrow[rr,"k"] \arrow[uu,<-,crossing over,"g" near end]&& D
-
-\end{tikzcd}
-
-\end{document}
+%!tikz width=420 align=left colors=paper alt="RC low-pass filter"
+%!tikz packages=circuitikz libraries=arrows.meta
+\begin{circuitikz}
+  \draw (0,0) to[R=$R$] (2,0) to[C=$C$] (2,-2) -- (0,-2) -- (0,0);
+\end{circuitikz}
 ```
 ````
 
-<img width=325 align="right" src="./imgs/img5.png">
+| Key | Values |
+| --- | --- |
+| `width`, `max-width`, `scale` | CSS length, or a number for `scale` |
+| `align` | `left`, `center`, `right` |
+| `alt` | quoted text, used as the accessible name. `alt=""` marks a diagram decorative |
+| `colors` | `adapt` (default), `preserve`, `paper`, `invert` |
+| `lazy` | `on`, `off`, `manual` |
+| `timeout` | seconds |
+| `packages` | comma list, `name[options]` accepted |
+| `libraries` | comma list, passed to `\usetikzlibrary` |
+| `border` | a TeX length, adds a margin around the diagram |
+| `fast` | skips SVG optimisation and the ink measurement |
+| `raw` | runs only the mandatory pipeline stages |
+| `nocache` | skips the cache in both directions |
 
-````latex
-```tikz
-\usepackage{chemfig}
-\begin{document}
+They are not written in the code fence line (` ```tikz width=420 `). Obsidian cannot read the fence
+tail during PDF export, in embeds or in hover previews, so the same block would hash to two
+different cache keys and the PDF would get a differently compiled diagram.
 
-\chemfig{[:-90]HN(-[::-45](-[::-45]R)=[::+45]O)>[::+45]*4(-(=O)-N*5(-(<:(=[::-60]O)-[::+60]OH)-(<[::+0])(<:[::-108])-S>)--)}
+## What is included
 
-\end{document}
+Reported by the plugin itself, under Settings → Bundled TeX engine, because it is generated from the
+build rather than written by hand. At the time of writing that is e-TeX 3.141592653, 245 TeX files,
+pgf/TikZ 3.1.10, pgfplots 1.18.1, and the expl3 layer.
+
+Verified by fixtures in `test/fixtures/tex`, each rendered end to end through the shipped worker:
+plain TikZ, `pgfplots` including its libraries, `circuitikz`, `chemfig`, `tikz-cd`, `forest`,
+`mathtools`, `xparse`, `tikz-feynhand`, `arrows.meta`, shadings and patterns.
+
+## Known limitations
+
+| | |
+| --- | --- |
+| `\mathfrak`, `\mathscr`, siunitx's unit symbols | The fonts and their metrics ship, but the DVI-to-SVG converter has a fixed font table covering only Computer Modern, and it is not extensible from outside. Fixing this means changes to `@drgrice1/dvi2html`. |
+| `patterns` draws nothing | The driver emits the pattern reference but not the pattern definition. |
+| `chemfig`'s `\schemestart` loses bonds | The bonds are already missing in the DVI, before any JavaScript runs. |
+| `tikz-feynman` | LuaTeX only. `tikz-feynhand` is bundled and works. |
+| CJK, Cyrillic, IPA | The engine is 8-bit. |
+| Obsidian Publish | Publish runs no community plugins. Exporting a diagram as an attachment is the answer, and is not built yet. |
+| Preambles from a vault file | Parsed but not yet resolved. Per-block `packages` and `libraries` work. |
+
+Untested on iOS and iPadOS at the time of writing. `isDesktopOnly` is `false` because it is expected
+to work, not because it has been confirmed.
+
+## Building
+
+The plugin and the TeX engine are built separately. The engine needs Docker and takes about ten
+minutes; you only need to build it again if you change something under `engine-build/`.
+
+```sh
+npm install
+npm run engine:image   # container with a pinned TeX Live and the web2js toolchain
+npm run engine:build   # tex.wasm, core.dump, tex_files, fonts -> engine-build/out/
+npm run build          # main.js and styles.css
 ```
-````
 
-<img width=310 align="right" src="./imgs/img6.png">
+Everything the engine build depends on is pinned in `engine-build/pins.env` and baked into the
+image, so a build makes no network requests and is reproducible.
 
-````latex
-```tikz
-\usepackage{chemfig}
-\begin{document}
+Useful while working on it:
 
-\definesubmol\fragment1{
-
-    (-[:#1,0.85,,,draw=none]
-    -[::126]-[::-54](=_#(2pt,2pt)[::180])
-    -[::-70](-[::-56.2,1.07]=^#(2pt,2pt)[::180,1.07])
-    -[::110,0.6](-[::-148,0.60](=^[::180,0.35])-[::-18,1.1])
-    -[::50,1.1](-[::18,0.60]=_[::180,0.35])
-    -[::50,0.6]
-    -[::110])
-    }
-
-\chemfig{
-!\fragment{18}
-!\fragment{90}
-!\fragment{162}
-!\fragment{234}
-!\fragment{306}
-}
-
-\end{document}
+```sh
+npm test               # unit tests
+npm run smoke          # every fixture through the engine, headless
+npm run verify:fork    # our engine fork against the upstream it forked from, byte for byte
+npm run verify:worker  # the exact worker string that goes into main.js
+npm run typecheck
 ```
-````
 
-## Contributing
-Contributions are welcome! For information on building Tikzjax, have a look at the [contributing guide](https://github.com/artisticat1/obsidian-tikzjax/issues/68), courtesy of [@thecodechemist99](https://github.com/thecodechemist99).
+To develop against a real vault, point the build at it and it will copy the files on every rebuild:
 
-## Acknowledgements
-This plugin would not be possible without [TikZJax](https://github.com/kisonecat/tikzjax) by [@kisonecat](https://github.com/kisonecat)! In particular, it uses
-[@drgrice1's fork](https://github.com/drgrice1/tikzjax/tree/ww-modifications) that adds some additional features.
+```sh
+OBSIDIAN_PLUGIN_DIR="$HOME/vaults/dev/.obsidian/plugins/tikzjax-next" npm run dev
+```
+
+`docs/DESIGN.md` describes the architecture, `docs/DECISIONS.md` records the decisions that override
+it and why, and `docs/BACKLOG.md` is a triage of every issue on the original repository.
+
+## Licence
+
+GPL-3.0-or-later. The plugin embeds a TeX engine derived from
+[drgrice1/tikzjax](https://github.com/drgrice1/tikzjax) and
+[drgrice1/web2js](https://github.com/drgrice1/web2js), both GPL-3, so the combined work is too.
+
+`NOTICE` lists every embedded component with its own terms: TeX itself, PGF/TikZ, pgfplots,
+circuitikz, chemfig and the rest, plus the Computer Modern and AMS fonts. Full licence texts are in
+`vendor/LICENSES/`.
+
+## Credits
+
+Jim Fowler wrote [TikZJax](https://github.com/kisonecat/tikzjax) and
+[web2js](https://github.com/kisonecat/web2js), which is the hard part and the reason any of this is
+possible. Glenn Rice maintains the forks this engine is built from. artisticat1 wrote the original
+Obsidian plugin.

@@ -1,0 +1,95 @@
+TikZJax Next
+Copyright (C) 2026 Giacomo Vinati
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. See LICENSE.
+
+--------------------------------------------------------------------------------
+
+The distributed plugin is not only this repository's source. `main.js` and
+`styles.css` embed a complete TeX engine, a set of TeX packages and a set of
+fonts, all of which carry their own terms. The list below is what is actually
+inside the files you install, with the licence each part is redistributed under.
+Full texts are in vendor/LICENSES/.
+
+The plugin as a whole is GPL-3.0-or-later because the engine it embeds is.
+
+
+ENGINE
+--------------------------------------------------------------------------------
+
+drgrice1/tikzjax                                              GPL-3.0-or-later
+  https://github.com/drgrice1/tikzjax
+  Copyright Jim Fowler, Glenn Rice.
+  engine-src/library.ts and engine-src/worker.ts are modified forks of
+  src/library.js and src/run-tex.js. Changes are listed in the header of each
+  file and in docs/DECISIONS.md D10.
+  Itself derived from kisonecat/tikzjax (https://github.com/kisonecat/tikzjax).
+
+drgrice1/web2js                                               GPL-3.0
+  https://github.com/drgrice1/web2js
+  Compiles the Pascal source of TeX to WebAssembly. Produces the tex.wasm and
+  core.dump embedded in main.js. Not modified.
+  Itself derived from kisonecat/web2js and jhoobergs/web2js.
+
+@drgrice1/dvi2html                                            GPL-3.0
+  https://github.com/drgrice1/dvi2html
+  Converts TeX's DVI output to SVG. Bundled unmodified from npm.
+
+TeX                                                           Knuth licence
+  Copyright (C) 1982 Donald E. Knuth.
+  The WEB source (texk/tex.web) is redistributed by web2js unmodified, as that
+  licence requires; the e-TeX and web2js change files alter behaviour only
+  through the .ch mechanism the licence provides for.
+
+
+TeX PACKAGES  (embedded in main.js as gzipped sources)
+--------------------------------------------------------------------------------
+
+PGF / TikZ                        LPPL-1.3c or GPL-2.0-or-later, and GFDL for docs
+pgfplots, pgfplotstable                                       GPL-3.0-or-later
+circuitikz                                                    GPL and LPPL
+tikz-feynhand                                                 GPL-3.0-or-later
+chemfig                                                       LPPL-1.3c
+mathtools                                                     LPPL-1.3c
+siunitx                                                       LPPL-1.3c
+tikz-cd                                                       LPPL-1.3
+forest                                                        LPPL-1.3
+standalone                                                    LPPL-1.3
+amsmath, amsfonts and the LaTeX kernel                        LPPL-1.3c
+
+The exact file list and the version of each package are generated from the build
+image rather than maintained by hand: see engine-build/build-engine.sh, and the
+"Bundled TeX engine" entry in the plugin's settings, which reports what the
+installed build actually contains.
+
+
+FONTS  (embedded in styles.css and main.js as WOFF2)
+--------------------------------------------------------------------------------
+
+Computer Modern                                               Knuth licence
+  Copyright (C) Donald E. Knuth. Converted from the BaKoMa Type 1 distribution
+  (https://ctan.org/pkg/cm-ps-type1) to WOFF2 by the build. Conversion is a
+  modification; the fonts are redistributed under their original terms and are
+  not renamed.
+
+AMS fonts (msam, msbm, eufm, eufb, eusm, eusb, euex, eurm, eurb)   OFL-1.1
+  Copyright (C) American Mathematical Society.
+
+LaTeX symbol fonts (lasy, lcmss)                              LPPL-1.3c
+
+
+JAVASCRIPT DEPENDENCIES  (bundled into main.js)
+--------------------------------------------------------------------------------
+
+pako          https://github.com/nodeca/pako                  MIT AND Zlib
+idb           https://github.com/jakearchibald/idb            ISC
+buffer        https://github.com/feross/buffer                MIT
+
+
+--------------------------------------------------------------------------------
+
+Corrections are welcome. If you own one of the components above and this
+attribution is wrong or incomplete, please open an issue and it will be fixed.

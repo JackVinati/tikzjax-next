@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # Deliberately no engine build here. Nothing below needs one: the tests are pure by design
+      # and the typechecker reads the virtual modules from types/, so the whole check runs in
+      # under a minute instead of the ~10 the Docker TeX build takes. The engine is verified by
+      # engine.yml, on its own schedule.
+      - name: Lint
+        run: npm run lint
+
+      - name: Store guidelines
+        run: npm run lint:store
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: No network in the plugin source
+        # The plugin makes zero network requests, and that is an invariant rather than a policy:
+        # the engine runs entirely offline and the only outbound call upstream ever made was a
+        # broken-image marker fetched from a third-party domain on every failed render.
+        run: |
+          if grep -rnE "\b(fetch|XMLHttpRequest|sendBeacon|WebSocket)\s*\(" src/ engine-src/ \
+               --include='*.ts' | grep -v '^engine-src/upstream/'; then
+            echo "::error::a network call reached the plugin source"
+            exit 1
+          fi
+
+      - name: Manifest and versions.json agree
+        # versions.json drifted five releases behind the manifest in the plugin this forks from,
+        # because nothing ever compared them.
+        run: |
+          node -e '
+            const fs = require("fs");
+            const manifest = JSON.parse(fs.readFileSync("manifest.json", "utf8"));
+            const versions = JSON.parse(fs.readFileSync("versions.json", "utf8"));
+            if (!versions[manifest.version]) {
+              console.error(`versions.json has no entry for manifest version ${manifest.version}`);
+              process.exit(1);
+            }
+            if (versions[manifest.version] !== manifest.minAppVersion) {
+              console.error("versions.json disagrees with manifest.minAppVersion");
+              process.exit(1);
+            }
+          '

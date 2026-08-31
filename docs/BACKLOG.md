@@ -6,6 +6,59 @@ All **114** upstream numbers (issues and PRs, #1–#114) appear exactly once in 
 
 **Fixability legend:** `plugin-ts` / `plugin-css` = fixable in this repo's TypeScript or CSS · `worker-patch` = fixable by a build-time string patch to the vendored worker (no TeX toolchain) · `needs-tex-rebuild` = requires regenerating `tex.wasm` / `core.dump` / `tex_files` / fonts · `wontfix` = upstream limit, architecturally impossible, or answered.
 
+---
+
+## Corrections — read these before the table
+
+This triage was written against **artisticat's 2022 bundle**, when a rebuilt TeX engine was a
+hypothetical parallel track called E1. That track is done: the engine is now built here, from
+pinned upstream sources, in a container (`engine-build/`). Several of the reasons the table gives
+for calling something impossible were true of that blob and are false of the engine we ship.
+
+The rows below are left as written, because the reasoning in them is the record of what was
+believed and why. These are the corrections.
+
+**1. expl3 works. It was never a limit of the engine.**
+The table blames "plain e-TeX 3.14159265-2.6 with no `\expanded` / `\pdfstrcmp`", and says this
+transitively blocks forest, xparse, siunitx v3, mathtools and tcolorbox. But `drgrice1/web2js`
+applies `changes/expanded.ch` and `changes/strcmp.ch`, which add exactly those primitives.
+`forest`, `xparse`, `mathtools` and `siunitx` all compile on the shipped engine — verified as
+fixtures in `test/fixtures/tex/`, rendered end to end through the shipped worker. **#86 renders.**
+What stopped these packages was never the primitives; it was that their files were not bundled.
+
+**2. pgfplots is 1.18.1, not 1.16.** So the premise of **#110** ("asks a 2018 release for a 2022
+compat level") is gone, and **#108** needs retesting on 1.18.1 rather than closing.
+
+**3. #28 / #79 are fixed.** The `\usepgfplotslibrary` files are bundled and `fillbetween` renders.
+This one the table already rated `S` and cheap; it simply landed.
+
+**4. The package list is not the 2022 list.** The engine is built from `drgrice1/tikzjax`'s
+`tex_files.json` plus a closure derived by compiling the fixtures with real LaTeX under
+`-recorder`. That is a different set. Comparing the two before publishing found **48 files the
+rebuild had silently dropped** — circuitikz, chemfig, tikz-feynhand and the euler/eucal fonts —
+which have since been restored and are covered by fixtures. Anything in this table that reasons
+from "what the 2022 bundle contained" should be checked against
+`engine-build/out/tex-versions.txt` and the plugin's own settings screen, which report what the
+installed build actually holds.
+
+**5. #55 / #84 / #113 (`\mathfrak`, `\mathscr`) stay open, for a different reason.**
+The table files them under "needs the font pipeline as well". That is right, but not because the
+fonts are missing: the WOFF2 faces ship, and the TFM metrics are now bundled too. `dvi2html` calls
+its own built-in metric table when parsing the DVI, and that table covers only Computer Modern and
+is not extensible from outside. Fixing this means extending or vendoring `@drgrice1/dvi2html`.
+The plugin now says so — *"The font eufm10 is not supported by the SVG converter"* — instead of
+failing blankly.
+
+**6. #59 (`patterns`) has a sharper diagnosis.** The table says the pgfsys driver "never emits
+`<pattern>`". It does: the output contains `<pattern id="pgfupat1" xlink:href="#pgfpat3">`. What is
+missing is the *definition* `#pgfpat3` (and the `#pgfsym3` it uses). That is a specific gap in the
+driver, in code this project now builds.
+
+**What has not changed:** everything resting on the DVI being wrong before any JavaScript runs
+(#25, #54 — a contributor opened `input.dvi` in TeXShop and the bonds were already absent), on
+LuaTeX (#20), on an 8-bit engine (#19 CJK), or on Obsidian Publish running no community plugins
+(#37, #47).
+
 Sorted by category, then severity (critical → high → medium → low).
 
 | Issue(s) | Title | Category | Severity | Effort | Fixability | Root cause (short) | Planned fix / Phase |

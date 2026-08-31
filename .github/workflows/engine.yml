@@ -1,0 +1,88 @@
+name: Engine
+
+# The TeX engine build: Pascal -> WebAssembly, a 156 MiB core dump, and 245 TeX files resolved
+# out of a pinned TeX Live. It takes about ten minutes and needs Docker, so it does not run on
+# every push. It runs when its own inputs change, on a weekly schedule so a rotted upstream is
+# found before a release needs it, and on demand.
+on:
+  push:
+    paths:
+      - 'engine-build/**'
+      - 'engine-src/**'
+      - '.github/workflows/engine.yml'
+  pull_request:
+    paths:
+      - 'engine-build/**'
+      - 'engine-src/**'
+  schedule:
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build the engine image
+        run: npm run engine:image
+
+      - name: Build the engine
+        run: docker run --rm -v "$PWD/engine-build/out:/out" tikzjax-engine:apt
+
+      - name: Report what it shipped
+        run: |
+          cat engine-build/out/BUILD-MANIFEST.txt
+          echo
+          cat engine-build/out/tex-versions.txt
+
+      - name: Every fixture renders
+        # The suite prints LIMIT, never PASS, for a documented boundary, and LIFTED if one starts
+        # working. A limitation that quietly becomes a pass is a fact about the engine nobody
+        # would otherwise notice.
+        run: npm run smoke
+
+      - name: The fork still matches upstream
+        # engine-src/library.ts is a fork of a WebAssembly host. It is only defensible if it can
+        # show it changed nothing observable, everywhere it did not mean to.
+        run: npm run verify:fork
+
+      - name: The shipped worker renders identically
+        run: npm run verify:worker
+
+      - name: Build the plugin
+        run: npm run build
+
+      - name: Size
+        run: |
+          node -e '
+            const { statSync } = require("fs");
+            const mb = (p) => statSync(p).size / 1048576;
+            const main = mb("main.js");
+            const styles = mb("styles.css");
+            console.log(`main.js ${main.toFixed(2)} MB, styles.css ${styles.toFixed(2)} MB`);
+            // A ceiling, not a target. main.js is dominated by the base64 core dump; the honest
+            // fix is a leaner dump, not shaving elsewhere, and this is here so that any OTHER
+            // growth is visible rather than lost in the noise.
+            if (main > 13) { console.error("main.js exceeded 13 MB"); process.exit(1); }
+            if (styles > 0.4) { console.error("styles.css exceeded 400 KB"); process.exit(1); }
+          '
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin
+          path: |
+            main.js
+            manifest.json
+            styles.css
+          retention-days: 14
