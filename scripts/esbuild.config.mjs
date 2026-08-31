@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import process from 'node:process';
 import esbuild from 'esbuild';
 import { engineAssetsPlugin, buildEngineAssets, engineIsBuilt } from './engine-assets.mjs';
+import { buildStyles, fontsPlugin } from './gen-styles.mjs';
 
 const prod = process.argv[2] === 'production';
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
@@ -86,6 +87,15 @@ async function buildWorker() {
 
 const { source: workerSource, engineId } = await buildWorker();
 
+const styles = buildStyles(root);
+{
+	const kb = (n) => `${(n / 1024).toFixed(0)} KB`;
+	console.log(
+		`  styles.css ${kb(styles.coreBytes)} (${styles.core} core faces) + ` +
+			`${kb(styles.coldBytes)} cold in main.js (${styles.cold} faces)`,
+	);
+}
+
 /** Resolves `virtual:engine` to the built worker string. Keeps the 7 MB payload out of the source tree. */
 const virtualEngine = {
 	name: 'virtual-engine',
@@ -132,7 +142,7 @@ const options = {
 	legalComments: 'none',
 	treeShaking: true,
 	logLevel: 'info',
-	plugins: [virtualEngine, deploy],
+	plugins: [virtualEngine, fontsPlugin(root, styles.coldCss), deploy],
 };
 
 if (prod) {

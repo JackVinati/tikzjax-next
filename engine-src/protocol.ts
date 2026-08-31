@@ -17,6 +17,7 @@ export type TexErrorKind =
 	| 'capacity' //       TeX capacity exceeded
 	| 'empty-output' //   TeX finished but wrote no DVI, or the DVI produced no SVG
 	| 'timeout' //        the master gave up; the worker is terminated, never reused
+	| 'aborted' //        the block went away before the job started; never surfaced to the user
 	| 'engine-unavailable'; //  the worker failed to boot at all
 
 /** Everything that changes the bytes TeX produces. Anything not here is presentation. */

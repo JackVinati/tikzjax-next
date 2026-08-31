@@ -1,0 +1,219 @@
+/*
+ * TikZJax Next — layout, colour model, and the states a diagram can be in.
+ *
+ * The colour model is the point of this file. The shipped plugin string-replaces "black" and
+ * "white" inside the SVG markup and bakes `var(--background-primary)` into presentation
+ * attributes; docs/DESIGN.md §7.5 lists the six ways that fails. Here colour leaves JavaScript
+ * entirely: the cached artifact is theme-neutral, and these tokens do the work. A theme switch
+ * therefore costs zero recompiles and zero re-post-processing.
+ */
+
+.tikzjax-figure {
+	--tikz-ink: var(--text-normal);
+	--tikz-paper: var(--background-primary);
+
+	color: var(--tikz-ink);
+	display: flex;
+	justify-content: center;
+	margin: 0.5em 0;
+}
+
+.tikzjax-figure[data-align='left'] {
+	justify-content: flex-start;
+}
+.tikzjax-figure[data-align='right'] {
+	justify-content: flex-end;
+}
+
+.tikzjax-figure svg {
+	display: block;
+	max-width: 100%;
+	height: auto;
+	/* TeX draws in ink; `fill: currentColor` is what makes the recoloured artifact follow the theme. */
+	fill: currentColor;
+	/* The engine's viewBox is systematically an inch short of the ink (upstream #66 #71 #29).
+	   Mount-time measurement fixes it properly; this keeps it visible until then. */
+	overflow: visible;
+}
+
+/* Paper: TeX's white. Set as a class rather than a var() in a presentation attribute, because
+   outside Obsidian an unresolvable var() is invalid-at-computed-value-time and `fill` falls back
+   to BLACK, not white — which is why diagrams copied out of the app come out wrong today
+   (upstream #21 #97). */
+.tikzjax-figure svg .tz-paper-fill {
+	fill: var(--tikz-paper);
+}
+.tikzjax-figure svg .tz-paper-stroke {
+	stroke: var(--tikz-paper);
+}
+
+/* Per-block colour modes (%!tikz colors=...). */
+.tikzjax-figure.is-preserve {
+	--tikz-ink: #000;
+	--tikz-paper: #fff;
+}
+.tikzjax-figure.is-paper {
+	--tikz-ink: #000;
+	--tikz-paper: #fff;
+	background: #fff;
+	padding: 0.5em;
+	border-radius: 4px;
+}
+.theme-dark .tikzjax-figure.is-invert svg {
+	filter: invert(1) hue-rotate(180deg);
+}
+
+/*
+ * Print and export.
+ *
+ * Both rules are deliberate redundancy, not belt-and-braces for its own sake. Obsidian's PDF
+ * export forces `theme-light` on the popup body, but its stylesheet-cloning helper installs a
+ * MutationObserver on the MAIN body's class and re-copies it — so any body-class change during a
+ * multi-second export can flip the popup back to dark mid-flight. `.print` pins the palette
+ * independently of both @media print emulation and the theme class. That is the mechanism behind
+ * "switch to light mode and export works", reported independently by three people on upstream #45.
+ */
+@media print {
+	.tikzjax-figure {
+		--tikz-ink: #000 !important;
+		--tikz-paper: #fff !important;
+		break-inside: avoid;
+		page-break-inside: avoid;
+	}
+	.tikzjax-figure.is-invert svg {
+		filter: none !important;
+	}
+}
+.print .tikzjax-figure {
+	--tikz-ink: #000;
+	--tikz-paper: #fff;
+}
+.print .tikzjax-figure.is-invert svg {
+	filter: none;
+}
+
+/* --- placeholder ---------------------------------------------------------------------------- */
+
+/* Sized from the cached bounding box so a note with twenty diagrams does not reflow as they land. */
+.tikzjax-placeholder {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	min-height: 80px;
+	border-radius: 6px;
+	background: var(--background-secondary);
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+.tikzjax-placeholder::after {
+	content: '';
+	width: 14px;
+	height: 14px;
+	border: 2px solid currentColor;
+	border-top-color: transparent;
+	border-radius: 50%;
+	animation: tikzjax-spin 0.8s linear infinite;
+}
+
+@keyframes tikzjax-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.tikzjax-placeholder::after {
+		animation: none;
+		border-top-color: currentColor;
+		opacity: 0.4;
+	}
+}
+
+/* A block waiting for an explicit "Render diagram" — the depth-cap and manual-lazy escape. */
+.tikzjax-manual {
+	display: flex;
+	justify-content: center;
+	padding: 1em;
+}
+
+/* --- errors and warnings -------------------------------------------------------------------- */
+
+/*
+ * Not role="alert": a note with forty broken blocks would fire forty live-region announcements on
+ * open. It is a labelled group with real buttons, so it is reachable and readable without shouting.
+ */
+.tikzjax-error {
+	border: 1px solid var(--background-modifier-error);
+	border-left-width: 3px;
+	border-radius: 6px;
+	background: var(--background-secondary);
+	padding: 0.75em 1em;
+	font-size: var(--font-ui-small);
+}
+
+.tikzjax-error-message {
+	color: var(--text-error);
+	font-weight: var(--font-semibold);
+	margin-bottom: 0.35em;
+}
+
+.tikzjax-error-hint {
+	color: var(--text-muted);
+	margin-bottom: 0.5em;
+}
+
+.tikzjax-error-source {
+	font-family: var(--font-monospace);
+	font-size: var(--font-smaller);
+	background: var(--background-primary);
+	border-radius: 4px;
+	padding: 0.4em 0.6em;
+	margin-bottom: 0.5em;
+	white-space: pre;
+	overflow-x: auto;
+}
+
+.tikzjax-error-caret {
+	color: var(--text-error);
+}
+
+.tikzjax-error-actions {
+	display: flex;
+	gap: 0.5em;
+	flex-wrap: wrap;
+}
+
+.tikzjax-error-log {
+	margin-top: 0.5em;
+	font-family: var(--font-monospace);
+	font-size: var(--font-smaller);
+	max-height: 16em;
+	overflow: auto;
+	white-space: pre;
+}
+
+/*
+ * The diagram rendered, but something is off: a pipeline stage was skipped, active content was
+ * stripped, or TeX recovered from an error and drew what it could. That last case only exists
+ * because of \nonstopmode, and it is precisely the case a user must not be left guessing about.
+ */
+.tikzjax-warning-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35em;
+	margin: 0.25em auto 0;
+	padding: 0.1em 0.5em;
+	border-radius: 999px;
+	background: var(--background-modifier-border);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	cursor: help;
+}
+
+.tikzjax-figure-wrapper {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+}
