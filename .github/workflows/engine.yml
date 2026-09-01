@@ -6,6 +6,10 @@ name: Engine
 # found before a release needs it, and on demand.
 on:
   push:
+    # Branches only. A tag push runs the release workflow, which builds and verifies the engine
+    # itself — without this filter both run, and the same fifteen minutes are spent twice.
+    branches:
+      - '**'
     paths:
       - 'engine-build/**'
       - 'engine-src/**'
