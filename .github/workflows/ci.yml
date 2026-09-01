@@ -25,10 +25,10 @@ jobs:
 
       - run: npm ci
 
-      # Deliberately no engine build here. Nothing below needs one: the tests are pure by design
-      # and the typechecker reads the virtual modules from types/, so the whole check runs in
-      # under a minute instead of the ~10 the Docker TeX build takes. The engine is verified by
-      # engine.yml, on its own schedule.
+      # No Docker TeX build here — that is engine.yml's job and takes ten minutes. The plugin build
+      # below is a different thing and now costs half a second, because the compressed engine is
+      # committed (internal/DECISIONS.md D12). Until it was, CI never built the plugin at all and a
+      # broken build was only discovered while cutting a release.
       - name: Lint
         run: npm run lint
 
@@ -43,6 +43,16 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Build
+        # The sha256 is printed, not just computed. A release asset has to match what anyone gets by
+        # building the same commit — the community store checks exactly that — and this is where a
+        # divergence between platforms or between the committed engine and the released one becomes
+        # visible without cutting a release to find out.
+        run: |
+          npm run build
+          echo "main.js    $(sha256sum main.js | cut -d' ' -f1)"
+          echo "styles.css $(sha256sum styles.css | cut -d' ' -f1)"
 
       - name: No network in the plugin source
         # The plugin makes zero network requests, and that is an invariant rather than a policy:
