@@ -501,16 +501,21 @@ The **total export budget is not optional**. `Promise.all(ctx.promises)` has no 
 ### 6.1 Key derivation and `artifactRevision()`
 
 ```ts
-key = sha256Hex([
-  `s${SCHEMA_VERSION}`,     // bumped only when the STORED ARTIFACT FORMAT changes
-  `e${ENGINE_ID}`,          // sha256 of the shipped, patched worker source
-  normalizedSource,
-  preambleText,
-  depHashes.join(','),
-  JSON.stringify(bakedOptions),
-  artifactRevision(settings),
-].join(' ')).slice(0, 32);
+key = sha256Hex(
+  field(`s${SCHEMA_VERSION}`) +   // bumped only when the STORED ARTIFACT FORMAT changes
+  field(engineId) +               // sha256 over the engine assets and engine-src/
+  field(normalizedSource) +
+  field(stableStringify(baked)) + // preamble, packages, libraries, border, two-pass
+  field(artifactRevision) +
+  field(stableStringify(pipeline)),
+).slice(0, 32);
 ```
+
+As built rather than as designed: the fields are length-prefixed (`field(s)` is `` `${s.length}:${s}` ``)
+instead of joined by a separator. A separator has to be a byte no input can contain, and no such byte
+exists here — the preamble is arbitrary TeX and the source is arbitrary user text — so with any
+separator there is another pair of fields that concatenates to the same string. Length prefixes make
+the encoding injective for free. See `src/cache/key.ts`.
 
 `artifactRevision()` is **deliberately narrow and enumerated**:
 
@@ -995,6 +1000,7 @@ Pipeline output is snapshotted byte-exact. **The Phase 2→3 refactor must be pr
 - [ ] Two vaults open on desktop: assert each has its own cache store and that "Clear all" in one does not empty the other.
 - [ ] Screen reader (VoiceOver / NVDA) over a note with a captioned diagram, an uncaptioned diagram and an error card.
 - [ ] Devtools Network tab across a full session including a failing diagram: assert **zero** requests.
+- [ ] **Finalize a fence written directly under a line of text**, with no blank line between them, then un-finalize. Assert the embed renders as an embed, the `%%` opens a comment rather than showing the TeX as visible text, and the note comes back byte for byte. This is the open question in the header of `src/note/finalize.ts`: no blank line is inserted because inserting one would make un-finalize inexact, and whether that matters is a fact about Obsidian's parser rather than about CommonMark.
 
 ---
 

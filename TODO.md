@@ -142,6 +142,7 @@ The manual matrix in DESIGN.md §10.4, in full. The three that catch the most:
 - [ ] **iOS**: enable → open Settings (the #111 crash path, which happens *before* anything renders) → 20-diagram note → scroll → background → foreground → export
 - [ ] **A vault with a pre-existing legacy cache**: upgrade, open a note, assert **zero** TeX compiles
 - [ ] **Devtools Network tab** across a full session including a failing diagram: assert zero requests
+- [ ] **Finalize a fence with no blank line above it**, then un-finalize: the embed must render as an embed, the `%%` must open a comment, and the note must come back byte for byte (the open question in `src/note/finalize.ts`)
 
 Then: submit to `obsidianmd/obsidian-releases` for the community plugin browser.
 
