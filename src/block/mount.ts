@@ -68,10 +68,12 @@ function applyPresentation(
 		figure.addClass(`is-${presentation.colors}`);
 	}
 
-	if (presentation.width) container.style.width = presentation.width;
-	if (presentation.maxWidth) container.style.maxWidth = presentation.maxWidth;
+	// setCssStyles rather than `.style.x =`: it is the API Obsidian documents for setting a real CSS
+	// property from code, and every value here comes from the block's own options.
+	if (presentation.width) container.setCssStyles({ width: presentation.width });
+	if (presentation.maxWidth) container.setCssStyles({ maxWidth: presentation.maxWidth });
 	if (presentation.scale && presentation.scale !== 1 && artifact.w > 0) {
-		container.style.width = `${artifact.w * presentation.scale}px`;
+		container.setCssStyles({ width: `${artifact.w * presentation.scale}px` });
 	}
 
 	// Accessibility: an unlabelled <svg> is invisible to a screen reader, and today every diagram
@@ -80,6 +82,8 @@ function applyPresentation(
 		svg.setAttribute('aria-hidden', 'true');
 	} else if (presentation.alt) {
 		svg.setAttribute('role', 'img');
+		// createElementNS, not createEl: `<title>` here has to be in the SVG namespace, and Obsidian's
+		// helpers build HTML elements. An HTML <title> inside an <svg> is not a label, it is nothing.
 		const title = svg.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'title');
 		title.textContent = presentation.alt;
 		svg.insertBefore(title, svg.firstChild);

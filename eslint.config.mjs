@@ -138,16 +138,6 @@ export default tseslint.config(
 	},
 
 	{
-		// A measured aspect ratio cannot live in a stylesheet: it differs per diagram, and it is what
-		// stops a note reflowing as each one lands. `setCssProps` is the API this rule's own message
-		// recommends for dynamic values, and its implementation flags that too — so the rule has no
-		// expressible answer here. Turned off for this file in config rather than inline, because
-		// obsidianmd forbids disabling it with a directive.
-		files: ['src/block/placeholder.ts'],
-		rules: { 'obsidianmd/no-static-styles-assignment': 'off' },
-	},
-
-	{
 		// Hash inner loops. `noUncheckedIndexedAccess` types every array read as possibly undefined,
 		// which in a byte-shuffling loop means an assertion per access or a branch per access; the
 		// branch would be dead code in a fixed-size buffer. Scoped to these two files so the rule

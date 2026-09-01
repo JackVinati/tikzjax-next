@@ -77,6 +77,11 @@
  * multi-second export can flip the popup back to dark mid-flight. `.print` pins the palette
  * independently of both @media print emulation and the theme class. That is the mechanism behind
  * "switch to light mode and export works", reported independently by three people on upstream #45.
+ *
+ * The `!important`s are the point of the block, not an accident: print has to beat the theme, the
+ * per-figure colour classes and anything a snippet has added, and it gets exactly one chance
+ * because the export is not interactive. `break-inside` is flagged as only partly supported, which
+ * is why the legacy `page-break-inside` sits next to it rather than instead of it.
  */
 @media print {
 	.tikzjax-figure {
@@ -106,6 +111,9 @@
 	justify-content: center;
 	width: 100%;
 	min-height: 80px;
+	/* The shape of a diagram nobody has rendered yet on this device. A measured one overrides this
+	   from placeholder.ts, which is the only thing there that cannot live in a stylesheet. */
+	aspect-ratio: 4 / 3;
 	border-radius: 6px;
 	background: var(--background-secondary);
 	color: var(--text-faint);

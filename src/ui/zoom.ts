@@ -117,7 +117,7 @@ export class ZoomModal extends Modal {
 	private apply(): void {
 		const svg = this.surface?.querySelector('svg');
 		if (svg instanceof SVGElement) {
-			svg.style.transform = `translate(${this.tx}px, ${this.ty}px) scale(${this.scale})`;
+			svg.setCssStyles({ transform: `translate(${this.tx}px, ${this.ty}px) scale(${this.scale})` });
 		}
 	}
 

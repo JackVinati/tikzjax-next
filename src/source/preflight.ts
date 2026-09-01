@@ -247,12 +247,15 @@ function checkPgfplotsCompat(text: string, caps: EngineCapabilities, out: Diagno
  * going silently dead again if the generator ever regresses. It was dead for exactly that reason
  * once, and nothing failed to say so.
  *
- * `Object.hasOwn` rather than `!== undefined`: `packages` is a plain object, so `constructor`,
- * `toString` and friends would otherwise be answered by `Object.prototype`.
+ * An own-property check rather than `!== undefined`: `packages` is a plain object, so
+ * `constructor`, `toString` and friends would otherwise be answered by `Object.prototype`.
+ * `hasOwnProperty.call` rather than `Object.hasOwn`, which is Safari 15.4 and this runs on phones.
  */
+const hasOwn = (object: object, key: string): boolean => Object.prototype.hasOwnProperty.call(object, key);
+
 function recordedVersion(name: string, caps: EngineCapabilities): string | undefined {
 	for (const key of [name, `${name}.sty`]) {
-		if (!Object.hasOwn(caps.packages, key)) continue;
+		if (!hasOwn(caps.packages, key)) continue;
 		const recorded = caps.packages[key];
 		if (recorded === undefined || recorded === 'absent') return undefined;
 		return recorded;

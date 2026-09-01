@@ -58,8 +58,17 @@ const COLOR_PROPERTIES = ['fill', 'stroke', 'color', 'stop-color', 'flood-color'
  *
  * Case-insensitive because CSS keywords are, and bounded by `[-\w]` so a hyphenated identifier that
  * merely ends in the word (`--my-currentcolor`) is not a match.
+ *
+ * The left bound is a CAPTURED character rather than a lookbehind, and that is not a style choice.
+ * A lookbehind is a syntax error in JavaScriptCore before Safari 16.4, and a syntax error anywhere
+ * in the bundle stops the WHOLE file from parsing — so this one regex, in a module most notes never
+ * reach, was enough to make Obsidian on an older iPhone say only "failed to load plugin". The
+ * replacer below has to put the captured character back.
+ *
+ * Two adjacent occurrences still both match: a match ends at the keyword, so the separator after it
+ * is left for the next one to claim.
  */
-const CURRENT_COLOR = /(?<![-\w])currentcolor(?![-\w])/gi;
+const CURRENT_COLOR = /(^|[^-\w])currentcolor(?![-\w])/gi;
 
 /** The `class` tokens colors.ts writes, and the property each one stands in for. */
 const PAPER_CLASS_PROPERTIES: ReadonlyArray<readonly [string, string]> = [
@@ -622,11 +631,12 @@ function hasCurrentColor(value: string): boolean {
 /**
  * A function replacer, not a string one: a replacement string is scanned for `$&`, `$1` and
  * friends, and the caller's ink is a value read off a theme variable rather than a literal we
- * control.
+ * control. `before` is the character the pattern had to consume in place of a lookbehind, and it
+ * goes back exactly as it came.
  */
 function replaceCurrentColor(value: string, color: string): string {
 	CURRENT_COLOR.lastIndex = 0;
-	return value.replace(CURRENT_COLOR, () => color);
+	return value.replace(CURRENT_COLOR, (_match, before: string) => `${before}${color}`);
 }
 
 /** Drop a trailing `!important` so that a value can be compared as a keyword. */

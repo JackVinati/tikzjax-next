@@ -132,6 +132,7 @@ plain TikZ, `pgfplots` including its libraries, `circuitikz`, `chemfig`, `tikz-c
 | `chemfig`'s `\schemestart` loses bonds | The bonds are already missing in the DVI, before any JavaScript runs. |
 | `tikz-feynman` | LuaTeX only. `tikz-feynhand` is bundled and works. |
 | CJK, Cyrillic, IPA | The engine is 8-bit. |
+| Obsidian Sync Standard does not sync `main.js` | It is 11.7 MB, and that plan caps a file at 5 MB. The plugin still installs from the community browser or a release on every device; only syncing the plugin folder itself is affected. The size is the TeX engine — a 156 MiB core dump, gzipped and base64'd — and shrinking it means a smaller engine, not tighter code. |
 | Obsidian Publish | Publish runs no community plugins. Save the diagram as an SVG attachment, or finalize the note, and the result publishes as ordinary content. |
 
 Untested on iOS and iPadOS at the time of writing. `isDesktopOnly` is `false` because it is expected

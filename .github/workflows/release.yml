@@ -7,6 +7,11 @@ on:
 
 permissions:
   contents: write
+  # For actions/attest-build-provenance: `id-token` mints the OIDC token that proves the build ran
+  # in this workflow, `attestations` records the result. Without them a user downloading main.js
+  # has only a filename and 11 MB of minified code to go on.
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -57,6 +62,14 @@ jobs:
 
       - name: Build the plugin
         run: npm run build
+
+      - name: Attest that these assets came from this repository
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            styles.css
+            manifest.json
 
       - name: Record what this release contains
         # The engine is the part of a release nobody can inspect from the outside: a WebAssembly

@@ -15,6 +15,12 @@
  *  - TeX can be run TWICE, opt-in per block, so a second run can read the first run's .aux.
  */
 
+// The npm `buffer` package — feross's browser implementation — not Node's builtin, and a direct
+// dependency so it cannot vanish under us when dvi2html changes its own. esbuild bundles it into
+// the worker string, so nothing is required at runtime and this works on iOS exactly as it does on
+// the desktop; the store's linter flags the specifier by name and cannot see which one resolved.
+// It is here because dvi2html's parser reads its input with Buffer methods: hand it a bare
+// ArrayBuffer and it parses zero opcodes and silently returns an empty document.
 import { Buffer } from 'buffer';
 import { ungzip } from 'pako';
 import { dvi2html } from '@drgrice1/dvi2html';

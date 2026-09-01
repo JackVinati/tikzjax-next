@@ -136,6 +136,22 @@ describe('freezeSvg: currentColor', () => {
 		expect(root.getAttribute('color')).toBe(INK);
 	});
 
+	it('resolves every occurrence in one declaration, and leaves a hyphenated lookalike alone', () => {
+		// The keyword is matched with a captured left boundary rather than a lookbehind, because a
+		// lookbehind is a SYNTAX error in JavaScriptCore before Safari 16.4 and took the whole bundle
+		// down with it on iOS. Two things have to survive that rewrite: adjacent occurrences, where
+		// the first match must not eat the boundary the second one needs, and the boundary itself.
+		const doc = frozen(
+			`${HEAD}<text id="t" style="fill: currentColor; stroke: currentColor; --my-currentcolor: 1px">x</text></svg>`,
+		);
+
+		const style = one(doc, '#t').getAttribute('style') ?? '';
+		expect(style).toContain(`fill: ${INK}`);
+		expect(style).toContain(`stroke: ${INK}`);
+		expect(style).toContain('--my-currentcolor: 1px');
+		expect(style).not.toContain('currentColor');
+	});
+
 	it('never overwrites a paint the document already declares on the root', () => {
 		const root = frozen(
 			`<svg xmlns="http://www.w3.org/2000/svg" fill="red" style="color: lime"/>`,

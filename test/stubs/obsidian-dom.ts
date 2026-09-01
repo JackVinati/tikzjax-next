@@ -67,6 +67,12 @@ export function installObsidianDom(window: Window & typeof globalThis): void {
 		for (const [name, value] of Object.entries(props)) this.style.setProperty(name, value);
 	};
 
+	// The sibling API, for real CSS properties rather than custom ones. Keys are camelCase, as on
+	// CSSStyleDeclaration, which is what makes it the right call for `aspect-ratio` and friends.
+	proto['setCssStyles'] = function (this: HTMLElement, styles: Record<string, string>): void {
+		Object.assign(this.style, styles);
+	};
+
 	// `el.doc` and `el.win`, which the plugin uses instead of the globals so a pop-out or the PDF
 	// export popup resolves to ITS document rather than the focused one.
 	if (!Object.getOwnPropertyDescriptor(nodeProto, 'doc')) {

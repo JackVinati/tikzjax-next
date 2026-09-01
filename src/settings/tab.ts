@@ -148,7 +148,7 @@ export class TikzSettingTab extends PluginSettingTab {
 			.addButton((b) =>
 				b
 					.setButtonText('Clear')
-					.setWarning()
+					.setDestructive()
 					.onClick(async () => {
 						await this.plugin.cache?.clear();
 						new Notice(STRINGS.cacheCleared);

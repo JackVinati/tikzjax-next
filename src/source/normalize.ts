@@ -96,7 +96,8 @@ export function normalizeSource(input: string): string {
 	// so they cannot express a paragraph break, and they are usually an artifact of how the fence
 	// was sliced out of the note rather than something the user typed. Interior blank lines — the
 	// ones that are `\par` — are never touched.
-	while (lines.length > 0 && lines.at(-1) === '') lines.pop();
+	// Indexed rather than `.at(-1)`: `Array.prototype.at` is Safari 15.4, and this runs on phones.
+	while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
 
 	return lines.join('\n');
 }

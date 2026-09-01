@@ -51,10 +51,8 @@ const fontedDocuments = new WeakSet<Document>();
 export function ensureFonts(doc: Document, css: string): void {
 	if (!css || fontedDocuments.has(doc)) return;
 	fontedDocuments.add(doc);
-	const style = doc.createElement('style');
-	style.id = 'tikzjax-fonts';
+	const style = (doc.head ?? doc.documentElement).createEl('style', { attr: { id: 'tikzjax-fonts' } });
 	style.textContent = css;
-	(doc.head ?? doc.documentElement).appendChild(style);
 }
 
 /** Undo ensureFonts across every document we touched. Called on plugin unload. */

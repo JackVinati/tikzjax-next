@@ -1,10 +1,11 @@
 import { builtinModules } from 'node:module';
-import { mkdir, copyFile, writeFile, access } from 'node:fs/promises';
+import { mkdir, copyFile, writeFile, access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import process from 'node:process';
 import esbuild from 'esbuild';
 import { engineAssetsPlugin, buildEngineAssets, engineIsBuilt } from './engine-assets.mjs';
 import { buildStyles, fontsPlugin } from './gen-styles.mjs';
+import { assertMobileSafe } from './check-mobile.mjs';
 
 const prod = process.argv[2] === 'production';
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
@@ -150,6 +151,11 @@ const options = {
 
 if (prod) {
 	await esbuild.build(options);
+
+	// Against the artifact, not the source: what ships is what has to parse on a phone, and it is
+	// the bundler's output — dependencies included — that decides. 0.1.0 shipped a lookbehind and
+	// no iPhone could enable it. See scripts/check-mobile.mjs.
+	assertMobileSafe(await readFile(options.outfile, 'utf8'), 'main.js');
 } else {
 	const ctx = await esbuild.context(options);
 	await ctx.watch();

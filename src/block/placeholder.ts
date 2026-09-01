@@ -18,12 +18,12 @@ export function renderPlaceholder(
 	el.setAttribute('aria-busy', 'true');
 	el.setAttribute('aria-label', 'Rendering diagram');
 
-	// setCssProps rather than element.style: these are computed per diagram, which is exactly the
-	// case Obsidian's guidelines carve out for it, and a CSS class cannot carry a measured ratio.
+	// `setCssStyles`, which is for real CSS properties; `setCssProps` is for custom properties
+	// (`--x`) and using it here was simply the wrong API. The default shape is a constant and lives
+	// in the stylesheet with the rest of the class; what cannot live there is a MEASURED ratio,
+	// which differs per diagram and is the whole reason the note does not reflow as each one lands.
 	if (known && known.w > 0 && known.h > 0) {
-		el.setCssProps({ 'aspect-ratio': `${known.w} / ${known.h}`, 'max-width': `${known.w}px` });
-	} else {
-		el.setCssProps({ 'aspect-ratio': '4 / 3' });
+		el.setCssStyles({ aspectRatio: `${known.w} / ${known.h}`, maxWidth: `${known.w}px` });
 	}
 	return el;
 }
