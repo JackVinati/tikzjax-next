@@ -31,6 +31,21 @@ export function engineIsBuilt(root) {
  * `INVENTORY.files` remains the authoritative answer to "is it bundled" — it is the tex_files list,
  * which is exactly what the virtual filesystem can serve. This table only answers "which version".
  */
+/**
+ * `\ProvidesPackage`'s bracket is a date, a version and a sentence, and the whole line is what the
+ * build reports. Settings shows these joined by commas on one line, so "2022/10/10 v1.3b Class to
+ * compile TeX sub-files standalone" would push everything after it off the end. Keep the leading
+ * tokens that look like a date or a version and drop the prose.
+ */
+function shorten(value) {
+	const kept = [];
+	for (const token of value.split(/\s+/)) {
+		if (!/^[0-9]|^v[0-9]/.test(token)) break;
+		kept.push(token);
+	}
+	return kept.join(' ') || value;
+}
+
 function readVersions(out) {
 	const path = join(out, 'tex-versions.txt');
 	if (!existsSync(path)) return {};
@@ -39,7 +54,7 @@ function readVersions(out) {
 		const m = /^(\S+)\s+(.*)$/.exec(line.trim());
 		if (!m) continue;
 		const [, file, raw] = m;
-		const version = raw.trim();
+		const version = shorten(raw.trim());
 		if (!version || version === 'absent' || version === 'unknown') continue;
 		packages[file.replace(/\.(sty|cls|def|tex)$/, '')] = version;
 	}
