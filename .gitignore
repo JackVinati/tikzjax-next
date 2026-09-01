@@ -5,9 +5,21 @@ main.js
 main.js.map
 *.tsbuildinfo
 
-# Engine build artifacts. core.dump alone is 156 MiB; these are reproducible from
-# `npm run engine:image && npm run engine:build` and must never be committed.
-engine-build/out/
+# Engine build artifacts. Most of this is scratch — core.dump alone is 156 MiB — but the compressed
+# engine IS committed, because otherwise `npm run build` needs Docker and fifteen minutes and cannot
+# run in a clean checkout at all. That is 8.5 MB, it changes only when the engine is deliberately
+# rebuilt, and the build is reproducible (internal/DECISIONS.md D12) so CI can rebuild and diff it
+# rather than take it on trust.
+engine-build/out/*
+!engine-build/out/tex.wasm.gz
+!engine-build/out/core.dump.gz
+!engine-build/out/tex-versions.txt
+!engine-build/out/CHECKSUMS
+!engine-build/out/dist/
+engine-build/out/dist/*
+!engine-build/out/dist/tex_files/
+!engine-build/out/dist/fonts/
+!engine-build/out/dist/fonts.css
 
 # Editor / OS
 .DS_Store

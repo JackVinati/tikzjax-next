@@ -435,6 +435,51 @@ build says so out loud when it borrows them.
 
 ---
 
+## D12 — The compressed engine is committed, and the build that produces it is reproducible
+
+**Amends D8.** D8 said the engine is built from source in a container and never committed, because
+`core.dump` is 156 MiB and the whole point was to stop treating the engine as an opaque blob. The
+first half stands. The second half was wrong in a way that only showed up when someone else tried
+to build this: the community store's review runs `npm run build` in a clean checkout, and it failed
+with `engine-build/out/ is missing or incomplete`. So does every contributor without Docker, and
+every contributor with Docker who does not want to spend fifteen minutes before their first edit.
+
+So the compressed engine is committed — 8.5 MB across 402 files:
+
+| Path | Size | What reads it |
+|---|---|---|
+| `engine-build/out/tex.wasm.gz` | 0.12 MB | `scripts/engine-assets.mjs` |
+| `engine-build/out/core.dump.gz` | 5.66 MB | `scripts/engine-assets.mjs` |
+| `engine-build/out/dist/tex_files/*.gz` (245) | 1.25 MB | `scripts/engine-assets.mjs` |
+| `engine-build/out/dist/fonts/*.woff2` (152) | 1.46 MB | `scripts/gen-styles.mjs` |
+| `engine-build/out/tex-versions.txt` | tiny | the shipped inventory |
+
+Everything else in `out/` stays ignored, including the uncompressed 156 MiB dump, the logs, and
+upstream's own 6.8 MB `dist/tikzjax.js`, which this plugin does not use at all.
+
+**What makes this defensible rather than lazy is that the build is reproducible**, so the committed
+bytes are a claim CI can check rather than one it has to accept. Two things had to change for that:
+
+1. **The TeX clock is pinned.** TeX reads the date at startup and freezes `\year \month \day \time`
+   into the format, and `core.dump` is a snapshot of the entire `WebAssembly.Memory` — so it came
+   out different on every build. `build-engine.sh` appends a fixed clock to `web2js/library.js`
+   before the dump. Two consecutive builds now produce the identical `core.dump`
+   (`795863279e5b6ee3…`), where before they never did.
+2. **gzip is called with `-n`.** It stamps the modification time into the archive header, so the
+   two `.gz` files differed even when their contents did not. The 245 `tex_files/*.gz` were already
+   clean — pako writes a zero mtime — which is why only these two needed it.
+
+The Engine workflow rebuilds from source and then runs `git diff --exit-code -- engine-build/out`.
+A difference means the engine was rebuilt and not committed, or an upstream input moved without
+`pins.env` recording it. Either way it is a build failure with a diff that names the files.
+
+**What this does not change.** The engine is still built from pinned upstream sources, still
+verified by 21 fixtures and by `verify-fork` asserting byte-identical output against upstream's
+engine, and still rebuildable by anyone with Docker in one command. What is committed is its
+output, and the repository can now prove that is what the output is.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

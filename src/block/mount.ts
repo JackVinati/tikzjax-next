@@ -82,11 +82,11 @@ function applyPresentation(
 		svg.setAttribute('aria-hidden', 'true');
 	} else if (presentation.alt) {
 		svg.setAttribute('role', 'img');
-		// createElementNS, not createEl: `<title>` here has to be in the SVG namespace, and Obsidian's
-		// helpers build HTML elements. An HTML <title> inside an <svg> is not a label, it is nothing.
-		const title = svg.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'title');
+		// createSvg, not createEl: this `<title>` has to be in the SVG namespace, and an HTML <title>
+		// inside an <svg> is not a label, it is nothing. `prepend` because the accessible name comes
+		// from the FIRST title child.
+		const title = svg.createSvg('title', { prepend: true });
 		title.textContent = presentation.alt;
-		svg.insertBefore(title, svg.firstChild);
 	} else {
 		svg.setAttribute('role', 'img');
 		svg.setAttribute('aria-label', 'TikZ diagram');

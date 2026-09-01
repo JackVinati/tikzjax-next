@@ -47,6 +47,24 @@ export function installObsidianDom(window: Window & typeof globalThis): void {
 		return (proto['createEl'] as (t: string, i?: unknown) => HTMLElement).call(this, 'span', info);
 	};
 
+	// SVG-namespaced children, which is what an <svg> needs: an HTML <title> inside one is inert.
+	// `prepend` is the option that matters here — the accessible name comes from the FIRST title.
+	nodeProto['createSvg'] = function (
+		this: Node,
+		tag: string,
+		info?: { cls?: string | string[]; attr?: Record<string, string>; prepend?: boolean },
+	): SVGElement {
+		const el = (this.ownerDocument ?? (this as unknown as Document)).createElementNS(
+			'http://www.w3.org/2000/svg',
+			tag,
+		);
+		if (info?.cls) el.setAttribute('class', Array.isArray(info.cls) ? info.cls.join(' ') : info.cls);
+		if (info?.attr) for (const [k, v] of Object.entries(info.attr)) el.setAttribute(k, v);
+		if (info?.prepend) this.insertBefore(el, this.firstChild);
+		else this.appendChild(el);
+		return el;
+	};
+
 	proto['addClass'] = function (this: HTMLElement, ...classes: string[]): void {
 		this.classList.add(...classes);
 	};

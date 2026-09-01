@@ -44,6 +44,20 @@ jobs:
       - name: Build the engine
         run: npm run engine:build
 
+      - name: The committed engine is the one this source produces
+        # The compressed engine is committed so that `npm run build` works in a clean checkout with
+        # no Docker (internal/DECISIONS.md D12). That is only honest if it can be checked, which is
+        # why the build is reproducible: the TeX clock is pinned and gzip is called with -n, so the
+        # same sources produce the same bytes. A diff here means either the engine was rebuilt and
+        # not committed, or something upstream moved without pins.env saying so.
+        run: |
+          if ! git diff --stat --exit-code -- engine-build/out; then
+            echo "::error::the committed engine differs from a fresh build of this source"
+            echo "Rebuild locally and commit the result:  npm run engine:image && npm run engine:build"
+            exit 1
+          fi
+          echo "engine-build/out matches a fresh build, byte for byte"
+
       - name: Report what it shipped
         run: |
           cat engine-build/out/BUILD-MANIFEST.txt

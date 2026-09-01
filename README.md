@@ -140,20 +140,29 @@ to work, not because it has been confirmed.
 
 ## Building
 
-The plugin and the TeX engine are built separately. The engine needs Docker and takes about ten
-minutes; you only need to build it again if you change something under `engine-build/`.
-
 ```sh
 npm install
-npm run engine:image   # container with a pinned TeX Live and the web2js toolchain
-npm run engine:build   # tex.wasm, core.dump, tex_files, fonts -> engine-build/out/
 npm run build          # main.js and styles.css
 ```
 
-Building the image is the only step that touches the network. It pins the upstream sources by
+That is the whole thing. The compressed TeX engine — 8.5 MB of WebAssembly, a gzipped core dump,
+245 TeX files and 152 fonts — is committed under `engine-build/out/`, so a fresh clone builds in
+seconds with no Docker.
+
+Rebuilding the engine itself needs Docker and about fifteen minutes, and you only need it if you
+change something under `engine-build/` or `engine-src/`:
+
+```sh
+npm run engine:image   # container with a pinned TeX Live and the web2js toolchain
+npm run engine:build   # tex.wasm, core.dump, tex_files, fonts -> engine-build/out/
+```
+
+Building the image is the only step that touches the network: it pins the upstream sources by
 commit (`engine-build/pins.env`) and the Computer Modern font archive by SHA-256, then bakes them
-in, so `engine:build` itself runs entirely offline and two runs of the same image produce the same
-engine.
+in, so `engine:build` runs entirely offline. It is also reproducible — the TeX clock is pinned and
+gzip is called with `-n` — so two builds of the same sources produce the same bytes, and CI rebuilds
+the engine and diffs it against what is committed rather than taking it on trust. If you rebuild it,
+commit the result.
 
 Useful while working on it:
 

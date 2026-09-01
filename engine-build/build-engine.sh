@@ -198,6 +198,42 @@ if grep -q "fs.write(file.descriptor" web2js/library.js; then
 fi
 ok "library.js close() writes the format synchronously"
 
+# ---------------------------------------------------------------------------------------------
+# THE CLOCK, and why the dump is otherwise different every time.
+#
+# TeX reads the date at startup and freezes \year \month \day \time into the format, so core.dump
+# — a snapshot of the entire WebAssembly.Memory — differs on every build even when every input is
+# identical. That is the difference between an artifact you can commit and check, and 156 MB of
+# "trust me": with the clock pinned, two builds of the same sources produce the same bytes, and CI
+# can rebuild and diff instead of taking the committed engine on faith.
+#
+# Appended rather than sed-substituted over the four function bodies: an append cannot half-apply.
+# The four names are asserted first, so a rename upstream fails here instead of silently leaving
+# the real clock in place.
+#
+# The date itself is arbitrary and never reaches a user. \today inside a diagram would print it,
+# which is why it is a plausible date rather than the epoch: a diagram that prints the build date
+# is odd, one that prints 1 January 1970 looks broken.
+for fn in getCurrentYear getCurrentMonth getCurrentDay getCurrentMinutes; do
+    grep -q "    $fn()" web2js/library.js || die "web2js library.js has no $fn — the clock patch needs re-reading"
+done
+grep -q "^module.exports = {" web2js/library.js || die "web2js library.js is no longer a CommonJS object literal"
+cat >> web2js/library.js <<'CLOCK'
+
+// Appended by engine-build/build-engine.sh. TeX freezes the date into the format, so an unpinned
+// clock makes core.dump differ on every build and the committed engine unverifiable.
+module.exports.getCurrentYear = () => 2026;
+module.exports.getCurrentMonth = () => 1;
+module.exports.getCurrentDay = () => 1;
+module.exports.getCurrentMinutes = () => 0;
+CLOCK
+node --input-type=commonjs -e "
+const lib = require(process.cwd() + '/web2js/library.js');
+const got = [lib.getCurrentYear(), lib.getCurrentMonth(), lib.getCurrentDay(), lib.getCurrentMinutes()].join('-');
+if (got !== '2026-1-1-0') { console.error('clock patch did not take: ' + got); process.exit(1); }
+" || die "the library.js clock patch did not apply"
+ok "library.js clock pinned to 2026-01-01, so core.dump is reproducible"
+
 # Upstream's `npm run build` is four steps and the last one is the flaky one, so run them
 # separately: a failure then names the step it happened in instead of "the build".
 for step in build:parser build:wasm build:asyncify-wasm build:initex; do
@@ -286,8 +322,11 @@ console.log(
 );
 '
 
-gzip -9 -c web2js/tex.wasm  > tikzjax/tex.wasm.gz
-gzip -9 -c web2js/core.dump > tikzjax/core.dump.gz
+# `-n`: no original name, no modification time in the header. Without it the two files differ on
+# every build even when their contents are identical to the byte — gzip stamps the clock into the
+# archive — and these are the two artifacts the plugin build reads and the repository commits.
+gzip -9 -n -c web2js/tex.wasm  > tikzjax/tex.wasm.gz
+gzip -9 -n -c web2js/core.dump > tikzjax/core.dump.gz
 cp web2js/initex-files.json tikzjax/ 2>/dev/null || true
 
 log "Patching genTexFiles.js to read files as bytes"

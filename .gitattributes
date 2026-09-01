@@ -7,3 +7,8 @@ Dockerfile text eol=lf
 # `pins.env: line 7: $'\r': command not found`. Without this a Windows checkout produces an image
 # that cannot run its own build, while CI — which checks out LF — passes.
 engine-build/** text eol=lf
+
+# ...except the built engine, which is committed and is BINARY. The rule above would rewrite CRLF
+# inside a gzip stream and inside a WOFF2 font, which does not fail loudly — it produces an archive
+# that will not inflate and a font that will not parse, on Windows only.
+engine-build/out/** binary
