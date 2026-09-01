@@ -45,32 +45,50 @@ jobs:
         run: npm run engine:build
 
       - name: The committed engine is the one this source produces
-        # The compressed engine is committed so that `npm run build` works in a clean checkout with
-        # no Docker (internal/DECISIONS.md D12). That is only honest if it can be checked, which is
-        # why the build is reproducible: the TeX clock is pinned and gzip is called with -n, so the
-        # same image produces the same bytes.
+        # The compressed engine is committed so `npm run build` works in a clean checkout with no
+        # Docker (internal/DECISIONS.md D12), which is only honest if it can be checked.
         #
-        # SAME IMAGE. The image installs Ubuntu's texlive with no version pin, so the day the
-        # archive ships a texlive update this step fails — correctly, because the engine genuinely
-        # changed, but through no commit of ours. tex-versions.txt is printed first for exactly
-        # that reason: it says whether the TeX distribution moved or whether something subtler did.
+        # It is checked against what the build can actually promise, and no further. The build is
+        # deterministic GIVEN THE SAME TeX LIVE: the clock is pinned, gzip is called with -n, and two
+        # runs of one image produce identical bytes. It is not deterministic across images, because
+        # `apt-get install texlive` has no version pin — three fresh images produced three different
+        # LaTeX kernels, and core.dump is a snapshot of TeX's memory after reading them.
+        #
+        # So the two cases are separated by the `format inputs` hash rather than lumped together:
+        #
+        #   inputs differ  -> the distribution moved. A warning. The committed engine is stale, not
+        #                     wrong, and when to rebuild it is a decision, not an emergency.
+        #   inputs match,
+        #   engine differs -> the build stopped being deterministic. That is a real defect and fails.
+        #
+        # Failing on both would paint the badge red permanently for something no commit caused,
+        # which teaches everyone to ignore it — and then the case that matters goes unnoticed too.
         run: |
-          if ! git diff --stat --exit-code -- engine-build/out; then
-            echo "::error::the committed engine differs from a fresh build of this source"
-            echo
-            echo "Read BUILD-MANIFEST's 'format inputs' line in the diff above before anything else."
-            echo "core.dump is built from latex.ltx and 145 other kernel files that are not bundled"
-            echo "and appear nowhere else here, so that hash is the only thing that distinguishes"
-            echo "'Ubuntu shipped a LaTeX update' from 'this build stopped being deterministic'."
-            echo
-            echo "What this build resolved:"
-            cat engine-build/out/BUILD-MANIFEST.txt
-            echo
-            cat engine-build/out/tex-versions.txt
-            echo
-            echo "Rebuild and commit the result:  npm run engine:image && npm run engine:build"
-            exit 1
+          committed=$(git show HEAD:engine-build/out/BUILD-MANIFEST.txt | sed -n 's/^format inputs  *\([0-9a-f]*\).*/\1/p')
+          rebuilt=$(sed -n 's/^format inputs  *\([0-9a-f]*\).*/\1/p' engine-build/out/BUILD-MANIFEST.txt)
+
+          if git diff --stat --exit-code -- engine-build/out; then
+            echo "engine-build/out matches a fresh build, byte for byte"
+            exit 0
           fi
+
+          echo "Committed engine was built from LaTeX kernel $committed"
+          echo "This runner's image has                      $rebuilt"
+          echo
+          cat engine-build/out/BUILD-MANIFEST.txt
+          echo
+          cat engine-build/out/tex-versions.txt
+          echo
+
+          if [ -n "$committed" ] && [ -n "$rebuilt" ] && [ "$committed" != "$rebuilt" ]; then
+            echo "::warning::Ubuntu's TeX Live moved since the committed engine was built."
+            echo "Nothing is broken. To adopt it:  npm run engine:image && npm run engine:build, then commit."
+            exit 0
+          fi
+
+          echo "::error::the engine changed while its inputs did not — the build is not deterministic"
+          echo "This is the case worth stopping for: same TeX Live, same sources, different bytes."
+          exit 1
           echo "engine-build/out matches a fresh build, byte for byte"
 
       - name: Report what it shipped

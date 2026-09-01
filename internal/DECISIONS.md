@@ -514,14 +514,31 @@ bytes are a claim CI can check rather than one it has to accept. Two things had 
 The Engine workflow rebuilds from source and then runs `git diff --exit-code -- engine-build/out`.
 A difference means the engine was rebuilt and not committed, or an upstream input moved.
 
-**The guarantee is per-image, and it is worth being exact about that.** `pins.env` pins web2js and
-tikzjax by commit and the font archive by SHA-256, but the TeX packages come from `apt-get install
-texlive...` against Ubuntu 24.04 with no version pin — that is what `TEXLIVE=apt` means. So: the
-same image always produces the same engine, and a rebuilt image produces the same engine only until
-Ubuntu ships a texlive update. When that happens this check fails, correctly — the engine really has
-changed — and the fix is to rebuild, look at what moved in `tex-versions.txt`, and commit it
-deliberately. The alternative, pinning every apt version, buys determinism until the first package
-is withdrawn from the archive and the image stops building at all.
+**The guarantee is per-image, and being exact about that took three measurements.** `pins.env` pins
+web2js and tikzjax by commit and the font archive by SHA-256, but the TeX packages come from
+`apt-get install texlive...` against Ubuntu 24.04 with no version pin — that is what `TEXLIVE=apt`
+means.
+
+Two runs of one image produce identical bytes: 399 files and both archives, checked. Three
+different images produced three different engines, and the reason was invisible until
+`BUILD-MANIFEST` started carrying a hash of the 146 files the format is built from — `latex.ltx`
+and the LaTeX kernel, none of which are bundled and none of which appear in `tex_files` or
+`tex-versions.txt`. The three images had three different kernels. The hash is stable within an
+image (computed twice, same answer), so the build is deterministic and its inputs are not.
+
+That distinction is what the Engine workflow checks, and it is the reason the check does not simply
+diff and fail:
+
+| inputs | engine | verdict |
+|---|---|---|
+| same | same | pass, byte for byte |
+| differ | differs | a warning. The distribution moved; the committed engine is stale, not wrong |
+| same | differs | an error. Same TeX Live, same sources, different bytes — a real defect |
+
+Failing on the middle row would paint the badge red for something no commit caused, and a badge
+that is always red teaches everyone to ignore the row that matters. Pinning every apt version is the
+alternative, and it buys determinism only until the first package is withdrawn from the archive and
+the image stops building at all.
 
 **What this does not change.** The engine is still built from pinned upstream sources, still
 verified by 21 fixtures and by `verify-fork` asserting byte-identical output against upstream's
