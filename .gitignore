@@ -14,6 +14,7 @@ engine-build/out/*
 !engine-build/out/tex.wasm.gz
 !engine-build/out/core.dump.gz
 !engine-build/out/tex-versions.txt
+!engine-build/out/BUILD-MANIFEST.txt
 !engine-build/out/CHECKSUMS
 !engine-build/out/dist/
 engine-build/out/dist/*

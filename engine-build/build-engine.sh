@@ -374,10 +374,36 @@ cp -r tikzjax/dist "$OUT/dist"
 cp tikzjax/tex_files.json "$OUT/"
 cp tikzjax/initex-files.json "$OUT/" 2>/dev/null || true   # `[ -f ] && cp` would trip `set -e`
 
+# The files the FORMAT was built from, hashed as one.
+#
+# core.dump is a snapshot of TeX's memory after reading latex.ltx and the LaTeX kernel — 146 files,
+# listed by name and resolved path in initex-files.json. Almost none of them are bundled, so none of
+# them appear in tex_files or in tex-versions.txt: they are invisible inputs that decide the whole
+# 156 MiB artifact. When a rebuild produced a different dump with every visible input identical,
+# there was no way to tell whether the kernel had moved or the build had become nondeterministic.
+# Now there is: this hash covers their contents, so a dump that differs while this matches is a
+# nondeterministic build, and a dump that differs because this differs is Ubuntu shipping a LaTeX
+# update. Two very different problems that looked the same.
+FORMAT_INPUTS=$(node -e '
+const fs = require("fs"), crypto = require("crypto");
+const used = JSON.parse(fs.readFileSync("web2js/initex-files.json", "utf8"));
+const hash = crypto.createHash("sha256");
+for (const name of Object.keys(used).sort()) {
+    const path = used[name];
+    hash.update(name);
+    try { hash.update(fs.readFileSync(path)); } catch { hash.update("<unreadable>"); }
+}
+process.stdout.write(hash.digest("hex").slice(0, 32));
+')
+[ -n "$FORMAT_INPUTS" ] || die "could not hash the format inputs — is web2js/initex-files.json there?"
+
+# No build date. This file is committed with the engine it describes, and a timestamp would make
+# every rebuild a diff — which would turn the reproducibility check in the Engine workflow into a
+# clock comparison. When it was built is what `git log` is for; what it was built FROM is here.
 cat > "$OUT/BUILD-MANIFEST.txt" <<MANIFEST
 tikzjax engine build
-built            $(date -u +%Y-%m-%dT%H:%M:%SZ)
 texlive flavour  ${TEXLIVE_FLAVOUR:-unknown}
+format inputs    ${FORMAT_INPUTS} (sha256 over the 146 files latex.ltx pulled in)
 tex banner       $(tex --version | head -1)
 TEXMFDIST        $(kpsewhich --var-value TEXMFDIST)
 web2js           ${WEB2JS_REF}

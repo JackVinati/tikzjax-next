@@ -1,0 +1,10 @@
+tikzjax engine build
+texlive flavour  apt
+format inputs    a101a94dd8d8dda85f4ea4d44774ba42 (sha256 over the 146 files latex.ltx pulled in)
+tex banner       TeX 3.141592653 (TeX Live 2023/Debian)
+TEXMFDIST        /usr/share/texlive/texmf-dist
+web2js           0114ef5905dc387b70e72c654bcedd3b52b29fad
+tikzjax          461ac15f1c63351392115c4262d8179bc9922404
+memory pages     2500 (156 MiB)
+tex_files        245
+node             v20.20.2

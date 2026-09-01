@@ -470,8 +470,16 @@ bytes are a claim CI can check rather than one it has to accept. Two things had 
    clean — pako writes a zero mtime — which is why only these two needed it.
 
 The Engine workflow rebuilds from source and then runs `git diff --exit-code -- engine-build/out`.
-A difference means the engine was rebuilt and not committed, or an upstream input moved without
-`pins.env` recording it. Either way it is a build failure with a diff that names the files.
+A difference means the engine was rebuilt and not committed, or an upstream input moved.
+
+**The guarantee is per-image, and it is worth being exact about that.** `pins.env` pins web2js and
+tikzjax by commit and the font archive by SHA-256, but the TeX packages come from `apt-get install
+texlive...` against Ubuntu 24.04 with no version pin — that is what `TEXLIVE=apt` means. So: the
+same image always produces the same engine, and a rebuilt image produces the same engine only until
+Ubuntu ships a texlive update. When that happens this check fails, correctly — the engine really has
+changed — and the fix is to rebuild, look at what moved in `tex-versions.txt`, and commit it
+deliberately. The alternative, pinning every apt version, buys determinism until the first package
+is withdrawn from the archive and the image stops building at all.
 
 **What this does not change.** The engine is still built from pinned upstream sources, still
 verified by 21 fixtures and by `verify-fork` asserting byte-identical output against upstream's

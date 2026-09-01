@@ -1,4 +1,16 @@
 name: Release
+#
+# Push the TAG BEFORE pushing main.
+#
+# The community store reads manifest.json from the default branch and looks for a release with that
+# version. Between a version bump landing on main and this workflow publishing, there is a window
+# where the two disagree and the store reports "no release matches your manifest version". Pushing
+# the tag first closes it: the release is being built before the bumped manifest is public.
+#
+#   git commit -m '0.1.3 — …'      # the bump is IN the tagged commit; this workflow checks that
+#   git tag -a 0.1.3 -F -
+#   git push origin 0.1.3          # release starts building
+#   git push origin main           # after it finishes
 
 on:
   push:
@@ -52,11 +64,11 @@ jobs:
 
       - run: npm run lint && npm run lint:store && npm run typecheck && npm test
 
-      - name: Build the engine
-        run: |
-          npm run engine:image
-          npm run engine:build
-
+      # No engine build here any more. The compressed engine is committed (D12), so this checkout
+      # already has exactly the bytes the plugin is built from — and the Engine workflow rebuilds it
+      # from source on main and diffs it, which is where that check belongs. Rebuilding it again
+      # here bought nothing and cost fifteen minutes, during which the store sees a manifest whose
+      # release does not exist yet and reports the plugin as unpublishable.
       - name: Verify the engine
         run: npm run smoke && npm run verify:fork && npm run verify:worker
 

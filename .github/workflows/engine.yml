@@ -48,12 +48,27 @@ jobs:
         # The compressed engine is committed so that `npm run build` works in a clean checkout with
         # no Docker (internal/DECISIONS.md D12). That is only honest if it can be checked, which is
         # why the build is reproducible: the TeX clock is pinned and gzip is called with -n, so the
-        # same sources produce the same bytes. A diff here means either the engine was rebuilt and
-        # not committed, or something upstream moved without pins.env saying so.
+        # same image produces the same bytes.
+        #
+        # SAME IMAGE. The image installs Ubuntu's texlive with no version pin, so the day the
+        # archive ships a texlive update this step fails — correctly, because the engine genuinely
+        # changed, but through no commit of ours. tex-versions.txt is printed first for exactly
+        # that reason: it says whether the TeX distribution moved or whether something subtler did.
         run: |
           if ! git diff --stat --exit-code -- engine-build/out; then
             echo "::error::the committed engine differs from a fresh build of this source"
-            echo "Rebuild locally and commit the result:  npm run engine:image && npm run engine:build"
+            echo
+            echo "Read BUILD-MANIFEST's 'format inputs' line in the diff above before anything else."
+            echo "core.dump is built from latex.ltx and 145 other kernel files that are not bundled"
+            echo "and appear nowhere else here, so that hash is the only thing that distinguishes"
+            echo "'Ubuntu shipped a LaTeX update' from 'this build stopped being deterministic'."
+            echo
+            echo "What this build resolved:"
+            cat engine-build/out/BUILD-MANIFEST.txt
+            echo
+            cat engine-build/out/tex-versions.txt
+            echo
+            echo "Rebuild and commit the result:  npm run engine:image && npm run engine:build"
             exit 1
           fi
           echo "engine-build/out matches a fresh build, byte for byte"
