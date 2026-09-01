@@ -19,6 +19,7 @@
 import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join, basename } from 'node:path';
+import { readEngineFile, engineFilesPresent } from './engine-files.mjs';
 import { Writable } from 'node:stream';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -30,11 +31,9 @@ const DIST = join(OUT, 'dist');
 const FIXTURES = join(root, 'test', 'fixtures', 'tex');
 const RESULTS = join(root, 'engine-build', 'out', 'smoke');
 
-for (const p of [join(OUT, 'tex.wasm'), join(OUT, 'core.dump'), join(DIST, 'tex_files')]) {
-	if (!existsSync(p)) {
-		console.error(`missing ${p}\nRun: npm run engine:image && npm run engine:build`);
-		process.exit(2);
-	}
+if (!engineFilesPresent(OUT) || !existsSync(join(DIST, 'tex_files'))) {
+	console.error(`no engine in ${OUT}\nRun: npm run engine:image && npm run engine:build`);
+	process.exit(2);
 }
 
 // The fork takes its log sink by injection rather than reaching for postMessage.
@@ -56,8 +55,8 @@ await esbuild.build({
 const library = await import(pathToFileURL(forkPath).href);
 const { dvi2html } = await import('@drgrice1/dvi2html');
 
-const code = new WebAssembly.Module(readFileSync(join(OUT, 'tex.wasm')));
-const coredump = new Uint8Array(readFileSync(join(OUT, 'core.dump')));
+const code = new WebAssembly.Module(readEngineFile(OUT, 'tex.wasm'));
+const coredump = new Uint8Array(readEngineFile(OUT, 'core.dump'));
 
 if (coredump.length !== library.pages * 65536) {
 	console.error(`core.dump is ${coredump.length} B but library.pages says ${library.pages * 65536} B`);

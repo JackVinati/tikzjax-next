@@ -14,6 +14,7 @@
 import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join, basename } from 'node:path';
+import { readEngineFile, engineFilesPresent } from './engine-files.mjs';
 import { Writable } from 'node:stream';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -24,8 +25,8 @@ const OUT = join(root, 'engine-build', 'out');
 const DIST = join(OUT, 'dist');
 const FIXTURES = join(root, 'test', 'fixtures', 'tex');
 
-if (!existsSync(join(OUT, 'tex.wasm'))) {
-	console.error('No engine build. Run: npm run engine:image && npm run engine:build');
+if (!engineFilesPresent(OUT)) {
+	console.error('No engine. Run: npm run engine:image && npm run engine:build');
 	process.exit(2);
 }
 
@@ -50,8 +51,8 @@ const upstream = await import(pathToFileURL(join(root, 'engine-src', 'upstream',
 const fork = await import(pathToFileURL(forkPath).href);
 const { dvi2html } = await import('@drgrice1/dvi2html');
 
-const code = new WebAssembly.Module(readFileSync(join(OUT, 'tex.wasm')));
-const coredump = new Uint8Array(readFileSync(join(OUT, 'core.dump')));
+const code = new WebAssembly.Module(readEngineFile(OUT, 'tex.wasm'));
+const coredump = new Uint8Array(readEngineFile(OUT, 'core.dump'));
 
 // --- bundled files, as the plugin will ship them ------------------------------------------------
 const bundled = new Map();
