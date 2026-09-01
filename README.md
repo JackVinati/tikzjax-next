@@ -135,8 +135,11 @@ plain TikZ, `pgfplots` including its libraries, `circuitikz`, `chemfig`, `tikz-c
 | Obsidian Sync Standard does not sync `main.js` | It is 11.7 MB, and that plan caps a file at 5 MB. The plugin still installs from the community browser or a release on every device; only syncing the plugin folder itself is affected. The size is the TeX engine — a 156 MiB core dump, gzipped and base64'd — and shrinking it means a smaller engine, not tighter code. |
 | Obsidian Publish | Publish runs no community plugins. Save the diagram as an SVG attachment, or finalize the note, and the result publishes as ordinary content. |
 
-Untested on iOS and iPadOS at the time of writing. `isDesktopOnly` is `false` because it is expected
-to work, not because it has been confirmed.
+Confirmed working on iOS: the engine compiles and diagrams render on an iPhone, which is what
+`isDesktopOnly: false` is claiming. What has not been measured there yet is behaviour under load — a
+note with twenty uncached diagrams, backgrounding the app mid-compile, PDF export — so if something
+gives out on a phone, that is where to look first, and an issue with the device and iOS version is
+worth more than a guess.
 
 ## Building
 

@@ -139,7 +139,8 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 
 The manual matrix in DESIGN.md §10.4, in full. The three that catch the most:
 
-- [ ] **iOS**: enable → open Settings (the #111 crash path, which happens *before* anything renders) → 20-diagram note → scroll → background → foreground → export
+- [x] **iOS: it loads and renders.** Confirmed on an iPhone, 2026-09-02, after minAppVersion came down to 1.7.2 (D6) — the store floor, not the code, was what had kept it off the device
+- [ ] **iOS, the rest of the path**: open Settings (the #111 crash path, which happens *before* anything renders) → 20-diagram note → scroll → background → foreground → export
 - [ ] **A vault with a pre-existing legacy cache**: upgrade, open a note, assert **zero** TeX compiles
 - [ ] **Devtools Network tab** across a full session including a failing diagram: assert zero requests
 - [ ] **Finalize a fence with no blank line above it**, then un-finalize: the embed must render as an embed, the `%%` must open a comment, and the note must come back byte for byte (the open question in `src/note/finalize.ts`)
