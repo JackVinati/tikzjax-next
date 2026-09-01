@@ -1,7 +1,11 @@
 # TODO — TikZJax modernization
 
-Working checklist. Ordered by dependency, not by importance — the sequence is not
-interchangeable even though everything ships in one delivery (`docs/DECISIONS.md` D2).
+Working checklist. Ordered by dependency, not by importance.
+
+Everything through §8 shipped in 0.1.0 unless it says otherwise below. What is left is §9 — the
+release gate, which is testing on real devices rather than writing code — plus the handful of items
+marked **open** in place. A few items are marked **superseded**: they solved a problem a later
+decision removed, and are kept so the sequence still reads.
 
 - **What** — `docs/DESIGN.md` (full architecture, every claim evidence-backed)
 - **Why / which issues** — `docs/BACKLOG.md` (all 114 upstream issues triaged, each appearing exactly once)
@@ -13,116 +17,123 @@ Issue numbers refer to `artisticat1/obsidian-tikzjax`.
 
 ## 0 · Correctness floor
 
-Small, independent fixes to today's code. No architecture. Each is a one-liner or close, and each
-is a real bug users hit now.
+Small, independent fixes to the code as it was. The rewrite removed the file every one of them
+pointed at; each is listed as done because the behaviour is now correct, not because the line was
+edited.
 
-- [ ] `doc.createElement`, not `document.createElement` (main.ts:45) — the pop-out/export bug
-- [ ] `textContent`, not `innerText`, for the 7 MB engine string (main.ts:48)
-- [ ] `s?.remove()` (main.ts:57) — `onunload` currently throws, so syntax highlighting is never torn down
-- [ ] Move the `tikzjax-load-finished` listener from `document` to `el` (main.ts:52) — **closes #102 #93 #87**
-- [ ] Guard `window.CodeMirror?.modeInfo` (main.ts:109) and `floatingSplit?.children` (main.ts:84) — **closes #74**
-- [ ] Splice `modeInfo` in place instead of reassigning the array (main.ts:114) — reassigning breaks other plugins
-- [ ] Empty-source guard — an empty ` ```tikz ` fence currently wedges the session
-- [ ] SVGO overrides `removeViewBox: false`, `cleanupNumericValues: {convertToPx: false}` — live geometry regressions (#12 #42 #50 #66)
-- [ ] Handle SVGO's `{error}` return shape instead of `@ts-ignore`ing `.data` — it can write the literal string `"undefined"` into a note
-- [ ] Minimal SVG sanitizer before insertion — `special{dvisvgm:raw …}` passes author markup through verbatim (see §7.2 defect 17). **No upstream issue; found in recon.**
-- [ ] `@media print { break-inside: avoid }` + unscope the `.block-language-tikz svg` rule
+- [x] `doc.createElement`, not `document.createElement` — the pop-out/export bug
+- [x] `textContent`, not `innerText`, for the engine string
+- [x] `s?.remove()` — `onunload` used to throw, so syntax highlighting was never torn down
+- [x] The `tikzjax-load-finished` listener on the element rather than `document` — **closes #102 #93 #87**
+- [x] Guard `window.CodeMirror?.modeInfo` and `floatingSplit?.children` — **closes #74**
+- [x] Splice `modeInfo` in place instead of reassigning the array — reassigning breaks other plugins
+- [x] Empty-source guard — an empty ` ```tikz ` fence used to wedge the session
+- [x] SVGO overrides `removeViewBox: false`, `cleanupNumericValues: {convertToPx: false}` — live geometry regressions (#12 #42 #50 #66)
+- [x] Handle SVGO's `{error}` return shape instead of `@ts-ignore`ing `.data` — it can write the literal string `"undefined"` into a note
+- [x] Minimal SVG sanitizer before insertion — `special{dvisvgm:raw …}` passes author markup through verbatim (§7.2 defect 17). **No upstream issue; found in recon.**
+- [x] `@media print { break-inside: avoid }` + unscope the `.block-language-tikz svg` rule
 
 ## 1 · Toolchain
 
-- [ ] `typescript@7.0.2` for `tsc --noEmit`; `oxlint@1.80` for the dev loop; `eslint@10` + `typescript-eslint@8` + `eslint-plugin-obsidianmd@0.4.2` with a `typescript@5.9.3` npm `override` for the store-rules gate (D5)
-- [ ] `tsconfig.json` per §9.2 — `strict`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax`, `erasableSyntaxOnly`, `types: []`, no `allowJs` (it drags 587 KB of minified SVGO into every build)
-- [ ] `esbuild@0.28.2`: `context()` + `watch()` (the current config uses the `watch` option removed in 0.17), `with { type: 'text' }` replacing the unmaintained `esbuild-plugin-inline-import`, `minify` in prod (there is no `minify` key at all today — 281 KB)
-- [ ] Externals: `obsidian`, `electron`, the **8** real `@codemirror/*` (13 of the 21 listed no longer exist), `@lezer/*`, node builtins
-- [ ] Drop `pako`, `@types/pako` (declared, never imported), `tslib`, `builtin-modules`, `esbuild-plugin-inline-import`; pin `obsidian@1.13.1` instead of `"latest"`
-- [ ] Regenerate `package-lock.json` — it is lockfileVersion 2 stamped `0.3.0` and **missing `localforage`**, so `npm ci` fails today
-- [ ] `versions.json` + truthful `minAppVersion: "1.13.0"` (D6) — currently `{"0.1.0":"0.12.0"}` against a manifest saying 0.5.2
-- [ ] New `manifest.json` id / name / author (D1) + coexistence guard against the old plugin
-- [ ] Vitest 4 + a ~40-line `obsidian` stub; `happy-dom` per-file only
-- [ ] CI: lint · typecheck · test · golden · build · `engine-guard` (sha256) · `patch-guard` (each patch matches exactly once) · `size-guard` · `version-guard`
-- [ ] Release workflow on `actions/checkout@v7` — the current one uses archived actions and `::set-output`, which is why the zip uploads as `obsidian-tikzjax-.zip`
-- [ ] `NOTICE` + `vendor/LICENSES/` + README licence section (§9.7 — **open decision**, see DECISIONS.md)
-- [ ] Dev loop: `OBSIDIAN_PLUGIN_DIR=… npm run dev` + `.hotreload`, documented in CONTRIBUTING
+- [x] `typescript@7.0.2` for `tsc --noEmit`; `oxlint@1.80` for the dev loop; `eslint@10` + `typescript-eslint@8` + `eslint-plugin-obsidianmd@0.4.2` with a `typescript@5.9.3` npm `override` for the store-rules gate (D5)
+- [x] `tsconfig.json` per §9.2 — `strict`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax`, `erasableSyntaxOnly`, `types: []`, no `allowJs`
+- [x] `esbuild@0.28.2`: `context()` + `watch()`, `with { type: 'text' }`, `minify` in prod
+- [x] Externals: `obsidian`, `electron`, the **8** real `@codemirror/*`, `@lezer/*`, node builtins
+- [x] Drop `tslib`, `builtin-modules`, `esbuild-plugin-inline-import`; pin `obsidian@1.13.1` instead of `"latest"`
+- [x] Regenerate `package-lock.json` — the old one was lockfileVersion 2 stamped `0.3.0` and missing `localforage`, so `npm ci` failed
+- [x] `versions.json` + truthful `minAppVersion: "1.13.0"` (D6)
+- [x] New `manifest.json` id / name / author (D1) + coexistence guard against the old plugin
+- [x] Vitest 4 + an `obsidian` stub; `happy-dom` per-file only
+- [x] CI: lint · store rules · format · typecheck · test · no-network guard · manifest/versions guard; engine build, fixtures, fork and worker verification on its own workflow
+- [x] Release workflow that checks the tag against the manifest before it builds anything
+- [x] `NOTICE` + `vendor/LICENSES/` + README licence section — GPL-3.0-or-later (D9)
+- [x] Dev loop: `OBSIDIAN_PLUGIN_DIR=… npm run dev` + `.hotreload`, documented in the README
 
 ## 2 · Engine — own the worker
 
 Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 
-- [ ] `scripts/extract-worker.mjs` — pull webpack module 147 out of `vendor/tikzjax.txt` (declared at byte 13), assert one match, assert `texify:async function`
-- [ ] `scripts/patch-worker.mjs` — every patch asserts **exactly one** match or fails the build:
-  - [ ] **P0** `//invalid.site/img-not-found.png` → `data:,tikzjax-error` — removes an outbound DNS+HTTP request on every failed render, from an offline-first plugin
-  - [ ] **P1** `.set(ye.slice(0))` → `.set(ye)` — −68.75 MiB transient per render
-  - [ ] **P2** hoist `WebAssembly.compile` — stops recompiling 517 KB of wasm every render
-  - [ ] **P2b** hoist and reuse `WebAssembly.Memory` — safe because the core dump is exactly 1100 × 65536 B, i.e. the *entire* non-growable memory
-  - [ ] **P3** `mq()` in a `finally` — stops the poisoned-VFS cascade after a failure
-  - [ ] **P4** replace the file loader's empty `catch {}` with a `!TIKZJAX-MISSING-FILE` message
-- [ ] `engine/rpc.ts` — threads.js wire protocol, ~120 lines. **TeX stdout arrives as bare-string `postMessage`, not a protocol frame** — branch on `typeof e.data === 'string'` *before* the frame switch or log capture silently sees nothing
-- [ ] `WorkerHost`: Blob worker, `URL.revokeObjectURL` (never done today), `Promise.race` timeout → `terminate()` + respawn, per-job log ring buffer
-- [ ] `\nonstopmode` injection — the engine feeds TeX a fixed terminal string with no batch mode, so an error reaches the interactive `? ` prompt and suspends the asyncify'd wasm forever. **This is the root of #18 #23 #27 #39 #51 #82 #85 #89** (~22 reporters)
-- [ ] `gen-inventory.mjs` → `engine/inventory.ts` (212 bundled files, package versions, capabilities) — drives the README table, the pre-flight lint and the error-card hints
-- [ ] Delete `loadTikZJax` / `unloadTikZJax` / `loadTikZJaxAllWindows` / `getAllWindows` and the `window-open` handler
+- **Superseded by D10.** The plan was to extract webpack module 147 out of the vendored
+  `tikzjax.txt` and patch the extracted string. D10 replaced all of it: the engine is now built
+  from pinned upstream sources in a container (`engine-build/`) and the worker is our own
+  TypeScript (`engine-src/worker.ts`), so there is no blob to cut open and no patch to keep
+  matching. Every fix the patches were for is in the fork, and `npm run verify:fork` proves the
+  fork renders identically to upstream where it did not mean to differ.
+  - [x] **P0** no `//invalid.site/img-not-found.png` — an outbound request on every failed render, from an offline-first plugin
+  - [x] **P1** no `.set(ye.slice(0))` — −68.75 MiB transient per render
+  - [x] **P2** `WebAssembly.compile` hoisted — no recompiling the wasm every render
+  - [x] **P2b** `WebAssembly.Memory` reused — safe because the core dump is exactly the whole non-growable memory
+  - [x] **P3** teardown in a `finally` — no poisoned-VFS cascade after a failure
+  - [x] **P4** a missing file is reported, not swallowed by an empty `catch {}`
+- [x] `engine-src/protocol.ts` — a tagged message protocol, and TeX stdout arrives on it rather than as bare strings
+- [x] `WorkerHost`: Blob worker, `URL.revokeObjectURL`, timeout → `terminate()` + respawn, per-job log ring buffer
+- [x] `\nonstopmode` injection — TeX used to reach the interactive `? ` prompt and suspend the asyncify'd wasm forever. **Root of #18 #23 #27 #39 #51 #82 #85 #89** (~22 reporters)
+- [x] Generated inventory (bundled files, package versions, capabilities) — drives the settings table, the pre-flight lint and the error-card hints
+- [x] Delete `loadTikZJax` / `unloadTikZJax` / `loadTikZJaxAllWindows` / `getAllWindows` and the `window-open` handler
 
 ## 3 · Block lifecycle
 
-- [ ] `TikzBlock extends MarkdownRenderChild` + `ctx.addChild` — **closes #98**
-- [ ] `block/machine.ts` — pure `(state, event) => [state, Effect[]]`. **Invariant: exactly one `settle()` per block**, property-tested under randomised fault injection
-- [ ] Async processor returning an awaited promise that **never rejects** (a rejection strands `asyncSections` forever in reading mode and throws out of `printToPdf`)
-- [ ] Cache L1 (Map + LRU) / L2 (IndexedDB `obsidian-tikzjax-<appId>` — **must** carry appId, or every vault on the machine shares one store) / **L3 legacy read-through** (D1: read, never delete)
-- [ ] `cache/key.ts` — sha256, synchronous (not `crypto.subtle`: the L1 probe must be sync). `artifactRevision()` narrow and enumerated, with two tests asserting **insensitivity to theme and scale**
-- [ ] `cache/legacy-key.ts` — frozen `md5(JSON.stringify({showConsole:'true'}) + legacyTidy(src))`. Never edited
-- [ ] Render queue: priority bands, dedup by key with refcounting, depth cap → manual demotion, session poison set, **every job settles in a `finally`**
-- [ ] Viewport gate (one `IntersectionObserver` per scroll root) **+ the 2 s zero-record escape hatch** — without it a block in a collapsed callout or a hidden tab sits with a permanent placeholder forever
-- [ ] Debounce; pre-start cancellation on unload. Mid-flight termination only on timeout / plugin unload / backpressure (**explicitly narrower than the brief** — see DESIGN.md §1.2)
-- [ ] Export detection from `el.doc` + per-block (30 s) and **total (60 s)** export budgets — `Promise.all(ctx.promises)` has no timeout of its own, so 40 uncached blocks would be a 20-minute uncancellable modal. **Closes #45 #114 #101 #109**
-- [ ] Per-mount id stamping (`__TZ__n` → `t<N>_`, replacement computed **once** before the call) — **closes #12**
-- [ ] Sized placeholders from the persisted bbox — no layout shift
-- [ ] Pre-flight source lint (§7.6's six rules) — **closes #52 #49 #67, partial #96**
-- [ ] Debug view + desktop-only status bar; Safari Web Inspector workflow in CONTRIBUTING
+- [x] `TikzBlock extends MarkdownRenderChild` + `ctx.addChild` — **closes #98**
+- [x] `block/machine.ts` — pure `(state, event) => [state, Effect[]]`. **Invariant: exactly one `settle()` per block**, property-tested under randomised fault injection
+- [x] Async processor returning an awaited promise that **never rejects**
+- [x] Cache L1 (Map + LRU) / L2 (IndexedDB, keyed per `appId`) / **L3 legacy read-through** (D1: read, never delete)
+- [x] `cache/key.ts` — sha256, synchronous. `artifactRevision()` narrow and enumerated, with tests asserting **insensitivity to theme and scale**
+- [x] `cache/legacy-key.ts` — frozen `md5(JSON.stringify({showConsole:'true'}) + legacyTidy(src))`. Never edited
+- [x] Render queue: priority bands, dedup by key with refcounting, depth cap → manual demotion, session poison set, **every job settles in a `finally`**
+- [x] Viewport gate (one `IntersectionObserver` per scroll root) **+ the 2 s zero-record escape hatch**
+- [x] Debounce; pre-start cancellation on unload. Mid-flight termination only on timeout / plugin unload / backpressure
+- [x] Export detection from `el.doc` + per-block and total export budgets — **closes #45 #114 #101 #109**
+- [x] Per-mount id stamping — **closes #12**
+- [x] Sized placeholders from the persisted bbox — no layout shift
+- [x] Pre-flight source lint (§7.6's six rules) — **closes #52 #49 #67, partial #96**
+- [x] Debug view; Safari Web Inspector workflow documented in the README
+- [ ] **open** — desktop-only status bar item. The debug view covers what it was for; this is convenience
 
 ## 4 · Colour, geometry, SVG pipeline
 
-- [ ] **Delete `colorSVGinDarkMode`** (main.ts:137-146) entirely
-- [ ] Ink/paper DOM pass over **all four emitters** — including `style="color: black"` on HTML spans, which today's quoted-string regex cannot match at all
-- [ ] CSS custom properties `--tikz-ink` / `--tikz-paper`, `.tz-paper-*` classes; **never write `var()` into a presentation attribute** (outside Obsidian it falls back to black, not white)
-- [ ] `@media print` **and** `.print` both pinned — Obsidian's export re-copies the main body's class mid-flight, which is why "switch to light mode first" works for three reporters on #45
-- [ ] Gradient stops left alone by default — **closes #73**
-- [ ] Modes `adapt | preserve | paper | invert` — **closes #38 #103 #15 #48**
-- [ ] Mount-time `await document.fonts.ready` → `getBBox()` → corrected viewBox, persisted. **Do not persist a bbox measured before the faces resolve** — it is an output, not a key input, so nothing would ever invalidate it. **Closes #66 #71 #29**
-- [ ] Width / align / scale on the **wrapper**, never on the `<svg>` — **closes #14 #26 #42**
-- [ ] SVGO modes `preset | targeted | off`; `targeted` stays opt-in until #6 is reproduced on a real device
-- [ ] Mandatory non-skippable `sanitize` stage; `MOUNTED(degraded)` + a warning chip instead of any silent fallthrough
-- [ ] No `String.prototype` methods on the hot path — Pretty BibTeX 2.0.0 monkey-patched `replaceAll` and silently killed both inversion and SVGO (#48)
-- [ ] Fast mode as a defined preset: `svgo: off` + skip measure + skip lint + priority boost; **never** skips sanitize or ids
+- [x] **Delete `colorSVGinDarkMode`** entirely
+- [x] Ink/paper DOM pass over **all four emitters** — including `style="color: black"` on HTML spans, which the old quoted-string regex could not match at all
+- [x] CSS custom properties `--tikz-ink` / `--tikz-paper`, `.tz-paper-*` classes; **never `var()` in a presentation attribute**
+- [x] `@media print` **and** `.print` both pinned
+- [x] Gradient stops left alone by default — **closes #73**
+- [x] Modes `adapt | preserve | paper | invert` — **closes #38 #103 #15 #48**
+- [x] Mount-time `await document.fonts.ready` → `getBBox()` → corrected viewBox, persisted — **closes #66 #71 #29**
+- [x] Width / align / scale on the **wrapper**, never on the `<svg>` — **closes #14 #26 #42**
+- [x] SVGO modes `preset | targeted | off`; `targeted` stays opt-in until #6 is reproduced on a real device
+- [x] Mandatory non-skippable `sanitize` stage; `MOUNTED(degraded)` + a warning chip instead of any silent fallthrough
+- [x] No `String.prototype` methods on the hot path — Pretty BibTeX 2.0.0 monkey-patched `replaceAll` and silently killed both inversion and SVGO (#48). Enforced by a lint rule
+- [x] Fast mode as a defined preset: `svgo: off` + skip measure + skip lint + priority boost; **never** skips sanitize or ids
 
 ## 5 · Errors
 
-- [ ] Structural classification — failed iff `texify` rejected or no `Output written on input.dvi`. **`input.log` is never written by this engine** (grep: 0); stdout is the only channel
-- [ ] `Overfull \hbox` must **never** produce an error card
-- [ ] Error card: message, offending line with a caret, capability-driven hint, collapsible log, Copy log / Retry / Docs. **Closes #81 #100**
-- [ ] Session-only poison set; never persisted
+- [x] Structural classification — failed iff `texify` rejected or no `Output written on input.dvi`
+- [x] `Overfull \hbox` never produces an error card
+- [x] Error card: message, offending line with a caret, capability-driven hint, collapsible log, Copy log / Retry / Docs — **closes #81 #100**
+- [x] Session-only poison set; never persisted
 
 ## 6 · Mobile
 
-- [ ] `styles.css` split: 12 core faces stay (~200 KB), the other 128 become a cold string injected per-`Document` **on first mount, not first render** (a cache hit and an export popup mount without rendering)
-- [ ] One Blob materialisation of the 7 MB worker instead of four
-- [ ] Teardown on `visibilitychange → hidden`; concurrency hard-clamped to 1 on mobile
-- [ ] TTF → WOFF2. **Closes #111 #91 #7 #24 #3**
+- [x] `styles.css` split: 12 core faces stay (191 KB), the other 140 become a cold string injected per-`Document` **on first mount, not first render**
+- [x] One Blob materialisation of the worker instead of four
+- [x] Teardown on `visibilitychange → hidden`; concurrency hard-clamped to 1 on mobile
+- [x] TTF → WOFF2 — **closes #111 #91 #7 #24 #3**
 
 ## 7 · Preamble, options, export
 
-- [ ] `%!tikz` body directives — **not** fence-info-string options: `ctx.getSectionInfo()` returns `null` in PDF export, embeds and hover, so a fence tail would give the same block two different cache keys and hand the PDF a differently-compiled diagram
-- [ ] Global preamble + walk-up `tikz-preamble.tex` + `%:input` with linkpath resolution, recursion, cycle detection, and a **visible** error on a missing file. **Closes #46 #76 #77 #83**
-- [ ] Dependency tracking → `vault.on('modify')` invalidation
-- [ ] Declarative settings (`getSettingDefinitions`); `declare settings` with `useDefineForClassFields` care
-- [ ] `freezeSvg` — resolve `currentColor`, inline **only** the referenced `@font-face` subset (~12 of 140)
-- [ ] Copy SVG / Save SVG / Finalize / Un-finalize; render-note / render-vault; zoom modal. **Closes #21 #33 #95 #97 #104 #37 #47**
+- [x] `%!tikz` body directives — **not** fence-info-string options
+- [x] Global preamble + walk-up `tikz-preamble.tex` + `%:input` with linkpath resolution, recursion, cycle detection, and a **visible** error on a missing file — **closes #46 #76 #77 #83**
+- [x] Dependency tracking → `vault.on('modify')` invalidation
+- [x] `freezeSvg` — resolve `currentColor`, inline **only** the referenced `@font-face` subset
+- [x] Copy SVG / Save SVG / Finalize / Un-finalize; render-note; zoom modal — **closes #21 #33 #95 #97 #104 #37 #47**
+- [ ] **open** — declarative settings (`getSettingDefinitions`). A hand-written settings tab ships instead; the declarative API would make the settings searchable from Obsidian's own search
+- [ ] **open** — render-vault. render-note ships; a vault-wide pass needs a progress UI and a cancel path, and is the kind of thing that wants a device measurement first
 
 ## 8 · pgfplots
 
-- [ ] **S1** — add the missing `tikzlibrarypgfplots.*.code.tex` files to `tex_files`. pgfplots **1.16 is already bundled** (30 files); only the `\usepgfplotslibrary` files are absent. That is the whole of **#28 #79**, and it needs no WASM work
-- [ ] Extended-engine loader: pinned URL + pinned SHA-256 + `vault.adapter.writeBinary` to `.obsidian/plugins/<id>/engines/`, fall back to core on any failure (D3)
-- [ ] Evaluate `@rod2ik/tikzjax` 1.6.0 against the golden corpus. It brings pgfplots 1.18.2, `arrows.meta`, `mathtools`, `mhchem`, `physics`, AMS symbol fonts, `yquant` — and **`expl3.sty`**, which if it actually runs would reopen ~37 issues currently marked permanently unfixable. Hazards: its `texify` wraps `\begin{document}` itself; its device-memory cap is `NaN → Infinity` on WebKit, i.e. **no cap on iOS**; 156 MiB per render. **Desktop-only until measured**
-- [ ] **E1** — containerised web2js rebuild carrying pgf 3.1.12 + pgfplots 1.18.3 (released 2026-08-26). Long-term; unblocks the whole `needs-tex-rebuild` partition
+- [x] **S1** — the missing `tikzlibrarypgfplots.*.code.tex` files are bundled. That was the whole of **#28 #79**
+- [ ] **open** — extended-engine loader: pinned URL + pinned SHA-256 + `vault.adapter.writeBinary` to `.obsidian/plugins/<id>/engines/`, fall back to core on any failure (D3). Not needed for anything that ships today; it is how a bigger TeX set would arrive without putting it in `main.js`
+- [x] ~~Evaluate `@rod2ik/tikzjax` 1.6.0~~ — superseded by D10 and answered by it. The question that mattered was whether expl3 runs; it does, on our own build (`changes/expanded.ch`, `changes/strcmp.ch`), so forest, xparse, mathtools and siunitx compile. The ~37-issue "permanently impossible" partition was wrong, and `docs/BACKLOG.md` records the correction
+- [ ] **open** — **E1**: ship the `net` TeX Live flavour (pgf 3.1.12, pgfplots 1.18.3, circuitikz 1.8.6) instead of Ubuntu's 2023 packages. The Dockerfile builds it today (`TEXLIVE=net`); what is missing is a run of the fixture corpus against it, because a package bump is a rendering change and the corpus is what would show it
 
 ## 9 · Release gate
 
@@ -132,11 +143,21 @@ The manual matrix in DESIGN.md §10.4, in full. The three that catch the most:
 - [ ] **A vault with a pre-existing legacy cache**: upgrade, open a note, assert **zero** TeX compiles
 - [ ] **Devtools Network tab** across a full session including a failing diagram: assert zero requests
 
+Then: submit to `obsidianmd/obsidian-releases` for the community plugin browser.
+
 ---
 
 ## Not doing, and why
 
 Full reasoning in `docs/BACKLOG.md`. The short version:
 
-- **~37 issues need a rebuilt TeX bundle** — expl3-dependent packages (siunitx v3 #30, forest #86, modern chemfig), the `patterns` driver gap (#59), chemfig `\schemestart` (#25 #54 — the bonds are already missing *in the DVI*, verified by a contributor in TeXShop), new fonts and encodings (#55 #113 #36 #53), CJK (#19 — impossible on an 8-bit engine), LuaTeX-only packages (#20). Provisional pending the rod2ik expl3 check (D3).
-- **13 issues close as answered or out of scope** — including Obsidian Publish (#37 #47: Publish runs no community plugins; Finalize-to-attachment is the answer and is better for visitors than 7 MB of WASM per page view) and the inline `$tikz:…$` renderer (#112).
+- **The `needs-tex-rebuild` partition is much smaller than it looked.** expl3 runs, so the packages
+  that depend on it are not blocked. What is genuinely blocked is narrower and mostly one thing:
+  `@drgrice1/dvi2html` has a fixed font table covering Computer Modern only, and it is not
+  extensible from outside — which is `\mathfrak`, `\mathscr` and siunitx's unit symbols (#55 #84
+  #113). The `patterns` driver gap (#59) is a missing pattern definition in the DVI, chemfig's
+  `\schemestart` (#25 #54) loses its bonds before any JavaScript runs, CJK (#19) is impossible on
+  an 8-bit engine, and LuaTeX-only packages (#20) stay LuaTeX-only.
+- **13 issues close as answered or out of scope** — including Obsidian Publish (#37 #47: Publish
+  runs no community plugins; finalize-to-attachment is the answer, and is better for visitors than
+  a WASM TeX per page view) and the inline `$tikz:…$` renderer (#112).

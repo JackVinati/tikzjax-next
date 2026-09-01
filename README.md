@@ -170,6 +170,16 @@ To develop against a real vault, point the build at it and it will copy the file
 OBSIDIAN_PLUGIN_DIR="$HOME/vaults/dev/.obsidian/plugins/tikzjax-next" npm run dev
 ```
 
+It also drops a `.hotreload` marker in that folder, so with
+[pjeby/hot-reload](https://github.com/pjeby/hot-reload) installed in the vault the plugin reloads
+about a second after a rebuild, without touching Obsidian.
+
+To debug on an iPhone or iPad, where there are no devtools: on the device, Settings → Apps → Safari
+→ Advanced → Web Inspector; connect it to a Mac by cable; then in Safari on the Mac, Develop → the
+device → the Obsidian window. That gives you the console and the debugger against the running
+plugin. Every mobile bug report on the original repository is untriageable for want of this
+paragraph, so if you are filing one, this is how to get something worth attaching.
+
 `docs/DESIGN.md` describes the architecture, `docs/DECISIONS.md` records the decisions that override
 it and why, and `docs/BACKLOG.md` is a triage of every issue on the original repository.
 
