@@ -1,1 +1,4 @@
-{ "dataset": { "texPackages": { "circuitikz": "" } }, "note": "Lost relative to the 2022 blob; upstream #23 #62 #63 #65." }
+{
+  "dataset": { "texPackages": { "circuitikz": "" } },
+  "note": "Lost relative to the 2022 blob; upstream #23 #62 #63 #65."
+}

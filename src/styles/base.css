@@ -341,3 +341,13 @@
 	color: var(--text-error);
 	font-size: var(--font-ui-smaller);
 }
+
+/* Off-screen host for warming a note's diagrams: they must render, and lay out, without being
+   seen. `visibility: hidden` would not do — a hidden subtree still lays out, but Obsidian's
+   viewport gating and getBBox() need real geometry. */
+.tikzjax-offscreen {
+	position: fixed;
+	left: -99999px;
+	top: 0;
+	width: 800px;
+}

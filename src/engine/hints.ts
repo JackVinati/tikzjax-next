@@ -270,17 +270,41 @@ const POOL = /\[([^\]=]+)=(\d+)\]/;
 // `constructor` or `toString` from Object.prototype — which is typed `string` here and would put
 // `function Object() { [native code] }` in front of the user.
 const POOL_ADVICE: ReadonlyMap<string, string> = new Map([
-	['main memory', 'Usually a plot with too many points: lower samples=, drop unused \\addplot rows, or split one picture into several.'],
-	['pool', 'Usually a plot with too many points: lower samples=, drop unused \\addplot rows, or split one picture into several.'],
-	['save', 'Usually deeply nested scopes or groups — flatten the picture, or move repeated settings into a single \\tikzset.'],
-	['input stack', 'Usually a macro that expands into itself. Check any \\def or \\newcommand that mentions its own name.'],
-	['parameter stack', 'Usually a macro that expands into itself. Check any \\def or \\newcommand that mentions its own name.'],
-	['buffer', 'Usually one enormous input line. Break long coordinate lists or long \\addplot table data across several lines.'],
+	[
+		'main memory',
+		'Usually a plot with too many points: lower samples=, drop unused \\addplot rows, or split one picture into several.',
+	],
+	[
+		'pool',
+		'Usually a plot with too many points: lower samples=, drop unused \\addplot rows, or split one picture into several.',
+	],
+	[
+		'save',
+		'Usually deeply nested scopes or groups — flatten the picture, or move repeated settings into a single \\tikzset.',
+	],
+	[
+		'input stack',
+		'Usually a macro that expands into itself. Check any \\def or \\newcommand that mentions its own name.',
+	],
+	[
+		'parameter stack',
+		'Usually a macro that expands into itself. Check any \\def or \\newcommand that mentions its own name.',
+	],
+	[
+		'buffer',
+		'Usually one enormous input line. Break long coordinate lists or long \\addplot table data across several lines.',
+	],
 	['grouping levels', 'Usually deeply nested scopes or groups — flatten the picture.'],
 	['text input levels', 'Too many nested \\input files.'],
 	['hash', 'Too many distinct macro names — this engine has a fixed hash and cannot be grown at runtime.'],
-	['number of strings', 'Too many distinct macro and file names — split the diagram across several blocks.'],
-	['pattern memory', 'Too many hyphenation patterns — this is a bundled-format limit, not something the diagram can fix.'],
+	[
+		'number of strings',
+		'Too many distinct macro and file names — split the diagram across several blocks.',
+	],
+	[
+		'pattern memory',
+		'Too many hyphenation patterns — this is a bundled-format limit, not something the diagram can fix.',
+	],
 ]);
 
 const capacity = (error: TexFailure): Diagnostic => {
@@ -336,11 +360,14 @@ const texError = (error: TexFailure, caps: EngineCapabilities): Diagnostic => {
 	// A few error texts that are common enough to name a cause for; everything else gets the log.
 	let hint: string | undefined;
 	if (/^missing \$ inserted/i.test(headline)) {
-		hint = 'A maths-mode character (_, ^, \\alpha …) appeared in text. Wrap it in $…$, or use a node with a maths label.';
+		hint =
+			'A maths-mode character (_, ^, \\alpha …) appeared in text. Wrap it in $…$, or use a node with a maths label.';
 	} else if (/pgfkeys.*(?:key|choice)/i.test(headline)) {
-		hint = 'An option this version of the package does not have. The engine bundles older releases than CTAN, so a documented key may simply not exist here yet.';
+		hint =
+			'An option this version of the package does not have. The engine bundles older releases than CTAN, so a documented key may simply not exist here yet.';
 	} else if (/environment .* undefined/i.test(headline)) {
-		hint = 'The environment needs a package that is not loaded. Add the \\usepackage for it, or check the spelling.';
+		hint =
+			'The environment needs a package that is not loaded. Add the \\usepackage for it, or check the spelling.';
 	}
 
 	return {

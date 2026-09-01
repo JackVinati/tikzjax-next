@@ -28,6 +28,7 @@ export class ZoomModal extends Modal {
 
 		const surface = this.contentEl.createDiv({ cls: 'tikzjax-zoom-surface' });
 		this.surface = surface;
+		// eslint-disable-next-line no-unsanitized/method -- the markup is a stored artifact, which only exists after the mandatory sanitize stage.
 		surface.appendChild(this.contentEl.doc.createRange().createContextualFragment(this.markup));
 
 		const svg = surface.querySelector('svg');
@@ -66,14 +67,31 @@ export class ZoomModal extends Modal {
 		surface.addEventListener('keydown', (event: KeyboardEvent) => {
 			const step = event.shiftKey ? 80 : 20;
 			switch (event.key) {
-				case 'ArrowLeft': this.tx += step; break;
-				case 'ArrowRight': this.tx -= step; break;
-				case 'ArrowUp': this.ty += step; break;
-				case 'ArrowDown': this.ty -= step; break;
-				case '+': case '=': this.zoomBy(1.2); return;
-				case '-': case '_': this.zoomBy(1 / 1.2); return;
-				case '0': this.reset(); return;
-				default: return;
+				case 'ArrowLeft':
+					this.tx += step;
+					break;
+				case 'ArrowRight':
+					this.tx -= step;
+					break;
+				case 'ArrowUp':
+					this.ty += step;
+					break;
+				case 'ArrowDown':
+					this.ty -= step;
+					break;
+				case '+':
+				case '=':
+					this.zoomBy(1.2);
+					return;
+				case '-':
+				case '_':
+					this.zoomBy(1 / 1.2);
+					return;
+				case '0':
+					this.reset();
+					return;
+				default:
+					return;
 			}
 			event.preventDefault();
 			this.apply();

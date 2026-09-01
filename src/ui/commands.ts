@@ -1,4 +1,5 @@
-import { MarkdownView, Notice, TFile, type App, type Editor, type Plugin } from 'obsidian';
+import type { TFile } from 'obsidian';
+import { MarkdownView, Notice, type App, type Editor, type Plugin } from 'obsidian';
 import { findTikzBlocks, finalizeBlock, unfinalizeBlock, type TikzBlockSpan } from '../note/finalize';
 import { freezeSvg } from '../svg/freeze';
 import { ZoomModal } from './zoom';
@@ -35,7 +36,11 @@ export function registerCommands(plugin: Plugin, deps: CommandDeps): void {
 		return findTikzBlocks(text).find((b) => offset >= b.start && offset <= b.end) ?? null;
 	};
 
-	const frozenFor = async (span: TikzBlockSpan, notePath: string, opaque: boolean): Promise<string | null> => {
+	const frozenFor = async (
+		span: TikzBlockSpan,
+		notePath: string,
+		opaque: boolean,
+	): Promise<string | null> => {
 		const markup = await deps.markupFor(span.source, notePath);
 		if (markup === null) return null;
 		return freezeSvg(markup, {

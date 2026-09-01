@@ -107,7 +107,10 @@ describe('capacity', () => {
 	it('does not read pool advice off Object.prototype', () => {
 		// The pool name is parsed out of a string. A plain object literal answers `constructor` with
 		// a function, and the hint would then contain `function Object() { [native code] }`.
-		const d = explain(failure({ kind: 'capacity', message: 'TeX capacity exceeded, sorry [constructor=1]' }), caps());
+		const d = explain(
+			failure({ kind: 'capacity', message: 'TeX capacity exceeded, sorry [constructor=1]' }),
+			caps(),
+		);
 
 		expect(d.hint).not.toMatch(/native code|function Object/);
 		expect(d.hint).toMatch(/Simplify the diagram/);
@@ -127,7 +130,8 @@ describe('tex-error: undefined control sequence', () => {
 			failure({
 				kind: 'tex-error',
 				firstError: 'Undefined control sequence.',
-				message: '! Undefined control sequence.\nl.5 \\draw (0,0) node {\\si\n                          {\\metre}};',
+				message:
+					'! Undefined control sequence.\nl.5 \\draw (0,0) node {\\si\n                          {\\metre}};',
 				line: 5,
 			}),
 			caps({ expl3: true }),
@@ -190,7 +194,11 @@ describe('tex-error: undefined control sequence', () => {
 
 	it('says a package cannot help when it is not bundled and expl3 is irrelevant', () => {
 		const d = explain(
-			failure({ kind: 'tex-error', firstError: 'Undefined control sequence.', message: 'l.4 \\Forest' }),
+			failure({
+				kind: 'tex-error',
+				firstError: 'Undefined control sequence.',
+				message: 'l.4 \\Forest',
+			}),
 			caps(),
 		);
 
@@ -215,7 +223,11 @@ describe('tex-error: undefined control sequence', () => {
 	it('does not invent a macro when TeX echoed none', () => {
 		// The worker's `message` is the bare `!` line, so this is the common shape.
 		const d = explain(
-			failure({ kind: 'tex-error', message: 'Undefined control sequence.', firstError: 'Undefined control sequence.' }),
+			failure({
+				kind: 'tex-error',
+				message: 'Undefined control sequence.',
+				firstError: 'Undefined control sequence.',
+			}),
 			caps(),
 		);
 
@@ -227,7 +239,12 @@ describe('tex-error: undefined control sequence', () => {
 describe('tex-error: everything else', () => {
 	it('keeps TeX’s own wording as the headline', () => {
 		const d = explain(
-			failure({ kind: 'tex-error', message: 'Missing $ inserted', firstError: 'Missing $ inserted', line: 2 }),
+			failure({
+				kind: 'tex-error',
+				message: 'Missing $ inserted',
+				firstError: 'Missing $ inserted',
+				line: 2,
+			}),
 			caps(),
 		);
 
@@ -277,7 +294,8 @@ describe('overfull boxes never become an error card', () => {
 			failure({
 				kind: 'tex-error',
 				firstError: 'Undefined control sequence.',
-				message: 'Overfull \\hbox (3.0pt too wide) in paragraph at lines 2--2\n! Undefined control sequence.\nl.6 \\qw',
+				message:
+					'Overfull \\hbox (3.0pt too wide) in paragraph at lines 2--2\n! Undefined control sequence.\nl.6 \\qw',
 			}),
 			caps(),
 		);
@@ -335,7 +353,10 @@ describe('purity', () => {
 		const before = { files: [...c.files], packages: { ...c.packages }, expl3: c.expl3 };
 
 		explain(failure({ kind: 'missing-file', message: 'siunitx.sty' }), c);
-		explain(failure({ kind: 'tex-error', firstError: 'Undefined control sequence.', message: 'l.1 \\ce' }), c);
+		explain(
+			failure({ kind: 'tex-error', firstError: 'Undefined control sequence.', message: 'l.1 \\ce' }),
+			c,
+		);
 
 		expect([...c.files]).toEqual(before.files);
 		expect(c.packages).toEqual(before.packages);
@@ -343,7 +364,10 @@ describe('purity', () => {
 	});
 
 	it('is deterministic for the same input', () => {
-		const input = failure({ kind: 'capacity', message: 'TeX capacity exceeded, sorry [pool size=100000]' });
+		const input = failure({
+			kind: 'capacity',
+			message: 'TeX capacity exceeded, sorry [pool size=100000]',
+		});
 
 		expect(explain(input, caps())).toEqual(explain(input, caps()));
 	});
@@ -409,7 +433,12 @@ describe('the transcript the worker actually sends', () => {
 				message: 'Undefined control sequence.',
 				firstError: 'Undefined control sequence.',
 				line: 5,
-				log: [...undefinedCs, 'l.5 \\draw (0,0) node {\\si', '                          {\\metre}};', '?'],
+				log: [
+					...undefinedCs,
+					'l.5 \\draw (0,0) node {\\si',
+					'                          {\\metre}};',
+					'?',
+				],
 			}),
 			caps({ expl3: true }),
 		);
@@ -461,7 +490,11 @@ describe('a headline that still carries TeX’s bang', () => {
 	// the bang, a future producer need not. A leading `!` must not defeat every hint we have.
 	it('recognises the error anyway', () => {
 		const d = explain(
-			failure({ kind: 'tex-error', message: '! Missing $ inserted.', firstError: '! Missing $ inserted.' }),
+			failure({
+				kind: 'tex-error',
+				message: '! Missing $ inserted.',
+				firstError: '! Missing $ inserted.',
+			}),
 			caps(),
 		);
 

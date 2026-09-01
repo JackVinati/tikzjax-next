@@ -83,7 +83,10 @@ export function fontsPlugin(root, coldCss) {
 	return {
 		name: 'virtual-fonts',
 		setup(build) {
-			build.onResolve({ filter: /^virtual:fonts$/ }, () => ({ path: 'virtual:fonts', namespace: 'virtual' }));
+			build.onResolve({ filter: /^virtual:fonts$/ }, () => ({
+				path: 'virtual:fonts',
+				namespace: 'virtual',
+			}));
 			build.onLoad({ filter: /^virtual:fonts$/, namespace: 'virtual' }, () => ({
 				contents: `export const COLD_FONT_CSS = ${JSON.stringify(coldCss)};\n`,
 				loader: 'js',

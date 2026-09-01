@@ -21,7 +21,7 @@ export class WorkerHost implements TexHost {
 	private nextId = 1;
 	private readonly pending = new Map<
 		number,
-		{ key: string; resolve: (r: TexResult) => void; reject: (e: unknown) => void; log: string[] }
+		{ key: string; resolve: (r: TexResult) => void; reject: (e: Error) => void; log: string[] }
 	>();
 
 	/** Streams TeX output per job, so a slow compile is watchable rather than silent until it ends. */
@@ -113,7 +113,9 @@ export class WorkerHost implements TexHost {
 			return;
 		}
 
-		entry.reject(new TexError(message.kind, message.log, message.firstError, message.line, message.message));
+		entry.reject(
+			new TexError(message.kind, message.log, message.firstError, message.line, message.message),
+		);
 	}
 
 	async render(job: TexJob, signal: AbortSignal): Promise<TexResult> {
@@ -121,7 +123,8 @@ export class WorkerHost implements TexHost {
 
 		await this.ready();
 		const worker = this.worker;
-		if (!worker) throw new TexError('engine-unavailable', [], undefined, undefined, 'worker is not running');
+		if (!worker)
+			throw new TexError('engine-unavailable', [], undefined, undefined, 'worker is not running');
 
 		const id = this.nextId++;
 		const log: string[] = [];
@@ -147,7 +150,7 @@ export class WorkerHost implements TexHost {
 			this.pending.set(id, {
 				key: job.key,
 				resolve: (result) => finish(() => resolve(result)),
-				reject: (error) => finish(() => reject(error)),
+				reject: (error: Error) => finish(() => reject(error)),
 				log,
 			});
 
@@ -179,7 +182,7 @@ export class WorkerHost implements TexHost {
 		this.failAll(new TexError('timeout', [], undefined, undefined, reason));
 	}
 
-	private failAll(error: unknown): void {
+	private failAll(error: Error): void {
 		for (const [, entry] of this.pending) entry.reject(error);
 		this.pending.clear();
 	}

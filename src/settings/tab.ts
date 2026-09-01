@@ -1,4 +1,5 @@
-import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
+import type { App } from 'obsidian';
+import { Notice, PluginSettingTab, Setting } from 'obsidian';
 import type TikzjaxNextPlugin from '../main';
 import { STRINGS } from '../ui/strings';
 
@@ -78,7 +79,9 @@ export class TikzSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Time limit per diagram')
-			.setDesc('Seconds before a diagram is abandoned and the engine restarted. 0 uses the built-in limit.')
+			.setDesc(
+				'Seconds before a diagram is abandoned and the engine restarted. 0 uses the built-in limit.',
+			)
 			.addText((t) =>
 				t
 					.setPlaceholder('0')
@@ -127,7 +130,9 @@ export class TikzSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Capture the TeX log')
-			.setDesc('Needed for error messages to name the problem and the line. Costs nothing when nothing fails.')
+			.setDesc(
+				'Needed for error messages to name the problem and the line. Costs nothing when nothing fails.',
+			)
 			.addToggle((t) =>
 				t.setValue(this.plugin.settings.captureLog).onChange(async (value) => {
 					this.plugin.settings.captureLog = value;
@@ -147,7 +152,7 @@ export class TikzSettingTab extends PluginSettingTab {
 					.onClick(async () => {
 						await this.plugin.cache?.clear();
 						new Notice(STRINGS.cacheCleared);
-						this.display();
+						this.update();
 					}),
 			);
 

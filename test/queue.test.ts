@@ -90,7 +90,10 @@ interface Job {
 class Runs {
 	readonly started: string[] = [];
 	readonly signals = new Map<string, AbortSignal>();
-	private readonly deferreds = new Map<string, { resolve: (v: string) => void; reject: (e: unknown) => void }>();
+	private readonly deferreds = new Map<
+		string,
+		{ resolve: (v: string) => void; reject: (e: unknown) => void }
+	>();
 	/** Keys whose `run` should throw synchronously rather than return a promise. */
 	readonly throwSync = new Set<string>();
 	live = 0;
@@ -880,7 +883,10 @@ describe('under randomised throw / timeout / release interleavings', () => {
 			expect(runCount, context).toBeGreaterThan(0);
 			expect(queue.inflightCount(), context).toBe(0);
 			expect(queue.size(), context).toBe(0);
-			expect(tracked.filter((t) => t.status === 'pending').length, `${context}: promises left hanging`).toBe(0);
+			expect(
+				tracked.filter((t) => t.status === 'pending').length,
+				`${context}: promises left hanging`,
+			).toBe(0);
 		}
 	});
 });

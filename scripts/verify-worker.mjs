@@ -139,7 +139,12 @@ for (const name of names) {
 	} else {
 		writeFileSync(join(RESULTS, `${name}.svg`), reply.svg);
 		ok = reference !== null && reply.svg === reference;
-		detail = reference === null ? 'no reference — run npm run smoke first' : ok ? `${reply.svg.length} B` : `${reply.svg.length} B vs reference ${reference.length} B`;
+		detail =
+			reference === null
+				? 'no reference — run npm run smoke first'
+				: ok
+					? `${reply.svg.length} B`
+					: `${reply.svg.length} B vs reference ${reference.length} B`;
 	}
 
 	if (!ok) failures++;

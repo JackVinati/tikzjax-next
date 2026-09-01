@@ -45,7 +45,10 @@ export function renderErrorCard(container: HTMLElement, options: ErrorCardOption
 		if (text !== undefined) {
 			const block = card.createDiv({ cls: 'tikzjax-error-source' });
 			block.createSpan({ text: `${index + 1} | ${text}\n` });
-			block.createSpan({ cls: 'tikzjax-error-caret', text: `${' '.repeat(String(index + 1).length + 3)}^` });
+			block.createSpan({
+				cls: 'tikzjax-error-caret',
+				text: `${' '.repeat(String(index + 1).length + 3)}^`,
+			});
 		}
 	}
 

@@ -143,22 +143,47 @@ const readTranscript = (log: string[]): Transcript => {
 /** Turn a transcript, plus the absence of output, into a classified failure. */
 const diagnose = (t: Transcript, missing: string[]): Diagnosis => {
 	if (t.kind === 'capacity') {
-		return { kind: 'capacity', message: t.firstError ?? 'TeX capacity exceeded', firstError: t.firstError, line: t.line };
+		return {
+			kind: 'capacity',
+			message: t.firstError ?? 'TeX capacity exceeded',
+			firstError: t.firstError,
+			line: t.line,
+		};
 	}
 	if (t.kind === 'missing-file') {
-		return { kind: 'missing-file', message: t.fileName ?? 'a file', firstError: t.firstError, line: t.line };
+		return {
+			kind: 'missing-file',
+			message: t.fileName ?? 'a file',
+			firstError: t.firstError,
+			line: t.line,
+		};
 	}
 	if (t.kind === 'tex-error') {
-		return { kind: 'tex-error', message: t.firstError ?? 'TeX error', firstError: t.firstError, line: t.line };
+		return {
+			kind: 'tex-error',
+			message: t.firstError ?? 'TeX error',
+			firstError: t.firstError,
+			line: t.line,
+		};
 	}
 
 	// `missing` is dominated by benign probes, so it becomes evidence only once TeX has both
 	// produced nothing and said nothing.
 	const suspicious = missing.filter((n) => !/\.(aux|log|dvi|toc|out|nav|snm)$/.test(n));
 	if (suspicious.length) {
-		return { kind: 'missing-file', message: suspicious[0] ?? 'a file', firstError: t.firstError, line: t.line };
+		return {
+			kind: 'missing-file',
+			message: suspicious[0] ?? 'a file',
+			firstError: t.firstError,
+			line: t.line,
+		};
 	}
-	return { kind: 'empty-output', message: 'TeX produced no output.', firstError: t.firstError, line: t.line };
+	return {
+		kind: 'empty-output',
+		message: 'TeX produced no output.',
+		firstError: t.firstError,
+		line: t.line,
+	};
 };
 
 // --- two passes ----------------------------------------------------------------------------------
@@ -304,6 +329,7 @@ const dviToSvg = async (dvi: Uint8Array): Promise<string> => {
 	// The chunk must be Buffer-like, not a bare ArrayBuffer: dvi2html's parser reads it with
 	// Buffer methods, and handing it an ArrayBuffer parses zero opcodes and silently yields an
 	// empty string — a successful TeX run that looks like an engine failure.
+	// eslint-disable-next-line @typescript-eslint/require-await -- dvi2html wants an async iterable; the single chunk is already in memory.
 	async function* stream() {
 		yield Buffer.from(dvi);
 	}
@@ -317,8 +343,6 @@ interface PassResult {
 	wroteDvi: boolean;
 	convertError?: string | undefined;
 }
-
-const NO_OUTPUT: PassResult = { svg: '', wroteDvi: false };
 
 /**
  * Run TeX once over `<job>.tex`, which must already be in the virtual filesystem, and draw
@@ -340,7 +364,7 @@ const runPass = async (job: string): Promise<PassResult> => {
 		const instance = await WebAssembly.instantiate(texModule, {
 			library,
 			env: { memory },
-		} as unknown as WebAssembly.Imports);
+		});
 		await library.executeAsync(instance.exports);
 
 		const dvi = library.readFileSync(`${job}.dvi`);
@@ -395,9 +419,9 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	const input = new TextEncoder().encode(buildInput(source, options));
 
 	/** Where the first pass's transcript ends, so its diagnosis can never be read out of pass two. */
-	let firstEnd = 0;
+	let firstEnd: number;
 	/** The pass whose diagram is being reported. Pass one unless pass two bettered it. */
-	let reported = NO_OUTPUT;
+	let reported: PassResult;
 	/** Whether the diagram being reported is pass two's. Decides whose transcript describes it. */
 	let adoptedSecondPass = false;
 	try {
@@ -429,7 +453,8 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 				// transcript is being kept at all — a run with logging off should not come back
 				// with one invented line in it. It can never be mistaken for a diagnostic either:
 				// readTranscript only ever matches `^!`.
-				if (logging) emit(`(tikzjax) second pass: re-running with ${carried.map((f) => f.name).join(', ')}`);
+				if (logging)
+					emit(`(tikzjax) second pass: re-running with ${carried.map((f) => f.name).join(', ')}`);
 
 				const second = await runPass(SECOND_JOB);
 				if (second.wroteDvi && second.svg.includes('<svg')) {

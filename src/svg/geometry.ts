@@ -50,8 +50,7 @@ export function parseViewBox(value: string | null | undefined): ViewBox | null {
 	if (numbers.length !== 4) return null;
 
 	const [x, y, width, height] = numbers;
-	if (x === undefined || y === undefined || width === undefined || height === undefined)
-		return null;
+	if (x === undefined || y === undefined || width === undefined || height === undefined) return null;
 	if (width < 0 || height < 0) return null;
 	return { x, y, width, height };
 }
@@ -136,14 +135,11 @@ function rewriteExtent(
 	// The identity fallback is not a guess: the engine writes `width="Wpt"` against
 	// `viewBox="-72 -72 W H"`, so one user unit is one point unless something downstream (SVGO,
 	// an author's edit) has already rescaled the document and left us a viewBox to read.
-	const scale =
-		viewBoxExtent !== undefined && viewBoxExtent > 0 ? length.value / viewBoxExtent : 1;
+	const scale = viewBoxExtent !== undefined && viewBoxExtent > 0 ? length.value / viewBoxExtent : 1;
 	root.setAttribute(attribute, formatNumber(inkExtent * scale) + length.unit);
 }
 
-export function parseLength(
-	value: string | null | undefined,
-): { value: number; unit: string } | null {
+export function parseLength(value: string | null | undefined): { value: number; unit: string } | null {
 	if (value === null || value === undefined) return null;
 	const match = /^\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*([a-z%]*)\s*$/i.exec(value);
 	if (match === null) return null;

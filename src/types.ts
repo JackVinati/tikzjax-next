@@ -144,13 +144,7 @@ export class TexError extends Error {
 	readonly firstError: string | undefined;
 	readonly line: number | undefined;
 
-	constructor(
-		kind: TexErrorKind,
-		log: string[],
-		firstError?: string | undefined,
-		line?: number | undefined,
-		message?: string,
-	) {
+	constructor(kind: TexErrorKind, log: string[], firstError?: string, line?: number, message?: string) {
 		super(message ?? firstError ?? kind);
 		this.name = 'TexError';
 		this.kind = kind;

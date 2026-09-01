@@ -1,1 +1,4 @@
-{ "expect": "failure", "note": "must produce a diagnosable \"! Undefined control sequence\", not a hang (upstream #81)." }
+{
+  "expect": "failure",
+  "note": "must produce a diagnosable \"! Undefined control sequence\", not a hang (upstream #81)."
+}

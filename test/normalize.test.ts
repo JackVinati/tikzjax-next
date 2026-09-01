@@ -286,9 +286,25 @@ describe('normalizeSource: invisible characters beyond the obvious ones', () => 
 	it('leaves nothing outside printable ASCII, tab and newline behind', () => {
 		// The property the module actually promises, stated as a property rather than as a list:
 		// after normalization no character that TeX cannot read survives, wherever it was placed.
-		const hostile = [NBSP, FIGURE_SPACE, NARROW_NBSP, THIN_SPACE, EN_SPACE, EM_SPACE,
-			IDEOGRAPHIC_SPACE, OGHAM_SPACE, ZWSP, BOM, WORD_JOINER, ZWNJ, SOFT_HYPHEN, RLM, LRI,
-			LINE_SEP, PARA_SEP];
+		const hostile = [
+			NBSP,
+			FIGURE_SPACE,
+			NARROW_NBSP,
+			THIN_SPACE,
+			EN_SPACE,
+			EM_SPACE,
+			IDEOGRAPHIC_SPACE,
+			OGHAM_SPACE,
+			ZWSP,
+			BOM,
+			WORD_JOINER,
+			ZWNJ,
+			SOFT_HYPHEN,
+			RLM,
+			LRI,
+			LINE_SEP,
+			PARA_SEP,
+		];
 		for (const ch of hostile) {
 			for (const src of [ch + 'a', 'a' + ch + 'b', 'a' + ch, 'a' + ch + '\nb', 'a\n' + ch + '\nb']) {
 				expect(normalizeSource(src), JSON.stringify(src)).toMatch(/^[\x20-\x7E\t\n]*$/);

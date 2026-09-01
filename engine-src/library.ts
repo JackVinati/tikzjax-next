@@ -70,7 +70,10 @@ let consoleBuffer = '';
 /** Fixed epoch so TeX's \year/\month/\day/\time are reproducible. Overridable for real clocks. */
 let clock = { year: 2026, month: 1, day: 1, minutes: 0 };
 
-export const setBundledFiles = (map: ReadonlyMap<string, Uint8Array>, inflateFn: (gz: Uint8Array) => Uint8Array) => {
+export const setBundledFiles = (
+	map: ReadonlyMap<string, Uint8Array>,
+	inflateFn: (gz: Uint8Array) => Uint8Array,
+) => {
 	bundledGz = map;
 	inflate = inflateFn;
 };
@@ -280,7 +283,7 @@ export const getCurrentYear = () => clock.year;
 // --- print ------------------------------------------------------------------------------------
 
 const fileFor = (descriptor: number): TexFile =>
-	descriptor < 0 ? ({ filename: 'stdout', stdout: true, erstat: 0 } as TexFile) : (files[descriptor] as TexFile);
+	descriptor < 0 ? { filename: 'stdout', stdout: true, erstat: 0 } : (files[descriptor] as TexFile);
 
 export const printString = (descriptor: number, x: number) => {
 	const file = fileFor(descriptor);
@@ -320,7 +323,7 @@ const readFilename = (length: number, pointer: number) => {
 	for (const b of buffer) filename += String.fromCharCode(b);
 	// Upstream writes /\000+$/ — an octal escape TypeScript 7 rejects. \x00 is the same NUL.
 	// The control character is the point: TeX hands filenames over NUL-padded to a fixed width.
-	// eslint-disable-next-line no-control-regex
+	// eslint-disable-next-line no-control-regex -- the NUL is the point, see above.
 	return filename.replace(/\x00+$/g, '');
 };
 
@@ -371,7 +374,8 @@ export const getfilesize = (length: number, pointer: number): number => {
 	filename = filename.replace(/ +$/g, '').replace(/^\*/, '');
 	if (filename === 'TeXformats:TEX.POOL') filename = 'tex.pool';
 
-	if (openSync(filename, 'r') !== -1) return filesystem[filename]?.length ?? resolveBundled(filename)?.length ?? 0;
+	if (openSync(filename, 'r') !== -1)
+		return filesystem[filename]?.length ?? resolveBundled(filename)?.length ?? 0;
 	return 0;
 };
 
@@ -416,9 +420,9 @@ export const inputln = (
 		return false;
 	}
 
-	buffer.subarray(first[0]!).set(content.subarray(file.position2 ?? 0, endOfLine));
+	buffer.subarray(first[0]).set(content.subarray(file.position2 ?? 0, endOfLine));
 	last[0] = first[0]! + endOfLine - (file.position2 ?? 0);
-	while (buffer[last[0]! - 1] === 32) last[0] = last[0]! - 1;
+	while (buffer[last[0] - 1] === 32) last[0] = last[0] - 1;
 
 	file.position2 = endOfLine;
 	file.eoln = true;

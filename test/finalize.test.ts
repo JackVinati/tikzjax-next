@@ -188,7 +188,9 @@ describe('findTikzBlocks: recognising a finalized block', () => {
 		const span = only(findTikzBlocks(finalized));
 
 		expect(span.finalized).toBe(true);
-		expect(sliceOf(finalized, span)).toBe(note(['![[Diagram 1.svg]]', '%%', '```tikz', '\\draw (0,0);', '```', '%%']));
+		expect(sliceOf(finalized, span)).toBe(
+			note(['![[Diagram 1.svg]]', '%%', '```tikz', '\\draw (0,0);', '```', '%%']),
+		);
 		expect(span.source).toBe('\\draw (0,0);\n');
 		expect(span.info).toBe('tikz');
 	});
@@ -247,7 +249,9 @@ describe('finalizeBlock', () => {
 		const text = note(['- item', '  ```tikz', '  \\draw (0,0);', '  ```', '']);
 		const out = finalizeBlock(text, only(findTikzBlocks(text)), 'd.svg');
 
-		expect(out).toBe(note(['- item', '  ![[d.svg]]', '  %%', '  ```tikz', '  \\draw (0,0);', '  ```', '  %%', '']));
+		expect(out).toBe(
+			note(['- item', '  ![[d.svg]]', '  %%', '  ```tikz', '  \\draw (0,0);', '  ```', '  %%', '']),
+		);
 	});
 
 	it('re-finalizing swaps the embed and leaves the preserved source untouched', () => {
@@ -316,13 +320,26 @@ describe('finalizeBlock', () => {
 		const stale = { ...only(findTikzBlocks(text)), start: 2 };
 
 		expect(() => finalizeBlock(text, stale, 'd.svg')).toThrow();
-		expect(() => finalizeBlock('short', { ...stale, start: 0, end: 900 }, 'd.svg')).toThrow(/out of range/);
+		expect(() => finalizeBlock('short', { ...stale, start: 0, end: 900 }, 'd.svg')).toThrow(
+			/out of range/,
+		);
 	});
 });
 
 describe('unfinalizeBlock', () => {
 	it('round-trips byte for byte, surrounding content and trailing newline included', () => {
-		const original = note(['# Note', '', 'before', '', '```tikz', '\\draw (0,0) -- (1,1);', '```', '', 'after', '']);
+		const original = note([
+			'# Note',
+			'',
+			'before',
+			'',
+			'```tikz',
+			'\\draw (0,0) -- (1,1);',
+			'```',
+			'',
+			'after',
+			'',
+		]);
 		const finalized = finalizeBlock(original, only(findTikzBlocks(original)), 'd.svg');
 
 		expect(unfinalizeBlock(finalized, only(findTikzBlocks(finalized)))).toBe(original);
@@ -337,7 +354,15 @@ describe('unfinalizeBlock', () => {
 	});
 
 	it('round-trips a block whose body contains %% and backtick runs', () => {
-		const original = note(['````tikz', '%% TeX comment', '\\node {```};', '', '\\draw (0,0);', '````', '']);
+		const original = note([
+			'````tikz',
+			'%% TeX comment',
+			'\\node {```};',
+			'',
+			'\\draw (0,0);',
+			'````',
+			'',
+		]);
 		const finalized = finalizeBlock(original, only(findTikzBlocks(original)), 'd.svg');
 
 		expect(unfinalizeBlock(finalized, only(findTikzBlocks(finalized)))).toBe(original);
@@ -389,7 +414,9 @@ describe('several blocks in one note', () => {
 
 		// Everything up to the second block is untouched, which is the property that lets a caller
 		// walk the array back-to-front without re-scanning.
-		expect(out.slice(0, (blocks[1] as TikzBlockSpan).start)).toBe(original.slice(0, (blocks[1] as TikzBlockSpan).start));
+		expect(out.slice(0, (blocks[1] as TikzBlockSpan).start)).toBe(
+			original.slice(0, (blocks[1] as TikzBlockSpan).start),
+		);
 		expect(out).toContain('```tikz\n\\draw (0,0) -- (1,0);\n```');
 		expect(out).toContain('![[second.svg]]');
 	});
@@ -438,7 +465,22 @@ describe('CRLF', () => {
 		const finalized = finalizeBlock(crlf, only(findTikzBlocks(crlf)), 'd.svg');
 
 		expect(finalized).toBe(
-			note(['# Note', '', '![[d.svg]]', '%%', '```tikz', '\\draw (0,0) -- (1,1);', '```', '%%', '', 'tail', ''], '\r\n'),
+			note(
+				[
+					'# Note',
+					'',
+					'![[d.svg]]',
+					'%%',
+					'```tikz',
+					'\\draw (0,0) -- (1,1);',
+					'```',
+					'%%',
+					'',
+					'tail',
+					'',
+				],
+				'\r\n',
+			),
 		);
 		expect(unfinalizeBlock(finalized, only(findTikzBlocks(finalized)))).toBe(crlf);
 	});
@@ -501,7 +543,7 @@ describe('round trip over generated notes', () => {
 	/** A seeded LCG: the corpus has to be the same on every machine and every run. */
 	function lcg(seed: number): () => number {
 		let s = seed >>> 0;
-		return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+		return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
 	}
 
 	it('finalizing every block and un-finalizing every block is the identity', () => {
@@ -511,7 +553,8 @@ describe('round trip over generated notes', () => {
 		for (let n = 0; n < 3000; n++) {
 			const lineCount = 1 + Math.floor(rand() * 12);
 			const lines: string[] = [];
-			for (let k = 0; k < lineCount; k++) lines.push(VOCAB[Math.floor(rand() * VOCAB.length)] as string);
+			for (let k = 0; k < lineCount; k++)
+				lines.push(VOCAB[Math.floor(rand() * VOCAB.length)] as string);
 			const eol = rand() < 0.25 ? '\r\n' : '\n';
 			const original = lines.join(eol) + (rand() < 0.5 ? eol : '');
 
@@ -531,7 +574,10 @@ describe('round trip over generated notes', () => {
 			if (refused) continue;
 
 			const finalizedSpans = findTikzBlocks(text);
-			expect(finalizedSpans.map((s) => s.finalized), JSON.stringify(original)).toEqual(blocks.map(() => true));
+			expect(
+				finalizedSpans.map((s) => s.finalized),
+				JSON.stringify(original),
+			).toEqual(blocks.map(() => true));
 
 			for (let i = finalizedSpans.length - 1; i >= 0; i--) {
 				text = unfinalizeBlock(text, finalizedSpans[i] as TikzBlockSpan);
@@ -549,7 +595,8 @@ describe('round trip over generated notes', () => {
 		for (let n = 0; n < 3000; n++) {
 			const lineCount = 1 + Math.floor(rand() * 12);
 			const lines: string[] = [];
-			for (let k = 0; k < lineCount; k++) lines.push(VOCAB[Math.floor(rand() * VOCAB.length)] as string);
+			for (let k = 0; k < lineCount; k++)
+				lines.push(VOCAB[Math.floor(rand() * VOCAB.length)] as string);
 			const text = lines.join(rand() < 0.25 ? '\r\n' : '\n');
 
 			let prevEnd = 0;

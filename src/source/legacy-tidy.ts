@@ -20,7 +20,7 @@
 export function legacyTidyTikzSource(input: string): string {
 	// Remove non-breaking space characters, otherwise we get errors
 	const remove = '&nbsp;';
-	const tikzSource = input.replaceAll(remove, '');
+	const tikzSource = replaceEvery(input, remove, '');
 
 	let lines = tikzSource.split('\n');
 
@@ -31,4 +31,15 @@ export function legacyTidyTikzSource(input: string): string {
 	lines = lines.filter((line) => line);
 
 	return lines.join('\n');
+}
+
+/**
+ * `replaceAll` without `String.prototype`.
+ *
+ * Pretty BibTeX 2.0.0 monkey-patched `String.prototype.replaceAll` to stringify a RegExp argument,
+ * which silently killed rendering with no error anywhere (upstream #48). Anything on the hot path
+ * that a third-party plugin can redefine is a dependency on that plugin behaving.
+ */
+function replaceEvery(text: string, needle: string, replacement: string): string {
+	return text.split(needle).join(replacement);
 }

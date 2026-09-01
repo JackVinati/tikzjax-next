@@ -23,7 +23,15 @@ const host: TexHost = {
 
 function options(over: Partial<BlockOptions> = {}): BlockOptions {
 	return {
-		baked: { border: null, packages: {}, libraries: '', preamble: '', depHashes: [], wrap: 'auto', twoPass: false },
+		baked: {
+			border: null,
+			packages: {},
+			libraries: '',
+			preamble: '',
+			depHashes: [],
+			wrap: 'auto',
+			twoPass: false,
+		},
 		presentation: {},
 		raw: false,
 		nocache: false,
@@ -49,7 +57,8 @@ function artifact(template: string): Artifact {
 	};
 }
 
-const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><rect width="10" height="10"/></svg>';
+const SVG =
+	'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><rect width="10" height="10"/></svg>';
 
 /** A cache with only the tiers the child actually reaches, so a test never waits on IndexedDB. */
 function fakeCache(hot?: Artifact) {
@@ -192,7 +201,12 @@ describe('the promise handed to Obsidian', () => {
 					submit: (_k: string, job: TexJobSpec) => {
 						job.onStart?.();
 						return Promise.reject(
-							new TexError('tex-error', ['! Undefined control sequence.'], 'Undefined control sequence.', 4),
+							new TexError(
+								'tex-error',
+								['! Undefined control sequence.'],
+								'Undefined control sequence.',
+								4,
+							),
 						);
 					},
 					release: () => undefined,

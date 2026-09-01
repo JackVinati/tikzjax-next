@@ -76,7 +76,13 @@ export class PreambleService {
 		// that reads as "implemented" in every summary and does nothing in the vault.
 		const walkUpPath = this.findWalkUp(entry.notePath, entry.walkUpName);
 
-		const cacheKey = JSON.stringify([entry.notePath, entry.globalPath, walkUpPath, entry.blockPath, entry.inputs]);
+		const cacheKey = JSON.stringify([
+			entry.notePath,
+			entry.globalPath,
+			walkUpPath,
+			entry.blockPath,
+			entry.inputs,
+		]);
 		const hit = this.cache.get(cacheKey);
 		if (hit) return hit;
 

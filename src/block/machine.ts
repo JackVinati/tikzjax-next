@@ -195,7 +195,12 @@ function noop(state: State): [State, Effect[]] {
  * Last, not first: the promise resolving is Obsidian's signal that the section's DOM is final, so
  * the mount or the error card must already be in the list ahead of it.
  */
-function go(prev: State, draft: Draft, effects: Effect[], unloaded: boolean = prev.unloaded): [State, Effect[]] {
+function go(
+	prev: State,
+	draft: Draft,
+	effects: Effect[],
+	unloaded: boolean = prev.unloaded,
+): [State, Effect[]] {
 	const settles = !prev.settled && SETTLES_ON_ENTRY.has(draft.phase);
 	const next = { ...draft, settled: prev.settled || settles, unloaded } as State;
 	return [next, settles ? [...effects, { kind: 'settle' }] : effects];
@@ -263,7 +268,10 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 				case 'l1Hit':
 					// Straight to MOUNTED, skipping MOUNTING: an L1 hit is a Map.get plus one string
 					// replace, so the child mounts synchronously and the section is never flagged async.
-					return go(state, { phase: 'MOUNTED' }, [{ kind: 'mount', degraded: false }, { kind: 'measure' }]);
+					return go(state, { phase: 'MOUNTED' }, [
+						{ kind: 'mount', degraded: false },
+						{ kind: 'measure' },
+					]);
 				case 'l1Miss':
 					return go(state, { phase: 'LOOKUP' }, [{ kind: 'lookup' }]);
 				default:
@@ -385,7 +393,9 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 					// artifact must not become the cached answer for this key. The `ids` stage is
 					// exempt from degradation upstream of here, so this can never reintroduce #12.
 					if (state.unloaded) return go(state, { phase: 'DISPOSED' }, []);
-					return go(state, { phase: 'MOUNTING', degraded: true }, [{ kind: 'mount', degraded: true }]);
+					return go(state, { phase: 'MOUNTING', degraded: true }, [
+						{ kind: 'mount', degraded: true },
+					]);
 				default:
 					return noop(state);
 			}
@@ -441,10 +451,14 @@ function miss(state: State, event: Extract<Event, { type: 'miss' }>): [State, Ef
 		return go(state, { phase: 'SCHEDULING', priority: 0 }, [{ kind: 'submit', priority: 0 }]);
 	}
 	if (event.poisoned === true) {
-		return go(state, { phase: 'FAILED', reason: 'poisoned' }, [{ kind: 'mountErrorCard', reason: 'poisoned' }]);
+		return go(state, { phase: 'FAILED', reason: 'poisoned' }, [
+			{ kind: 'mountErrorCard', reason: 'poisoned' },
+		]);
 	}
 	if (event.lazy === 'manual') {
-		return go(state, { phase: 'IDLE_MANUAL', reason: 'manual' }, [{ kind: 'mountManualButton', reason: 'manual' }]);
+		return go(state, { phase: 'IDLE_MANUAL', reason: 'manual' }, [
+			{ kind: 'mountManualButton', reason: 'manual' },
+		]);
 	}
 	if (event.depthCapped === true) {
 		return go(state, { phase: 'IDLE_MANUAL', reason: 'depthCap' }, [

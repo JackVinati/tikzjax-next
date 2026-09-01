@@ -100,7 +100,10 @@ const styles = buildStyles(root);
 const virtualEngine = {
 	name: 'virtual-engine',
 	setup(build) {
-		build.onResolve({ filter: /^virtual:engine$/ }, () => ({ path: 'virtual:engine', namespace: 'virtual' }));
+		build.onResolve({ filter: /^virtual:engine$/ }, () => ({
+			path: 'virtual:engine',
+			namespace: 'virtual',
+		}));
 		build.onLoad({ filter: /^virtual:engine$/, namespace: 'virtual' }, () => ({
 			contents:
 				`export const WORKER_SOURCE = ${JSON.stringify(workerSource)};\n` +

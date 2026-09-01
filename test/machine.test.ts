@@ -424,7 +424,11 @@ describe('the settle invariant', () => {
 	});
 
 	it('unloading an already-mounted block does not settle a second time', () => {
-		const { state, effects } = drive(initialState(), [...TO_MOUNTING, { type: 'mounted' }, { type: 'unload' }]);
+		const { state, effects } = drive(initialState(), [
+			...TO_MOUNTING,
+			{ type: 'mounted' },
+			{ type: 'unload' },
+		]);
 		expect(state.phase).toBe('DISPOSED');
 		expect(countSettles(effects)).toBe(1);
 	});
@@ -433,7 +437,11 @@ describe('the settle invariant', () => {
 		const failed = drive(initialState(), [...LOAD, { type: 'emptySource' }]);
 		expect(countSettles(failed.effects)).toBe(1);
 		// FAILED -> retry -> ... -> FAILED again.
-		const again = drive(failed.state, [{ type: 'retry' }, { type: 'slot' }, { type: 'err', reason: 'capacity' }]);
+		const again = drive(failed.state, [
+			{ type: 'retry' },
+			{ type: 'slot' },
+			{ type: 'err', reason: 'capacity' },
+		]);
 		expect(again.state.phase).toBe('FAILED');
 		expect(countSettles(again.effects)).toBe(0);
 	});
@@ -558,8 +566,13 @@ describe('property: exactly one settle, over randomised event sequences', () => 
 				for (const effect of fx) {
 					if (effect.kind === 'settle') {
 						settles++;
-						expect(effect, `seed ${seed}: settle was not last in its batch`).toBe(fx[fx.length - 1]);
-						expect(SETTLING.has(next.phase), `seed ${seed}: settled on entry to ${next.phase}`).toBe(true);
+						expect(effect, `seed ${seed}: settle was not last in its batch`).toBe(
+							fx[fx.length - 1],
+						);
+						expect(
+							SETTLING.has(next.phase),
+							`seed ${seed}: settled on entry to ${next.phase}`,
+						).toBe(true);
 					}
 					// Nothing may paint into a DOM the child no longer owns.
 					if (unloadedAt >= 0 && i > unloadedAt) {
@@ -664,9 +677,17 @@ describe('a queue rejection before the job starts', () => {
 	it('every pre-start rejection settles the block WITHOUT an unload', () => {
 		// The property test drains with `unload`, which settles everything — so it cannot see a
 		// phase that strands on its own. This is the requirement stated without that crutch.
-		const reasons: Array<'depthCap' | FailureReason> = ['depthCap', 'poisoned', 'timeout', 'engine-unavailable'];
+		const reasons: Array<'depthCap' | FailureReason> = [
+			'depthCap',
+			'poisoned',
+			'timeout',
+			'engine-unavailable',
+		];
 		for (const reason of reasons) {
-			const { state, effects } = drive(initialState(), [...TO_SCHEDULING, { type: 'rejected', reason }]);
+			const { state, effects } = drive(initialState(), [
+				...TO_SCHEDULING,
+				{ type: 'rejected', reason },
+			]);
 			expect(state.settled, `rejected(${reason}) never settled`).toBe(true);
 			expect(countSettles(effects), `rejected(${reason}) settle count`).toBe(1);
 			expect(state.phase).not.toBe('SCHEDULING');

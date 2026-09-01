@@ -44,7 +44,7 @@ export class QueueError extends Error {
 	readonly key: string;
 
 	// Not parameter properties: `erasableSyntaxOnly` forbids them.
-	constructor(kind: QueueRejectionKind, key: string, message?: string | undefined) {
+	constructor(kind: QueueRejectionKind, key: string, message?: string) {
 		super(message ?? `${kind}: ${key}`);
 		this.name = 'QueueError';
 		this.kind = kind;
@@ -52,7 +52,7 @@ export class QueueError extends Error {
 	}
 }
 
-export function isQueueError(error: unknown, kind?: QueueRejectionKind | undefined): error is QueueError {
+export function isQueueError(error: unknown, kind?: QueueRejectionKind): error is QueueError {
 	return error instanceof QueueError && (kind === undefined || error.kind === kind);
 }
 
@@ -159,24 +159,22 @@ export class RenderQueue<J, T> {
 	}
 
 	/** Cleared by Retry, by any settings change, and by reload. Never persisted. */
-	clearPoison(key?: string | undefined): void {
+	clearPoison(key?: string): void {
 		if (key === undefined) this.poisoned.clear();
 		else this.poisoned.delete(key);
 	}
 
-	submit(
-		key: string,
-		job: J,
-		priority: Priority,
-		timeoutMs: number,
-		opts?: SubmitOptions | undefined,
-	): Promise<T> {
+	submit(key: string, job: J, priority: Priority, timeoutMs: number, opts?: SubmitOptions): Promise<T> {
 		// A distinct token per anonymous submission, so two anonymous callers still count as two.
 		const owner = opts?.owner ?? Symbol('tikz-anonymous-owner');
 
 		if (opts?.ignorePoison !== true && this.poisoned.has(key)) {
 			return Promise.reject(
-				new QueueError('poisoned', key, `${key} timed out earlier this session and will not be retried`),
+				new QueueError(
+					'poisoned',
+					key,
+					`${key} timed out earlier this session and will not be retried`,
+				),
 			);
 		}
 

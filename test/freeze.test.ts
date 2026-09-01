@@ -16,10 +16,10 @@ const PAPER = '#191724';
 
 /** Four faces, one per shape the real stylesheet emits, plus one that must never be selected. */
 const FONT_CSS = [
-	'@font-face{font-family:cmr10;src:url(data:font/woff2;base64,AAAAcmr10) format(\'woff2\');font-display:block}',
+	"@font-face{font-family:cmr10;src:url(data:font/woff2;base64,AAAAcmr10) format('woff2');font-display:block}",
 	"@font-face{font-family:'cmmi10';src:url(data:font/woff2;base64,AAAAcmmi10) format('woff2')}",
 	'@font-face { font-family : CMSY10 ; src : url(data:font/woff2;base64,AAAAcmsy10) format("woff2") }',
-	'@font-face{font-family:cmbx12;src:url(data:font/woff2;base64,AAAAcmbx12) format(\'woff2\')}',
+	"@font-face{font-family:cmbx12;src:url(data:font/woff2;base64,AAAAcmbx12) format('woff2')}",
 ].join('\n');
 
 function options(overrides: Partial<FreezeOptions> = {}): FreezeOptions {
@@ -82,7 +82,12 @@ describe('freezeSvg: currentColor', () => {
 		);
 
 		expect(one(doc, '#tick').getAttribute('stroke')).toBe(INK);
-		expect(freezeSvg(`${HEAD}<defs><pattern><path stroke="currentColor"/></pattern></defs></svg>`, options())).not.toContain('currentColor');
+		expect(
+			freezeSvg(
+				`${HEAD}<defs><pattern><path stroke="currentColor"/></pattern></defs></svg>`,
+				options(),
+			),
+		).not.toContain('currentColor');
 	});
 
 	it('resolves currentColor inside marker, mask and defs content too', () => {
@@ -132,8 +137,9 @@ describe('freezeSvg: currentColor', () => {
 	});
 
 	it('never overwrites a paint the document already declares on the root', () => {
-		const root = frozen(`<svg xmlns="http://www.w3.org/2000/svg" fill="red" style="color: lime"/>`)
-			.documentElement;
+		const root = frozen(
+			`<svg xmlns="http://www.w3.org/2000/svg" fill="red" style="color: lime"/>`,
+		).documentElement;
 
 		expect(root.getAttribute('fill')).toBe('red');
 		expect(root.getAttribute('color')).toBeNull();
@@ -224,7 +230,7 @@ describe('freezeSvg: font subset', () => {
 	it('copies the face rule verbatim, base64 payload and all', () => {
 		const output = freezeSvg(`${HEAD}<text font-family="cmr10">x</text></svg>`, options());
 
-		expect(output).toContain('url(data:font/woff2;base64,AAAAcmr10) format(\'woff2\')');
+		expect(output).toContain("url(data:font/woff2;base64,AAAAcmr10) format('woff2')");
 	});
 
 	it('emits a stylesheet a CSS parser accepts, whatever prose surrounds the rules', () => {
@@ -237,7 +243,10 @@ describe('freezeSvg: font subset', () => {
 		// the one stage that exists to prevent it.
 		const css = `/* the ${'@font-' + 'face'} rules follow */
 ${FONT_CSS}`;
-		const output = freezeSvg(`${HEAD}<text font-family="cmr10">x</text></svg>`, options({ fontCss: css }));
+		const output = freezeSvg(
+			`${HEAD}<text font-family="cmr10">x</text></svg>`,
+			options({ fontCss: css }),
+		);
 
 		expect(inlinedFamilies(output)).toEqual(['cmr10']);
 
@@ -367,9 +376,7 @@ describe('freezeSvg: opaque background', () => {
 
 	it('adds nothing when the caller did not ask for it', () => {
 		expect(freezeSvg(`${HEAD}<path d="M0 0"/></svg>`, options())).not.toContain('<rect');
-		expect(freezeSvg(`${HEAD}<path d="M0 0"/></svg>`, options({ opaque: false }))).not.toContain(
-			'<rect',
-		);
+		expect(freezeSvg(`${HEAD}<path d="M0 0"/></svg>`, options({ opaque: false }))).not.toContain('<rect');
 	});
 });
 

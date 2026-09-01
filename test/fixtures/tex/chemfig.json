@@ -1,1 +1,4 @@
-{ "dataset": { "texPackages": { "chemfig": "" } }, "note": "Lost relative to the 2022 blob; upstream #25 #69 #70 #85 #94." }
+{
+  "dataset": { "texPackages": { "chemfig": "" } },
+  "note": "Lost relative to the 2022 blob; upstream #25 #69 #70 #85 #94."
+}

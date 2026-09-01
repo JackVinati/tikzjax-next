@@ -1,1 +1,4 @@
-{ "dataset": { "texPackages": { "forest": "" } }, "note": "upstream #86, the canonical expl3 blocker. BACKLOG.md calls it XL and impossible." }
+{
+  "dataset": { "texPackages": { "forest": "" } },
+  "note": "upstream #86, the canonical expl3 blocker. BACKLOG.md calls it XL and impossible."
+}

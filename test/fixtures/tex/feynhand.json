@@ -1,1 +1,4 @@
-{ "dataset": { "texPackages": { "tikz-feynhand": "" } }, "note": "Lost in the rebuild; the only Feynman option that ever worked here (upstream #20 asks for tikz-feynman, which is LuaTeX-only)." }
+{
+  "dataset": { "texPackages": { "tikz-feynhand": "" } },
+  "note": "Lost in the rebuild; the only Feynman option that ever worked here (upstream #20 asks for tikz-feynman, which is LuaTeX-only)."
+}

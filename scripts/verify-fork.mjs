@@ -56,7 +56,8 @@ const coredump = new Uint8Array(readFileSync(join(OUT, 'core.dump')));
 // --- bundled files, as the plugin will ship them ------------------------------------------------
 const bundled = new Map();
 for (const f of readdirSync(join(DIST, 'tex_files'))) {
-	if (f.endsWith('.gz')) bundled.set(f.slice(0, -3), new Uint8Array(readFileSync(join(DIST, 'tex_files', f))));
+	if (f.endsWith('.gz'))
+		bundled.set(f.slice(0, -3), new Uint8Array(readFileSync(join(DIST, 'tex_files', f))));
 }
 
 const dviToSvg = async (dvi) => {
@@ -203,10 +204,13 @@ for (const name of names) {
 	if (!same) {
 		writeFileSync(join(tmp, `${name}.upstream.svg`), a.svg ?? '');
 		writeFileSync(join(tmp, `${name}.fork.svg`), b.svg ?? '');
-		console.log(`      upstream ${a.svg?.length ?? 0} B vs fork ${b.svg?.length ?? 0} B — written to ${tmp}`);
+		console.log(
+			`      upstream ${a.svg?.length ?? 0} B vs fork ${b.svg?.length ?? 0} B — written to ${tmp}`,
+		);
 		const la = a.log.join('\n');
 		const lb = b.log.join('\n');
-		if (la !== lb) console.log(`      transcripts also differ (${a.log.length} vs ${b.log.length} lines)`);
+		if (la !== lb)
+			console.log(`      transcripts also differ (${a.log.length} vs ${b.log.length} lines)`);
 	}
 }
 

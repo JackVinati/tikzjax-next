@@ -66,7 +66,8 @@ function extract(): Block {
 	const file = readWorker();
 	const from = file.indexOf(BEGIN);
 	const to = file.indexOf(END);
-	if (from < 0 || to < 0) throw new Error(`engine-src/worker.ts no longer marks its two-pass block with ${BEGIN} … ${END}`);
+	if (from < 0 || to < 0)
+		throw new Error(`engine-src/worker.ts no longer marks its two-pass block with ${BEGIN} … ${END}`);
 
 	const block = file.slice(from, to);
 	const js = transformSync(block, { loader: 'ts' }).code;
@@ -75,7 +76,8 @@ function extract(): Block {
 	return { source: block, ...(new Function(`${js}\n${exported}`)() as Omit<Block, 'source'>) };
 }
 
-const { source, secondPassWarranted, AUX_BOILERPLATE, FIRST_JOB, SECOND_JOB, CARRIED, reportedRange } = extract();
+const { source, secondPassWarranted, AUX_BOILERPLATE, FIRST_JOB, SECOND_JOB, CARRIED, reportedRange } =
+	extract();
 
 const aux = (text: string): CarriedFile[] => [{ name: 'input2.aux', text }];
 
@@ -114,7 +116,9 @@ describe('secondPassWarranted', () => {
 
 	it('runs a second pass when the first wrote a cross-reference', () => {
 		// The measured case: `??` on one pass, the real number on two.
-		expect(secondPassWarranted(aux('\\relax \n\\newlabel{e}{{1}{1}{}{}{}}\n\\gdef \\@abspage@last{1}\n'))).toBe(true);
+		expect(
+			secondPassWarranted(aux('\\relax \n\\newlabel{e}{{1}{1}{}{}{}}\n\\gdef \\@abspage@last{1}\n')),
+		).toBe(true);
 	});
 
 	it('runs a second pass when the first wrote picture positions', () => {

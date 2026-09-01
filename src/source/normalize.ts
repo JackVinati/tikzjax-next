@@ -70,9 +70,12 @@ export function normalizeSource(input: string): string {
 		// Secondary case, kept for compatibility: notes edited under the old plugin may contain the
 		// literal entity, which the legacy tidy deleted. Deleting it (rather than mapping it to a
 		// space, as we do for the real character) keeps those notes rendering byte-identically.
-		// Single-pass, exactly as legacy's `replaceAll` is: `&&nbsp;nbsp;` deliberately leaves one
+		// split/join rather than `replaceAll`: Pretty BibTeX 2.0.0 monkey-patched
+		// String.prototype.replaceAll and silently killed rendering with no error (upstream #48).
+		// Single-pass, exactly as legacy's is: `&&nbsp;nbsp;` deliberately leaves one
 		// entity behind rather than diverging from the frozen implementation on a pathological input.
-		.replaceAll('&nbsp;', '')
+		.split('&nbsp;')
+		.join('')
 		.replace(SPACE_LIKE, ' ')
 		// CRLF and lone CR (old Mac line endings, and some clipboard sources) -> LF. U+2028 and
 		// U+2029 are line and *paragraph* separators by definition and are what a Word or Google

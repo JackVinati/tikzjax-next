@@ -32,6 +32,7 @@
     "test:golden": "RUN_GOLDEN=1 vitest run",
     "smoke": "node scripts/smoke.mjs",
     "verify:fork": "node scripts/verify-fork.mjs",
+    "verify:worker": "node scripts/verify-worker.mjs",
     "engine:image": "docker build -t tikzjax-engine:apt --build-arg TEXLIVE=apt engine-build",
     "engine:image:latest": "docker build -t tikzjax-engine:net --build-arg TEXLIVE=net engine-build",
     "engine:build": "docker run --rm -v \"$PWD/engine-build/out:/out\" tikzjax-engine:apt",

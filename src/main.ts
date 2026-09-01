@@ -16,7 +16,7 @@ import { PreambleService } from './preamble/vault';
 import { registerCommands } from './ui/commands';
 import { DebugView, DEBUG_VIEW_TYPE, type RenderRecord } from './ui/debug-view';
 import { sha256Hex } from './cache/sha256';
-import { MarkdownRenderer, MarkdownView, TFile, type WorkspaceLeaf } from 'obsidian';
+import { Component, MarkdownRenderer, MarkdownView, TFile, type WorkspaceLeaf } from 'obsidian';
 import { TikzSettingTab } from './settings/tab';
 import { STRINGS } from './ui/strings';
 
@@ -122,7 +122,10 @@ export default class TikzjaxNextPlugin extends Plugin {
 				preamble: this.preamble,
 				onBlock: (spec) => {
 					this.keysBySource.set(spec.rawSource, spec.key);
-					this.preamble?.track(spec.key, spec.options.baked.depHashes.map((d) => d.split(':')[0] ?? ''));
+					this.preamble?.track(
+						spec.key,
+						spec.options.baked.depHashes.map((d) => d.split(':')[0] ?? ''),
+					);
 					this.remember({
 						key: spec.key,
 						sourcePreview: spec.source.replace(/\s+/g, ' ').slice(0, 80),
@@ -133,13 +136,17 @@ export default class TikzjaxNextPlugin extends Plugin {
 			}),
 		);
 
-		this.registerView(DEBUG_VIEW_TYPE, (leaf: WorkspaceLeaf) => new DebugView(leaf, {
-			records: () => this.records,
-			inventory: () => this.host?.engineInventory ?? null,
-			cacheStats: () => this.cache?.stats() ?? Promise.resolve({ entries: 0, bytes: 0 }),
-			memoryStats: () => this.cache?.memoryStats() ?? { entries: 0, bytes: 0 },
-			queueDepth: () => this.queue?.size() ?? 0,
-		}));
+		this.registerView(
+			DEBUG_VIEW_TYPE,
+			(leaf: WorkspaceLeaf) =>
+				new DebugView(leaf, {
+					records: () => this.records,
+					inventory: () => this.host?.engineInventory ?? null,
+					cacheStats: () => this.cache?.stats() ?? Promise.resolve({ entries: 0, bytes: 0 }),
+					memoryStats: () => this.cache?.memoryStats() ?? { entries: 0, bytes: 0 },
+					queueDepth: () => this.queue?.size() ?? 0,
+				}),
+		);
 
 		registerCommands(this, {
 			app: this.app,
@@ -198,20 +205,29 @@ export default class TikzjaxNextPlugin extends Plugin {
 	 */
 	private async warmNote(file: TFile): Promise<{ ok: number; failed: number }> {
 		const text = await this.app.vault.cachedRead(file);
-		const holder = createDiv();
-		holder.style.position = 'fixed';
-		holder.style.left = '-99999px';
+		const holder = createDiv({ cls: 'tikzjax-offscreen' });
 		document.body.appendChild(holder);
+
+		// A throwaway Component, NOT `this`.
+		//
+		// MarkdownRenderer.render registers every child it creates against the component it is
+		// given, and unloads them when that component unloads. Handing it the plugin means the
+		// blocks from every warmed note stay registered until the plugin itself is disabled —
+		// a leak that grows with use, and precisely what obsidianmd/no-plugin-as-component exists
+		// to catch. Unloading the owner in the `finally` is what makes warming free afterwards.
+		const owner = new Component();
+		owner.load();
 
 		const before = this.records.length;
 		try {
-			await MarkdownRenderer.render(this.app, text, holder, file.path, this);
+			await MarkdownRenderer.render(this.app, text, holder, file.path, owner);
 			const produced = this.records.slice(before);
 			return {
 				ok: produced.filter((r) => r.state !== 'error').length,
 				failed: produced.filter((r) => r.state === 'error').length,
 			};
 		} finally {
+			owner.unload();
 			holder.remove();
 		}
 	}

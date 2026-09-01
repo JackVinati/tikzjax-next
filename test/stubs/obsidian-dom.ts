@@ -60,6 +60,13 @@ export function installObsidianDom(window: Window & typeof globalThis): void {
 		this.textContent = text;
 	};
 
+	// Obsidian's own wrapper over `style.setProperty`, which is how a plugin is expected to write
+	// a computed value. Faithful in the detail that matters: custom properties (`--x`) and ordinary
+	// ones go through the same call, so a test can read either back off `el.style`.
+	proto['setCssProps'] = function (this: HTMLElement, props: Record<string, string>): void {
+		for (const [name, value] of Object.entries(props)) this.style.setProperty(name, value);
+	};
+
 	// `el.doc` and `el.win`, which the plugin uses instead of the globals so a pop-out or the PDF
 	// export popup resolves to ITS document rather than the focused one.
 	if (!Object.getOwnPropertyDescriptor(nodeProto, 'doc')) {

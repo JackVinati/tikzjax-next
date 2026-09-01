@@ -13,7 +13,7 @@ function defaults(): BlockOptions {
 			preamble: '\\def\\R{\\mathbb{R}}',
 			depHashes: ['macros.tex:abc'],
 			wrap: 'auto',
-		twoPass: false,
+			twoPass: false,
 		},
 		presentation: { scale: 1, colors: 'adapt' },
 		raw: false,
@@ -25,7 +25,14 @@ function defaults(): BlockOptions {
 
 describe('parseDirectives: sources with no directives', () => {
 	it('returns the source byte-for-byte and the defaults unchanged', () => {
-		const source = ['\\begin{document}', '\t\\begin{tikzpicture}', '\t\t% a plain comment', '\t\\end{tikzpicture}', '\\end{document}', ''].join('\n');
+		const source = [
+			'\\begin{document}',
+			'\t\\begin{tikzpicture}',
+			'\t\t% a plain comment',
+			'\t\\end{tikzpicture}',
+			'\\end{document}',
+			'',
+		].join('\n');
 		const result = parseDirectives(source, defaults());
 
 		expect(result.body).toBe(source);
@@ -98,7 +105,7 @@ describe('parseDirectives: grammar', () => {
 		const result = parseDirectives('%!tikz alt="never closed', defaults());
 
 		expect(result.options.presentation.alt).toBe('never closed');
-		expect(result.options.warnings).toEqual(['line 1: unterminated quote in \'alt=\'']);
+		expect(result.options.warnings).toEqual(["line 1: unterminated quote in 'alt='"]);
 	});
 
 	it('is indifferent to leading indentation, key case and separator width', () => {
@@ -249,7 +256,9 @@ describe('parseDirectives: presentation values', () => {
 		// `width: none` and `max-width: auto` are not CSS; the browser drops the whole declaration,
 		// so accepting them meant the directive silently did nothing.
 		expect(parseDirectives('%!tikz width=auto', defaults()).options.presentation.width).toBe('auto');
-		expect(parseDirectives('%!tikz max-width=none', defaults()).options.presentation.maxWidth).toBe('none');
+		expect(parseDirectives('%!tikz max-width=none', defaults()).options.presentation.maxWidth).toBe(
+			'none',
+		);
 
 		const bad = parseDirectives('%!tikz width=none max-width=auto', defaults());
 		expect(bad.options.presentation.width).toBeUndefined();
@@ -325,7 +334,10 @@ describe('parseDirectives: baked values', () => {
 	});
 
 	it('keeps a real option list, spaces and all', () => {
-		const result = parseDirectives('%!tikz packages="circuitikz[siunitx, european],pgfplots[compat=1.16]"', defaults());
+		const result = parseDirectives(
+			'%!tikz packages="circuitikz[siunitx, european],pgfplots[compat=1.16]"',
+			defaults(),
+		);
 
 		expect(result.options.baked.packages).toEqual({
 			pgfplots: 'compat=1.16',
@@ -464,7 +476,10 @@ describe('parseDirectives: unknown keys', () => {
 		const seeded = { ...defaults(), warnings: ['from the global settings'] };
 		const result = parseDirectives('%!tikz nope=1', seeded);
 
-		expect(result.options.warnings).toEqual(['from the global settings', "line 1: unknown option 'nope'"]);
+		expect(result.options.warnings).toEqual([
+			'from the global settings',
+			"line 1: unknown option 'nope'",
+		]);
 		expect(seeded.warnings).toEqual(['from the global settings']);
 	});
 });

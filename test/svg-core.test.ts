@@ -57,15 +57,11 @@ describe('parseSvg / serializeSvg', () => {
 		expect(bare).toBeInstanceOf(SvgParseError);
 		expect((bare as SvgParseError).reason).toBe('not-svg');
 
-		const wrongNs = grab(() =>
-			parseSvg('<h:svg xmlns:h="http://www.w3.org/1999/xhtml"><h:g/></h:svg>'),
-		);
+		const wrongNs = grab(() => parseSvg('<h:svg xmlns:h="http://www.w3.org/1999/xhtml"><h:g/></h:svg>'));
 		expect((wrongNs as SvgParseError).reason).toBe('not-svg');
 
 		// …and the real thing still parses.
-		expect(parseSvg(svg('<g/>')).documentElement.namespaceURI).toBe(
-			'http://www.w3.org/2000/svg',
-		);
+		expect(parseSvg(svg('<g/>')).documentElement.namespaceURI).toBe('http://www.w3.org/2000/svg');
 	});
 
 	it('rejects empty and whitespace-only engine output', () => {
@@ -243,9 +239,7 @@ describe('sanitizeSvg', () => {
 		expect(kinds(removed)).toEqual(['event-handler']);
 		expect(removed[0]!.detail.length).toBeLessThan(120);
 
-		const animated = parseSvg(
-			svg(`<set attributeName="href" to="javascript:${'y'.repeat(4000)}"/>`),
-		);
+		const animated = parseSvg(svg(`<set attributeName="href" to="javascript:${'y'.repeat(4000)}"/>`));
 		const fromAnimation = sanitizeSvg(animated);
 		expect(fromAnimation).toHaveLength(1);
 		expect(fromAnimation[0]!.detail.length).toBeLessThan(120);
@@ -362,7 +356,10 @@ describe('placeholderIds', () => {
 			`<g id="a"/><?tz ${ID_TOKEN}9?>`,
 		]) {
 			const doc = parseSvg(svg(body));
-			expect(grab(() => placeholderIds(doc)), body).toBeInstanceOf(IdTokenCollisionError);
+			expect(
+				grab(() => placeholderIds(doc)),
+				body,
+			).toBeInstanceOf(IdTokenCollisionError);
 			// A stamped mount would otherwise carry the caller's token space into foreign markup.
 			expect(serializeSvg(doc), body).toContain(ID_TOKEN);
 		}

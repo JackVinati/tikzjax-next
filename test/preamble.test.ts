@@ -424,12 +424,7 @@ describe('missing files', () => {
 			read: async () => '',
 		};
 
-		const resolved = await resolvePreamble(
-			entry({ globalPath: 'anything.tex' }),
-			NOTE,
-			source,
-			fakeHash,
-		);
+		const resolved = await resolvePreamble(entry({ globalPath: 'anything.tex' }), NOTE, source, fakeHash);
 
 		expect(resolved.text).toBe('');
 		expect(resolved.deps).toEqual([]);

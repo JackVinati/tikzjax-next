@@ -1,0 +1,17 @@
+main.js
+styles.css
+node_modules/
+engine-build/out/
+vendor/
+# The pristine upstream copy, kept verbatim so the fork can be diffed against it. Reformatting it
+# would destroy the only thing it is for.
+engine-src/upstream/
+
+# Prose and hand-drawn tables. Prettier pads every table cell to the widest row, which turns the
+# limitations table in the README into 250-column lines — worse to read in the source than the
+# thing it is normalising. Markdown here is written by hand and reviewed by eye.
+*.md
+
+# Written by engine-build/collect-tex-files.sh. Reformatting it makes every regeneration a
+# 200-line diff against a file no one edits by hand.
+engine-build/tex-files.collected.json

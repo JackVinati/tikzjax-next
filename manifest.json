@@ -1,10 +1,10 @@
 {
-	"id": "tikzjax-next",
-	"name": "TikZJax Next",
-	"version": "0.1.0",
-	"minAppVersion": "1.13.0",
-	"description": "Render TikZ and LaTeX diagrams in your notes.",
-	"author": "JackVinati",
-	"authorUrl": "https://github.com/JackVinati",
-	"isDesktopOnly": false
+  "id": "tikzjax-next",
+  "name": "TikZJax Next",
+  "version": "0.1.0",
+  "minAppVersion": "1.13.0",
+  "description": "Render TikZ and LaTeX diagrams in your notes.",
+  "author": "JackVinati",
+  "authorUrl": "https://github.com/JackVinati",
+  "isDesktopOnly": false
 }

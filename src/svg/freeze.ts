@@ -51,14 +51,7 @@ const XLINK_NS = 'http://www.w3.org/1999/xlink';
  * paints because those live inside `<defs>`, which is exactly the region a top-level
  * `style="color:…"` is least reliable at reaching.
  */
-const COLOR_PROPERTIES = [
-	'fill',
-	'stroke',
-	'color',
-	'stop-color',
-	'flood-color',
-	'lighting-color',
-] as const;
+const COLOR_PROPERTIES = ['fill', 'stroke', 'color', 'stop-color', 'flood-color', 'lighting-color'] as const;
 
 /**
  * The `currentColor` keyword, as a whole token.
@@ -147,12 +140,7 @@ export function freezeSvg(markup: string, options: FreezeOptions): string {
  * survives as red and its descendants' `currentColor` follows it, instead of being flattened to the
  * theme ink. A naive `style="color:#000"` stamped on the root gets that case wrong.
  */
-function freezeElement(
-	el: Element,
-	options: FreezeOptions,
-	families: Set<string>,
-	inherited: string,
-): void {
+function freezeElement(el: Element, options: FreezeOptions, families: Set<string>, inherited: string): void {
 	// Paper first: the class outranks a presentation attribute in Obsidian, so resolving it into a
 	// literal attribute before the colour pass reads one keeps the two in the order the cascade
 	// had them.
@@ -410,11 +398,7 @@ function collectFamilies(value: string, families: Set<string>): void {
 function normalizeFamily(value: string): string {
 	let name = trimAscii(stripPriority(value));
 	const first = name.charAt(0);
-	if (
-		(first === '"' || first === "'") &&
-		name.length > 1 &&
-		name.charAt(name.length - 1) === first
-	) {
+	if ((first === '"' || first === "'") && name.length > 1 && name.charAt(name.length - 1) === first) {
 		name = name.slice(1, name.length - 1);
 	}
 	return trimAscii(name).toLowerCase();

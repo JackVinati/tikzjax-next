@@ -39,5 +39,6 @@ export const STRINGS = {
 	// Cache.
 	cacheStats: (count: number, mb: string) => `${count} diagrams, ${mb}`,
 	cacheCleared: 'Cleared the diagram cache.',
-	legacyImported: (count: number, mb: string) => `Imported ${count} diagrams (${mb}) from the previous plugin.`,
+	legacyImported: (count: number, mb: string) =>
+		`Imported ${count} diagrams (${mb}) from the previous plugin.`,
 } as const;

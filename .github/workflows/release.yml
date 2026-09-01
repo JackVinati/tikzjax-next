@@ -50,7 +50,7 @@ jobs:
       - name: Build the engine
         run: |
           npm run engine:image
-          docker run --rm -v "$PWD/engine-build/out:/out" tikzjax-engine:apt
+          npm run engine:build
 
       - name: Verify the engine
         run: npm run smoke && npm run verify:fork && npm run verify:worker
@@ -80,5 +80,4 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --notes-file release-notes.md \
-            --draft \
             main.js manifest.json styles.css

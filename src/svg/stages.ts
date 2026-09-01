@@ -34,20 +34,20 @@ export function buildStages(options: StageOptions): Stage[] {
 			name: 'sanitize',
 			mandatory: true,
 			run: (doc) => {
-				sanitizeSvg(doc as XMLDocument);
+				sanitizeSvg(doc);
 			},
 		},
 		{
 			name: 'entities',
 			run: (doc) => {
-				remapSoftHyphens(doc as XMLDocument);
+				remapSoftHyphens(doc);
 			},
 		},
 		{
 			name: 'ids',
 			mandatory: true,
 			run: (doc) => {
-				placeholderIds(doc as XMLDocument);
+				placeholderIds(doc);
 			},
 		},
 	];

@@ -24,7 +24,8 @@ export type OptimizeMode = 'preset' | 'targeted' | 'off';
 // -------------------------------------------------------------------------------------------
 // The targeted transform
 
-const TRANSFORM_CHAIN = /^\s*scale\(\s*-1\s*,?\s*1\s*\)\s*translate\(([^)]*)\)\s*scale\(\s*-1\s*,?\s*-1\s*\)\s*$/;
+const TRANSFORM_CHAIN =
+	/^\s*scale\(\s*-1\s*,?\s*1\s*\)\s*translate\(([^)]*)\)\s*scale\(\s*-1\s*,?\s*-1\s*\)\s*$/;
 
 /**
  * Collapse dvi2html's text-group transform into a single matrix and drop `alignment-baseline`.
@@ -51,7 +52,10 @@ export function targetedTransform(doc: Document): void {
 		const m = TRANSFORM_CHAIN.exec(value);
 		if (!m) continue;
 
-		const parts = (m[1] ?? '').split(/[\s,]+/).filter(Boolean).map(Number);
+		const parts = (m[1] ?? '')
+			.split(/[\s,]+/)
+			.filter(Boolean)
+			.map(Number);
 		const [a = 0, b = 0] = parts;
 		if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
 

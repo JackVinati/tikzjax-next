@@ -396,10 +396,14 @@ export class TikzBlock extends MarkdownRenderChild {
 			}
 
 			const doc = parseSvg(markup);
-			const result = runPipeline(doc, buildStages({
-				colors: this.spec.options.presentation.colors ?? 'adapt',
-				optimize: this.spec.options.fast ? 'off' : 'targeted',
-			}), { raw: this.spec.options.raw });
+			const result = runPipeline(
+				doc,
+				buildStages({
+					colors: this.spec.options.presentation.colors ?? 'adapt',
+					optimize: this.spec.options.fast ? 'off' : 'targeted',
+				}),
+				{ raw: this.spec.options.raw },
+			);
 
 			const template = serializeSvg(result.doc);
 			const previous = this.artifact;
@@ -420,7 +424,8 @@ export class TikzBlock extends MarkdownRenderChild {
 
 			this.dispatch({ type: 'ok' });
 		} catch (error) {
-			this.failure = error instanceof TexError ? error : new TexError('empty-output', [], String(error));
+			this.failure =
+				error instanceof TexError ? error : new TexError('empty-output', [], String(error));
 			this.dispatch({ type: 'stageThrew' });
 		}
 	}
@@ -451,7 +456,7 @@ export class TikzBlock extends MarkdownRenderChild {
 		const svg = this.body.querySelector('svg');
 		if (!svg || !this.artifact || this.artifact.viewBox !== null) return;
 
-		const bounds = await measureInk(svg as SVGSVGElement, this.body.doc);
+		const bounds = await measureInk(svg, this.body.doc);
 		if (!bounds || this.state.phase === 'DISPOSED' || !this.artifact) return;
 
 		this.artifact = withMeasuredBounds(this.artifact, bounds);

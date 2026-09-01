@@ -75,7 +75,8 @@ if (coredump.length !== library.pages * 65536) {
 let missed = [];
 const bundled = new Map();
 for (const entry of readdirSync(join(DIST, 'tex_files'))) {
-	if (entry.endsWith('.gz')) bundled.set(entry.slice(0, -3), new Uint8Array(readFileSync(join(DIST, 'tex_files', entry))));
+	if (entry.endsWith('.gz'))
+		bundled.set(entry.slice(0, -3), new Uint8Array(readFileSync(join(DIST, 'tex_files', entry))));
 }
 library.setBundledFiles(bundled, (gz) => new Uint8Array(gunzipSync(gz)));
 library.setLogSink((line) => transcript.push(line));

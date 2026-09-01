@@ -38,14 +38,15 @@ export function mountArtifact(
 	// re-serialise anything already in the container. The sanitize stage has already run over the
 	// parsed document, and it is mandatory precisely because this insertion path executes what it
 	// is given.
+	// eslint-disable-next-line no-unsanitized/method -- the sanitize stage is mandatory, non-skippable and has already run over this markup (svg/stages.ts); it is what makes this insertion safe.
 	const fragment = container.doc.createRange().createContextualFragment(markup);
 	const svg = fragment.querySelector('svg');
 	if (!svg) return null;
 
-	applyPresentation(container, svg as SVGSVGElement, presentation, artifact);
+	applyPresentation(container, svg, presentation, artifact);
 	container.appendChild(fragment);
 
-	return { svg: svg as SVGSVGElement, nonce };
+	return { svg: svg, nonce };
 }
 
 /**

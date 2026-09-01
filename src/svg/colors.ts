@@ -65,8 +65,7 @@ export function classifyColor(value: string): PaintClass {
 	if (normalized === 'black') return 'ink';
 	if (normalized === 'white') return 'paper';
 	if (normalized.charAt(0) === '#') return classifyHex(normalized);
-	if (normalized.startsWith('rgb(') || normalized.startsWith('rgba('))
-		return classifyRgb(normalized);
+	if (normalized.startsWith('rgb(') || normalized.startsWith('rgba(')) return classifyRgb(normalized);
 	return 'other';
 }
 

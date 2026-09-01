@@ -392,7 +392,6 @@ export function unfinalizeBlock(noteText: string, span: TikzBlockSpan): string {
 	return noteText.slice(0, span.start) + fenceText + noteText.slice(span.end);
 }
 
-
 // -------------------------------------------------------------------------------------------
 // Rewrite helpers
 
@@ -427,12 +426,20 @@ function fenceTextOf(noteText: string, span: TikzBlockSpan): string {
 	const opener = lines[1];
 	const fenceLine = lines[2];
 	const fence = fenceLine ? matchOpener(fenceLine.text) : null;
-	if (!embed || !opener || !fenceLine || !fence || !EMBED_LINE.test(embed.text) || !COMMENT_DELIMITER.test(opener.text)) {
+	if (
+		!embed ||
+		!opener ||
+		!fenceLine ||
+		!fence ||
+		!EMBED_LINE.test(embed.text) ||
+		!COMMENT_DELIMITER.test(opener.text)
+	) {
 		throw new Error('tikz finalize: span is marked finalized but does not contain a finalized block');
 	}
 	const close = scanFence(lines, 2, fence).closeLine;
 	const last = close === null ? undefined : lines[close];
-	if (!last) throw new Error('tikz finalize: span is marked finalized but does not contain a finalized block');
+	if (!last)
+		throw new Error('tikz finalize: span is marked finalized but does not contain a finalized block');
 	return region.slice(fenceLine.start, last.end);
 }
 

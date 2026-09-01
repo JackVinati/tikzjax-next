@@ -150,7 +150,9 @@ describe('preflight', () => {
 		});
 
 		it('reports a package only once however many times it is loaded', () => {
-			expect(preflight('\\usepackage{siunitx}\n\\usepackage{siunitx}', baked(), caps())).toHaveLength(1);
+			expect(preflight('\\usepackage{siunitx}\n\\usepackage{siunitx}', baked(), caps())).toHaveLength(
+				1,
+			);
 		});
 
 		it('warns on a package the generated table records as absent, under either keying', () => {
@@ -196,7 +198,8 @@ describe('preflight', () => {
 
 		it('does not repeat the stale "LaTeX3 is impossible here" advice on an expl3 engine', () => {
 			const withExpl3 = preflight('\\usepackage{siunitx}', baked(), caps())[0]?.hint ?? '';
-			const without = preflight('\\usepackage{siunitx}', baked(), caps({ expl3: false }))[0]?.hint ?? '';
+			const without =
+				preflight('\\usepackage{siunitx}', baked(), caps({ expl3: false }))[0]?.hint ?? '';
 			expect(withExpl3).toContain('does provide expl3');
 			expect(without).toContain('no expl3');
 		});
@@ -348,7 +351,9 @@ describe('preflight', () => {
 		});
 
 		it('does not fire on \\foreach variables, which are the idiom', () => {
-			expect(preflight('\\foreach \\x/\\y in {1/2} { \\draw (\\x,\\y); }', baked(), caps())).toEqual([]);
+			expect(preflight('\\foreach \\x/\\y in {1/2} { \\draw (\\x,\\y); }', baked(), caps())).toEqual(
+				[],
+			);
 		});
 
 		it('does not fire on \\providecommand, which cannot overwrite anything', () => {

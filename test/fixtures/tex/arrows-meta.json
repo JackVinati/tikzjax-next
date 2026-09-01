@@ -1,1 +1,4 @@
-{ "dataset": { "tikzLibraries": "arrows.meta" }, "note": "arrows.meta is absent from the 2022 bundle; present in tex_files.json here." }
+{
+  "dataset": { "tikzLibraries": "arrows.meta" },
+  "note": "arrows.meta is absent from the 2022 bundle; present in tex_files.json here."
+}

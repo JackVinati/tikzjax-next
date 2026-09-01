@@ -117,12 +117,7 @@ function checkDocumentClass(text: string, out: Diagnostic[]): void {
 
 const USEPACKAGE = /\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}/g;
 
-function checkPackages(
-	text: string,
-	baked: BakedOptions,
-	caps: EngineCapabilities,
-	out: Diagnostic[],
-): void {
+function checkPackages(text: string, baked: BakedOptions, caps: EngineCapabilities, out: Diagnostic[]): void {
 	const seen = new Set<string>();
 
 	for (const { name, line } of collectNames(text, USEPACKAGE, Object.keys(baked.packages))) {
@@ -151,7 +146,8 @@ function packageHint(name: string, caps: EngineCapabilities): string {
 		return `${name} is a TikZ library, not a package — it is bundled, but it loads with \\usetikzlibrary{${name}}.`;
 	}
 
-	const base = 'Remove the line and inline the few macros you need, or switch to an engine that bundles it.';
+	const base =
+		'Remove the line and inline the few macros you need, or switch to an engine that bundles it.';
 
 	// D8 in docs/DECISIONS.md: this engine's web2js build applies expanded.ch and strcmp.ch, so
 	// expl3 runs. The old "LaTeX3 packages are permanently impossible here" advice is stale and
@@ -274,7 +270,9 @@ function recordedVersion(name: string, caps: EngineCapabilities): string | undef
  */
 function numericVersion(recorded: string | undefined): string | undefined {
 	if (recorded === undefined) return undefined;
-	return /^\s*([0-9]+(?:\.[0-9]+)*)\s*$/.exec(recorded)?.[1] ?? /\bv([0-9]+(?:\.[0-9]+)+)/.exec(recorded)?.[1];
+	return (
+		/^\s*([0-9]+(?:\.[0-9]+)*)\s*$/.exec(recorded)?.[1] ?? /\bv([0-9]+(?:\.[0-9]+)+)/.exec(recorded)?.[1]
+	);
 }
 
 /** Numeric, component-wise. `1.9` < `1.16`, which a string compare gets backwards. */
@@ -310,7 +308,9 @@ function checkEncoding(text: string, caps: EngineCapabilities, out: Diagnostic[]
 	}
 	if (offenders.size === 0) return;
 
-	const listed = [...offenders.keys()].slice(0, MAX_REPORTED_CHARS).map((ch) => `'${ch}' (${codepoint(ch)})`);
+	const listed = [...offenders.keys()]
+		.slice(0, MAX_REPORTED_CHARS)
+		.map((ch) => `'${ch}' (${codepoint(ch)})`);
 	const rest = offenders.size - listed.length;
 	const first = [...offenders.values()][0] ?? 0;
 
@@ -364,25 +364,100 @@ const BUILTIN_MACROS: ReadonlyMap<string, string> = new Map<string, string>([
 	...named('a TeX integer parameter (the clock TeX starts with)', 'time', 'day', 'month', 'year'),
 	...named(
 		'a TeX primitive',
-		'input', 'output', 'end', 'par', 'relax', 'the', 'box', 'hbox', 'vbox', 'count', 'dimen',
-		'skip', 'char', 'span',
+		'input',
+		'output',
+		'end',
+		'par',
+		'relax',
+		'the',
+		'box',
+		'hbox',
+		'vbox',
+		'count',
+		'dimen',
+		'skip',
+		'char',
+		'span',
 	),
 	...named(
 		'a plain-TeX math symbol',
-		'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'varepsilon', 'zeta', 'eta', 'theta',
-		'vartheta', 'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi', 'pi', 'varpi', 'rho', 'varrho',
-		'sigma', 'varsigma', 'tau', 'upsilon', 'phi', 'varphi', 'chi', 'psi', 'omega',
-		'Gamma', 'Delta', 'Theta', 'Lambda', 'Xi', 'Pi', 'Sigma', 'Upsilon', 'Phi', 'Psi', 'Omega',
+		'alpha',
+		'beta',
+		'gamma',
+		'delta',
+		'epsilon',
+		'varepsilon',
+		'zeta',
+		'eta',
+		'theta',
+		'vartheta',
+		'iota',
+		'kappa',
+		'lambda',
+		'mu',
+		'nu',
+		'xi',
+		'pi',
+		'varpi',
+		'rho',
+		'varrho',
+		'sigma',
+		'varsigma',
+		'tau',
+		'upsilon',
+		'phi',
+		'varphi',
+		'chi',
+		'psi',
+		'omega',
+		'Gamma',
+		'Delta',
+		'Theta',
+		'Lambda',
+		'Xi',
+		'Pi',
+		'Sigma',
+		'Upsilon',
+		'Phi',
+		'Psi',
+		'Omega',
 	),
 	...named(
 		'a LaTeX math operator',
-		'sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'sinh', 'cosh', 'tanh', 'log', 'ln', 'exp',
-		'min', 'max', 'det', 'dim', 'deg', 'arg', 'gcd',
+		'sin',
+		'cos',
+		'tan',
+		'cot',
+		'sec',
+		'csc',
+		'sinh',
+		'cosh',
+		'tanh',
+		'log',
+		'ln',
+		'exp',
+		'min',
+		'max',
+		'det',
+		'dim',
+		'deg',
+		'arg',
+		'gcd',
 	),
 	...named(
 		'a TikZ command',
-		'draw', 'fill', 'filldraw', 'shade', 'path', 'node', 'coordinate', 'clip', 'foreach',
-		'tikz', 'pgfmathresult', 'pgfmathparse',
+		'draw',
+		'fill',
+		'filldraw',
+		'shade',
+		'path',
+		'node',
+		'coordinate',
+		'clip',
+		'foreach',
+		'tikz',
+		'pgfmathresult',
+		'pgfmathparse',
 	),
 ]);
 

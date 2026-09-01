@@ -1,11 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
-import {
-	applyColorModel,
-	classifyColor,
-	PAPER_FILL_CLASS,
-	PAPER_STROKE_CLASS,
-} from '../src/svg/colors';
+import { applyColorModel, classifyColor, PAPER_FILL_CLASS, PAPER_STROKE_CLASS } from '../src/svg/colors';
 import { applyInkBounds, formatNumber, formatViewBox, parseViewBox } from '../src/svg/geometry';
 import { PipelineError, runPipeline, type Stage } from '../src/svg/pipeline';
 
@@ -128,9 +123,7 @@ describe('applyColorModel — the four emitters', () => {
 		applyColorModel(doc, 'adapt');
 
 		expect(one(doc, 'span').getAttribute('style')).toBe('color: currentColor');
-		expect(one(doc, 'g').getAttribute('style')).toBe(
-			'fill: currentColor; stroke: currentColor',
-		);
+		expect(one(doc, 'g').getAttribute('style')).toBe('fill: currentColor; stroke: currentColor');
 	});
 
 	it('keeps !important when rewriting a declaration', () => {
@@ -188,9 +181,7 @@ describe('applyColorModel — paper', () => {
 		applyColorModel(doc, 'adapt');
 		applyColorModel(doc, 'adapt');
 
-		expect(one(doc, 'g').getAttribute('class')).toBe(
-			`pgfsys ${PAPER_FILL_CLASS} ${PAPER_STROKE_CLASS}`,
-		);
+		expect(one(doc, 'g').getAttribute('class')).toBe(`pgfsys ${PAPER_FILL_CLASS} ${PAPER_STROKE_CLASS}`);
 	});
 
 	it('leaves a white `color` verbatim — there is no tz-paper-color rule to resolve it', () => {
@@ -340,9 +331,7 @@ describe('parseViewBox / formatViewBox', () => {
 
 	it('round-trips and trims noise from the numbers', () => {
 		expect(formatViewBox({ x: -72, y: -72, width: 100, height: 50 })).toBe('-72 -72 100 50');
-		expect(formatViewBox({ x: 0.1 + 0.2, y: 0, width: 1 / 3, height: 2 })).toBe(
-			'0.3 0 0.33333 2',
-		);
+		expect(formatViewBox({ x: 0.1 + 0.2, y: 0, width: 1 / 3, height: 2 })).toBe('0.3 0 0.33333 2');
 		expect(formatNumber(-0.0000001)).toBe('0');
 	});
 });
@@ -393,12 +382,8 @@ describe('applyInkBounds', () => {
 		const before = serialize(doc);
 
 		expect(() => applyInkBounds(doc, { x: 0, y: 0, width: 0, height: 5 })).toThrow(RangeError);
-		expect(() => applyInkBounds(doc, { x: 0, y: 0, width: NaN, height: 5 })).toThrow(
-			RangeError,
-		);
-		expect(() => applyInkBounds(doc, { x: Infinity, y: 0, width: 1, height: 5 })).toThrow(
-			RangeError,
-		);
+		expect(() => applyInkBounds(doc, { x: 0, y: 0, width: NaN, height: 5 })).toThrow(RangeError);
+		expect(() => applyInkBounds(doc, { x: Infinity, y: 0, width: 1, height: 5 })).toThrow(RangeError);
 		// A refusal must leave the engine's own frame in place to mount with.
 		expect(serialize(doc)).toBe(before);
 	});
@@ -528,13 +513,9 @@ describe('runPipeline', () => {
 	});
 
 	it('raw runs only the mandatory stages, and that is not a degradation', () => {
-		const result = runPipeline(
-			svgDoc('<rect/>'),
-			[mark('sanitize'), mark('optimize'), mark('ids')],
-			{
-				raw: true,
-			},
-		);
+		const result = runPipeline(svgDoc('<rect/>'), [mark('sanitize'), mark('optimize'), mark('ids')], {
+			raw: true,
+		});
 
 		expect(result.doc.documentElement.getAttribute('data-sanitize')).toBe('1');
 		expect(result.doc.documentElement.getAttribute('data-ids')).toBe('1');
@@ -589,10 +570,7 @@ describe('runPipeline', () => {
 	});
 
 	it('carries the real colour and geometry stages', () => {
-		const doc = svgDoc(
-			'<rect fill="black"/>',
-			'width="100pt" height="50pt" viewBox="-72 -72 100 50"',
-		);
+		const doc = svgDoc('<rect fill="black"/>', 'width="100pt" height="50pt" viewBox="-72 -72 100 50"');
 		const result = runPipeline(doc, [
 			stage('colors', (d) => {
 				applyColorModel(d, 'adapt');
@@ -608,10 +586,7 @@ describe('runPipeline', () => {
 	});
 
 	it('degrades rather than losing the diagram when geometry gets a bad measurement', () => {
-		const doc = svgDoc(
-			'<rect fill="black"/>',
-			'width="100pt" height="50pt" viewBox="-72 -72 100 50"',
-		);
+		const doc = svgDoc('<rect fill="black"/>', 'width="100pt" height="50pt" viewBox="-72 -72 100 50"');
 		const result = runPipeline(doc, [
 			stage('colors', (d) => {
 				applyColorModel(d, 'adapt');
@@ -715,4 +690,4 @@ describe('runPipeline — a stage throw can never escape', () => {
 		expect(result.warnings[0]).toContain('optimize');
 		expect(result.doc.querySelector('rect')).not.toBeNull();
 	});
-})
+});

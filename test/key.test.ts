@@ -27,12 +27,8 @@ const subtleSha256 = async (s: string): Promise<string> => {
 
 describe('sha256Hex', () => {
 	it('matches the published vectors', () => {
-		expect(sha256Hex('')).toBe(
-			'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-		);
-		expect(sha256Hex('abc')).toBe(
-			'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
-		);
+		expect(sha256Hex('')).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+		expect(sha256Hex('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
 		expect(sha256Hex('abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq')).toBe(
 			'248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1',
 		);
@@ -476,8 +472,6 @@ describe('legacyKey', () => {
 	});
 
 	it('is sensitive to the source itself', () => {
-		expect(legacyKey(SOURCE.replace('(1,1)', '(1,2)'))).toBe(
-			'd9c7537d290d0ac16b4e8d1135e75cd0',
-		);
+		expect(legacyKey(SOURCE.replace('(1,1)', '(1,2)'))).toBe('d9c7537d290d0ac16b4e8d1135e75cd0');
 	});
 });
