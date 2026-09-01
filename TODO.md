@@ -41,7 +41,7 @@ edited.
 - [x] Externals: `obsidian`, `electron`, the **8** real `@codemirror/*`, `@lezer/*`, node builtins
 - [x] Drop `tslib`, `builtin-modules`, `esbuild-plugin-inline-import`; pin `obsidian@1.13.1` instead of `"latest"`
 - [x] Regenerate `package-lock.json` — the old one was lockfileVersion 2 stamped `0.3.0` and missing `localforage`, so `npm ci` failed
-- [x] `versions.json` + truthful `minAppVersion: "1.13.0"` (D6)
+- [x] `versions.json` + truthful `minAppVersion: "1.7.2"` — derived from the API surface, after 1.13.0 turned out to lock every iPhone out (D6)
 - [x] New `manifest.json` id / name / author (D1) + coexistence guard against the old plugin
 - [x] Vitest 4 + an `obsidian` stub; `happy-dom` per-file only
 - [x] CI: lint · store rules · format · typecheck · test · no-network guard · manifest/versions guard; engine build, fixtures, fork and worker verification on its own workflow
@@ -125,7 +125,7 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] Dependency tracking → `vault.on('modify')` invalidation
 - [x] `freezeSvg` — resolve `currentColor`, inline **only** the referenced `@font-face` subset
 - [x] Copy SVG / Save SVG / Finalize / Un-finalize; render-note; zoom modal — **closes #21 #33 #95 #97 #104 #37 #47**
-- [ ] **open** — declarative settings (`getSettingDefinitions`). A hand-written settings tab ships instead; the declarative API would make the settings searchable from Obsidian's own search
+- [ ] **not doing for now** — declarative settings (`getSettingDefinitions`). It is 1.13-only, and the floor is 1.5.7 so that the plugin installs on mobile at all (D6). Adopting it means carrying both paths; it buys settings-search discoverability on 1.13+ and costs everyone below it
 - [ ] **open** — render-vault. render-note ships; a vault-wide pass needs a progress UI and a cancel path, and is the kind of thing that wants a device measurement first
 
 ## 8 · pgfplots

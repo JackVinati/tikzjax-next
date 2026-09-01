@@ -178,7 +178,49 @@ drops to the already-present 5.9.3. Nothing else in the build depends on the com
 `DESIGN.md` §9.2's tsconfig is unchanged and already TS-7-shaped — it explicitly drops `baseUrl`
 and `moduleResolution: node` on the grounds that both are gone in TS 7.
 
-## D6 — `minAppVersion` is 1.13.0
+## D6 — `minAppVersion` is 1.7.2
+
+**This decision was wrong, and it was wrong in the way decisions about hypothetical users usually
+are.** It is kept below with the correction on top, because the reasoning is instructive.
+
+1.13.0 was chosen for two APIs. One of them, `getSettingDefinitions`, was never implemented — so the
+floor was being paid for a feature that does not exist. The other, `Plugin.settings`, is a typing
+concern: the emitted JavaScript declares a class field either way.
+
+"Raising the floor orphans nobody" was true when the plugin had zero installs and false the moment
+it had one. **Obsidian for iOS trails the desktop.** The first person to try installing this on an
+iPhone — the maintainer — got `the Obsidian version of the app needs to be 1.13.0, but this
+installation is 1.12.7`. A plugin whose whole point is that it works on mobile was uninstallable on
+mobile, to reserve an API it does not call.
+
+The floor now comes from the API surface, and it is not a matter of opinion: `eslint-plugin-obsidianmd`
+has a rule, `no-unsupported-api`, that compares every call against `minAppVersion` and fails. Set the
+floor, run the linter, read what it names. It found two things a manual read had missed.
+
+`Workspace.revealLeaf` (1.7.2) is what sets the floor — it opens the diagnostics view. Everything
+else is older: `getAvailablePathForAttachment` (1.5.7), `vault.process` (1.1.0),
+`MarkdownRenderer.render` (0.10.6), `registerView` (0.9.7), `getFirstLinkpathDest` (0.12.5),
+`createBinary` (0.9.7), and `setCssStyles`, `setCssProps`, `createSvg`, `addChild`, which predate
+the `@since` tags entirely.
+
+Two calls were holding the floor at 1.13 for no benefit, and both are gone:
+
+- `ButtonComponent.setDestructive` paints one button. `setWarning` is deprecated in its favour but
+  present since 0.11.0 and still works. Feature-detecting the pair was the first attempt and is
+  worse than choosing: the linter reads the call textually, cannot see the guard, and reports the
+  error either way.
+- `SettingTab.update()` refreshes the settings pane after the cache is cleared. `display()` does the
+  same thing and is as old as the class.
+
+The consequence is that the declarative settings API stays unimplemented and the store keeps warning
+about it. That is the right trade: it costs settings-search discoverability on 1.13+, and it buys
+every user between 1.5.7 and 1.13 — which today includes every iPhone.
+
+---
+
+### The original decision, for the record
+
+## D6 (superseded) — `minAppVersion` is 1.13.0
 
 **Resolves open question 1.**
 

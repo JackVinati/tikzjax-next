@@ -1,7 +1,22 @@
-import type { App } from 'obsidian';
+import type { App, ButtonComponent } from 'obsidian';
 import { Notice, PluginSettingTab, Setting } from 'obsidian';
 import type TikzjaxNextPlugin from '../main';
 import { STRINGS } from '../ui/strings';
+
+/**
+ * Paint a button as destructive.
+ *
+ * `setWarning`, not its 1.13 replacement `setDestructive`, and deliberately: deprecated is not
+ * absent, it works on every version from 0.11.0 up, and calling the new one would raise this
+ * plugin's floor to 1.13 for the colour of one button — which on mobile is the difference between
+ * installable and not, because Obsidian for iOS trails the desktop (internal/DECISIONS.md D6).
+ *
+ * Feature-detecting the pair was the first attempt and is worse: the store's linter reads the call
+ * textually, cannot see the guard, and reports an error against the floor either way.
+ */
+function markDestructive(button: ButtonComponent): ButtonComponent {
+	return button.setWarning();
+}
 
 /**
  * Settings.
@@ -146,13 +161,14 @@ export class TikzSettingTab extends PluginSettingTab {
 			.setName('Cached diagrams')
 			.setDesc('Counting…')
 			.addButton((b) =>
-				b
+				markDestructive(b)
 					.setButtonText('Clear')
-					.setDestructive()
 					.onClick(async () => {
 						await this.plugin.cache?.clear();
 						new Notice(STRINGS.cacheCleared);
-						this.update();
+						// `display()`, not 1.13's `update()`: it does the same thing here — clear the
+						// container and rebuild — and works all the way down to this plugin's floor.
+						this.display();
 					}),
 			);
 

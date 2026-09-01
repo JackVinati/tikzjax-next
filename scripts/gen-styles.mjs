@@ -47,7 +47,13 @@ const faceRule = (family, woff2) =>
  */
 export function buildStyles(root) {
 	const distFonts = join(root, 'engine-build', 'out', 'dist', 'fonts');
-	const base = readFileSync(join(root, 'src', 'styles', 'base.css'), 'utf8');
+
+	// LF, whatever the checkout used. styles.css is a SHIPPED ARTIFACT: the community store checks
+	// that a release asset matches a build of the same source, and without this the same commit
+	// produced one styles.css on Windows and another on Linux — the line endings of base.css passed
+	// straight through into the output. main.js was never affected, because esbuild normalises what
+	// it bundles; this file is concatenated, not bundled, which is exactly why it slipped through.
+	const base = readFileSync(join(root, 'src', 'styles', 'base.css'), 'utf8').replace(/\r\n/g, '\n');
 
 	if (!existsSync(distFonts)) {
 		return { css: base, coldCss: '', core: 0, cold: 0, coreBytes: base.length, coldBytes: 0 };
@@ -66,7 +72,7 @@ export function buildStyles(root) {
 	const css = `${base}\n/* Core TeX faces. The remaining ${cold.length} are injected on first mount; see scripts/gen-styles.mjs. */\n${core.join('\n')}\n`;
 	const coldCss = cold.join('\n');
 
-	writeFileSync(join(root, 'styles.css'), css);
+	writeFileSync(join(root, 'styles.css'), css, 'utf8');
 
 	return {
 		css,
