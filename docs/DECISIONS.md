@@ -385,6 +385,56 @@ and Glenn Rice, and a `CHANGES` note listing our modifications.
 
 ---
 
+## D11 — The two patches the build does apply, and why they are patches
+
+D10 says there is no blob to patch, and there is not: the shipped worker is our own source. But the
+BUILD still runs upstream's `web2js` and `tikzjax` repositories to produce the engine, and two of
+their files are wrong for what we ask of them. Both are patched in `build-engine.sh`, each guarded
+by a grep before and a grep after, so a silent no-op fails the build rather than shipping something
+subtly broken.
+
+**1. `tikzjax/genTexFiles.js` reads every bundled file as UTF-8.**
+
+`pako.gzip(fs.readFileSync(sysFile, 'utf8'))` is fine while the bundle is all `.tex` and `.sty`. The
+moment a `.tfm` goes in — and font metrics are exactly what this engine was missing — every byte
+above 0x7F becomes U+FFFD and the metrics are destroyed. Read as bytes.
+
+**2. `web2js/library.js` closes a written file with an ASYNCHRONOUS write.**
+
+```js
+close(descriptor) {
+    if (file.writing) fs.write(file.descriptor, Buffer.concat(file.output), () => {});
+    fs.close(file.descriptor, () => {});
+}
+```
+
+`initex.js` runs TeX twice in one process: the first turns `latex.ltx` into `latex.fmt`, the second
+loads that format and freezes the whole `WebAssembly.Memory` into `core.dump`. The format is
+accumulated in memory by `put()` and written out by that `close()` — so 21 MB go to the libuv
+threadpool with the callback discarded, while the script continues synchronously into a second TeX
+that reads the file back with `readFileSync`.
+
+It is a race, and on a quiet machine the writer wins every time: five runs out of five here. On a
+GitHub runner it loses about half the time and the build dies with `(Fatal format file error; I'm
+stymied)` — two failures in four runs, with byte-identical `tex.wasm` and `tex.pool` each time,
+which is what ruled out every explanation involving different inputs. `writeSync`, `closeSync`.
+
+The runtime never had this problem: `engine-src/library.ts` has no filesystem, only a `Map`, and its
+`close` touches nothing.
+
+Applying the patch changes no artifact. `tex.wasm` and `tex_files.json` come out with the same
+sha256 as before it; `core.dump` differs only because TeX freezes the current date into memory,
+which is the known non-determinism recorded in D8's list.
+
+**Why patch rather than fork these two as well.** They run at build time, in a container, and their
+output is checked by everything downstream: the dump has to be exactly `pages × 65536` bytes, 21
+fixtures have to render through it, and `verify-fork` has to find that output byte-identical to
+upstream's engine. A fork would have to be kept in step with upstream for no gain those assertions
+do not already provide. The shipped code is code we own; the build tools are borrowed, and the
+build says so out loud when it borrows them.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

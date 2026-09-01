@@ -166,11 +166,73 @@ done
 ok "TeX memory pages: $(node -p "require('./web2js/commonMemory.js').pages")"
 
 # node_modules comes from the image; only install if it somehow is not there.
-( cd web2js && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && npm run build )
+( cd web2js && { [ -d node_modules ] || npm ci --no-audit --no-fund; } )
 
-[ -s web2js/tex.wasm   ] || die "tex.wasm was not produced"
-[ -s web2js/core.dump  ] || die "core.dump was not produced"
-ok "tex.wasm   $(stat -c%s web2js/tex.wasm) bytes"
+# ---------------------------------------------------------------------------------------------
+# THE FLAKY DUMP, and why this patch exists.
+#
+# initex.js runs TeX twice in one process. The first turns latex.ltx into latex.fmt; the second
+# loads that format with `&latex` and freezes the whole WebAssembly.Memory into core.dump. The
+# format is accumulated in memory by `put()` and written out by `close()` — with `fs.write`, the
+# ASYNCHRONOUS one, whose callback is ignored. 21 MB then go to the libuv threadpool while the
+# script continues synchronously into the second TeX, which reads the file back with readFileSync.
+#
+# It is a race, and the writer usually wins on a quiet machine: five out of five here. On a GitHub
+# runner it loses about half the time, and TeX reads a half-written format and dies with
+# "(Fatal format file error; I'm stymied)" — which is what this build did on two runs out of four,
+# with byte-identical tex.wasm and tex.pool each time.
+#
+# Synchronous write, synchronous close. Both assert, because a silent no-op here would put the race
+# back without saying so. Runtime is unaffected either way: the plugin uses engine-src/library.ts,
+# whose filesystem is a Map in memory and whose `close` touches no disk at all.
+grep -q "fs.write(file.descriptor, Buffer.concat(file.output), () => {});" web2js/library.js \
+    || die "web2js library.js no longer closes with an async write — re-read close() before removing this patch"
+sed -i 's/fs\.write(file\.descriptor, Buffer\.concat(file\.output), () => {});/fs.writeSync(file.descriptor, Buffer.concat(file.output));/' web2js/library.js
+sed -i 's/fs\.close(file\.descriptor, () => {});/fs.closeSync(file.descriptor);/' web2js/library.js
+grep -q "fs.writeSync(file.descriptor, Buffer.concat(file.output));" web2js/library.js \
+    || die "the library.js close() write patch did not apply"
+grep -q "fs.closeSync(file.descriptor);" web2js/library.js \
+    || die "the library.js close() close patch did not apply"
+if grep -q "fs.write(file.descriptor" web2js/library.js; then
+    die "an async write survived the library.js close() patch"
+fi
+ok "library.js close() writes the format synchronously"
+
+# Upstream's `npm run build` is four steps and the last one is the flaky one, so run them
+# separately: a failure then names the step it happened in instead of "the build".
+for step in build:parser build:wasm build:asyncify-wasm build:initex; do
+    node -e "process.exit(require('./web2js/package.json').scripts['$step'] ? 0 : 1)" \
+        || die "web2js has no '$step' script — its build was restructured; re-read package.json"
+done
+
+( cd web2js && npm run build:parser && npm run build:wasm && npm run build:asyncify-wasm )
+
+[ -s web2js/tex.wasm ] || die "tex.wasm was not produced"
+[ -s web2js/tex.pool ] || die "tex.pool was not produced"
+ok "tex.wasm   $(stat -c%s web2js/tex.wasm) bytes  sha256 $(sha256sum web2js/tex.wasm | cut -c1-16)"
+ok "tex.pool   $(stat -c%s web2js/tex.pool) bytes  sha256 $(sha256sum web2js/tex.pool | cut -c1-16)"
+
+# The dump. The close() patch above fixes the race that made this fail half the time on CI, so an
+# "attempt 2" line below means either that the patch stopped covering the failure or that something
+# else is wrong — it is a signal, not routine. It prints latex.fmt's size for that reason: a short
+# format is the signature of a lost write, and the good one here is 21427400 bytes.
+#
+# Retrying at all is safe because nothing downstream trusts the dump on faith: it must be exactly
+# pages x 65536 bytes, then 21 fixtures render through it, then verify-fork asserts the output is
+# byte-identical to upstream's engine. A dump that passes all three is a dump, whichever attempt
+# produced it.
+DUMPED=
+for attempt in 1 2 3; do
+    if ( cd web2js && npm run build:initex ) && [ -s web2js/core.dump ]; then
+        DUMPED=$attempt
+        break
+    fi
+    printf '    \033[33m!\033[0m attempt %s produced no core.dump (latex.fmt: %s bytes)\n' \
+        "$attempt" "$(stat -c%s web2js/latex.fmt 2>/dev/null || echo 'missing')"
+    rm -f web2js/core.dump web2js/latex.fmt
+done
+[ -n "$DUMPED" ] || die "core.dump was not produced in 3 attempts"
+[ "$DUMPED" = 1 ] || ok "core.dump produced on attempt $DUMPED"
 ok "core.dump  $(stat -c%s web2js/core.dump) bytes"
 
 # core.dump must be an exact multiple of the 64 KiB wasm page size and match `pages`, because the
