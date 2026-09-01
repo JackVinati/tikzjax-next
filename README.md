@@ -16,6 +16,23 @@ This is a fork of [artisticat1/obsidian-tikzjax](https://github.com/artisticat1/
 which had not been updated since 2022. It is not a drop-in replacement: the plugin id is different,
 so the two can be installed side by side, though not enabled at the same time.
 
+**It works on iPhone and iPad.** Not "should work" — a TeX engine compiles and diagrams render on
+the device. It is slower there than on a desktop, and the first diagram is the slow one: it pays for
+starting the engine, and everything after it is faster. A diagram you have already seen is a hash
+lookup, so re-opening a note costs nothing at all on any device. Making the first render quicker on
+mobile is the next thing worth working on.
+
+Everything it is built with is current, and that is the point of the fork rather than a detail of
+it: **TypeScript 7**, esbuild 0.28, ESLint 10 with oxlint for the fast loop, Vitest 4, and the
+Obsidian 1.13 typings — while running on Obsidian 1.7.2 and up, because the floor is set by the API
+the plugin actually calls rather than by the version it was written against. The TeX side is a real
+TeX Live: pgf/TikZ 3.1.10, pgfplots 1.18.1 with its libraries, circuitikz, chemfig and the expl3
+layer, built from source in a container rather than vendored as a 7 MB blob nobody can look inside.
+
+For contrast, the state of the plugin this forks from: its lockfile no longer installed at all, and
+its build config listed twenty-one `@codemirror` packages of which thirteen had been folded into
+others years earlier.
+
 ## What is different
 
 The original plugin created a `<script type="text/tikz">` element and let a bundled script scan the
