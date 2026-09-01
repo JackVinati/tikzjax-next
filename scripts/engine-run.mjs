@@ -26,7 +26,16 @@ const out = join(root, 'engine-build', 'out');
 // Creating it here keeps it owned by whoever runs the build.
 mkdirSync(out, { recursive: true });
 
-const args = ['run', '--rm', '-v', `${out}:/out`, `tikzjax-engine:${flavour}`];
+// The container runs as root. On Linux that means everything it writes into the bind mount stays
+// owned by root, and the next step in the pipeline — smoke, which writes out/smoke — fails with
+// EACCES. Hand it the host's ids so it can give the directory back on the way out. `getuid` is
+// undefined on Windows, where Docker Desktop virtualises ownership and there is nothing to fix.
+const ids =
+	typeof process.getuid === 'function' && typeof process.getgid === 'function'
+		? ['-e', `HOST_UID=${process.getuid()}`, '-e', `HOST_GID=${process.getgid()}`]
+		: [];
+
+const args = ['run', '--rm', '-v', `${out}:/out`, ...ids, `tikzjax-engine:${flavour}`];
 console.log(`docker ${args.join(' ')}`);
 
 const result = spawnSync('docker', args, {

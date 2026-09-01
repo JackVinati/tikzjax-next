@@ -293,5 +293,20 @@ echo
 log "Package versions shipped"
 cat "$OUT/tex-versions.txt"
 echo
+# On Linux the container runs as root and writes into a bind mount, so everything in out/ comes out
+# owned by root and the next step — smoke, which writes out/smoke — dies with EACCES. Docker Desktop
+# virtualises ownership, so this only ever bites on CI and on a Linux workstation. scripts/engine-run.mjs
+# passes the host's uid/gid when it has them; without them this is a no-op.
+if [ -n "${HOST_UID:-}" ] && [ -n "${HOST_GID:-}" ]; then
+    # Not fatal. Everything is already written by this point, and a mount that will not take a
+    # chown should cost a warning rather than the whole ten-minute build.
+    if chown -R "$HOST_UID:$HOST_GID" "$OUT" 2>/dev/null; then
+        ok "out/ handed back to ${HOST_UID}:${HOST_GID}"
+    else
+        printf '    \033[33m!\033[0m could not chown %s to %s:%s — later steps may hit EACCES\n' \
+            "$OUT" "$HOST_UID" "$HOST_GID"
+    fi
+fi
+
 log "Done. Artifacts in $OUT"
 ls -la "$OUT"

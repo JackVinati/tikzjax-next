@@ -38,7 +38,7 @@ jobs:
         run: npm run engine:image
 
       - name: Build the engine
-        run: docker run --rm -v "$PWD/engine-build/out:/out" tikzjax-engine:apt
+        run: npm run engine:build
 
       - name: Report what it shipped
         run: |
