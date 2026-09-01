@@ -70,6 +70,9 @@ jobs:
             echo '```'
           } > release-notes.md
 
+      # Published, not a draft. BRAT — which is how this gets onto an iPhone before the community
+      # store review — reads the latest RELEASE, and a draft is invisible to it. Add --draft back if
+      # a release should ever be reviewed before it is downloadable.
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
