@@ -84,7 +84,13 @@ export function buildEngineAssets(root) {
 	hash.update(dumpGz);
 	hash.update(names.join('\n'));
 	for (const file of ['library.ts', 'worker.ts', 'protocol.ts']) {
-		hash.update(readFileSync(join(root, 'engine-src', file)));
+		// Read as text with the line endings normalised, NOT as bytes. Hashing the bytes made the id
+		// a function of the checkout rather than of the source: a Windows clone gets CRLF and Linux
+		// gets LF, so the same commit produced two different engine ids — and with them two different
+		// main.js, which is the one thing a reproducible build has to rule out. It also meant a user
+		// switching between a locally built plugin and a released one recompiled every diagram for no
+		// reason, since the id is a cache-key input.
+		hash.update(readFileSync(join(root, 'engine-src', file), 'utf8').replace(/\r\n/g, '\n'));
 	}
 	const engineId = hash.digest('hex');
 
