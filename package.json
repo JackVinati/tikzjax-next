@@ -35,8 +35,8 @@
     "verify:worker": "node scripts/verify-worker.mjs",
     "engine:image": "docker build -t tikzjax-engine:apt --build-arg TEXLIVE=apt engine-build",
     "engine:image:latest": "docker build -t tikzjax-engine:net --build-arg TEXLIVE=net engine-build",
-    "engine:build": "docker run --rm -v \"$PWD/engine-build/out:/out\" tikzjax-engine:apt",
-    "engine:build:latest": "docker run --rm -v \"$PWD/engine-build/out:/out\" tikzjax-engine:net"
+    "engine:build": "node scripts/engine-run.mjs apt",
+    "engine:build:latest": "node scripts/engine-run.mjs net"
   },
   "dependencies": {
     "@drgrice1/dvi2html": "0.0.7-beta4",

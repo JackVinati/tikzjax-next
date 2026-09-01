@@ -1,3 +1,9 @@
 *.sh text eol=lf
 Dockerfile text eol=lf
 *.profile text eol=lf
+
+# Everything under engine-build is read inside a Linux container. pins.env is sourced by the build
+# script, and with CRLF the shell tries to run the trailing carriage return as a command:
+# `pins.env: line 7: $'\r': command not found`. Without this a Windows checkout produces an image
+# that cannot run its own build, while CI — which checks out LF — passes.
+engine-build/** text eol=lf

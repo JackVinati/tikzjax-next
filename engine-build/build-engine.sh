@@ -62,32 +62,76 @@ version_of() {
     path=$(kpsewhich "$file" 2>/dev/null || true)
     [ -n "$path" ] || { echo "absent"; return; }
 
-    # The version lives in a revision file as a macro definition. Both the assignment form and the
-    # file name vary across the family, and getting either wrong silently yields "unknown":
-    #   pgf.revision.tex       \def\pgfversion{3.1.10}
-    #   pgfplots.revision.tex  \gdef\pgfplotsversion{1.18.1}   <- \gdef, inside a \begingroup
-    # tikz ships with pgf and has no version of its own, so it borrows pgf's.
+    # Four ways a TeX package states its version, in decreasing order of how much it means what it
+    # says. Every one of them is here because a package in the reported set uses it and nothing
+    # else, and a version reported as "unknown" is a question the release notes leave open.
+
+    # 1. A revision file, as a macro definition. Both the assignment form and the file name vary:
+    #      pgf.revision.tex       \def\pgfversion{3.1.10}
+    #      pgfplots.revision.tex  \gdef\pgfplotsversion{1.18.1}   <- \gdef, inside a \begingroup
+    #    tikz ships with pgf and pgfplotstable with pgfplots; neither carries a version of its own.
     local family="$base"
-    [ "$base" = "tikz" ] && family="pgf"
+    case "$base" in
+        tikz) family="pgf" ;;
+        pgfplotstable) family="pgfplots" ;;
+    esac
 
     for rev in "${family}.revision.tex" "${family}revision.tex"; do
         macro=$(kpsewhich "$rev" 2>/dev/null || true)
         [ -n "$macro" ] || continue
         local v
-        v=$(grep -ohE "\\\\(g|x|e)?def\\\\${family}version\\{[^}]*\\}" "$macro" 2>/dev/null \
+        v=$(grep -ohE '\\(g|x|e)?def\\'"${family}"'version\{[^}]*\}' "$macro" 2>/dev/null \
             | head -1 | sed -E 's/.*\{([^}]*)\}.*/\1/')
         [ -n "$v" ] && { echo "$v"; return; }
     done
 
-    # Otherwise take the \ProvidesPackage bracket, but only if it actually starts with a digit —
-    # a date or a version. Anything else is a macro and is more misleading than "unknown".
+    # 2. expl3 packages announce themselves positionally rather than in a bracket:
+    #      \ProvidesExplPackage{siunitx}{2024-01-25}{3.3.10}{...}
+    #    Take the version, or the date when a package leaves the version empty (xparse does).
+    local flat expl
+    flat=$(tr '\n' ' ' < "$path")
+    expl=$(printf '%s' "$flat" \
+        | grep -ohE '\\ProvidesExpl(Package|File|Class) *\{[^}]*\} *\{[^}]*\} *\{[^}]*\}' \
+        | head -1 || true)
+    if [ -n "$expl" ]; then
+        local when ver
+        when=$(printf '%s' "$expl" | sed -E 's/.*\{[^}]*\} *\{([^}]*)\} *\{[^}]*\}$/\1/')
+        ver=$(printf '%s' "$expl" | sed -E 's/.*\{([^}]*)\}$/\1/')
+        [ -n "$ver" ] && { echo "$ver"; return; }
+        [ -n "$when" ] && { echo "$when"; return; }
+    fi
+
+    # 3. The \ProvidesPackage bracket. Matched against the file with its newlines flattened, because
+    #    standalone.cls opens the bracket with a comment and puts the date on the next line, and a
+    #    line-by-line grep silently reports it as unknown. Accepted only if what is left starts with
+    #    a digit: anything else is a macro (pgfplotstable's bracket is `\pgfplotsversiondate`) and
+    #    printing a macro name as a version is worse than admitting to not knowing.
     local bracket
-    bracket=$(grep -ohE '\\Provides(Package|File|Class)\{[^}]*\}\s*\[[^]]*\]' "$path" 2>/dev/null \
-        | head -1 | sed -E 's/.*\[([^]]*)\].*/\1/')
+    bracket=$(printf '%s' "$flat" \
+        | grep -ohE '\\Provides(Package|File|Class)\{[^}]*\} *\[[^]]*\]' \
+        | head -1 | sed -E 's/.*\[([^]]*)\].*/\1/' | sed -E 's/^%+ *//' | tr -s ' \t' ' ')
     case "$bracket" in
-        [0-9]*) echo "$bracket" ;;
-        *) echo "unknown" ;;
+        [0-9]*) echo "$bracket"; return ;;
     esac
+
+    # 4. The package's own version or date macro, in the .sty or in the file it loads its code
+    #    from. This is how circuitikz (\def\pgfcircversion{1.6.6} in circuitikz.sty), chemfig
+    #    (\def\CFver{1.66} in chemfig.tex) and expl3 (\def\ExplFileDate{2024-01-22} in
+    #    expl3-code.tex) state theirs. The value has to start with a digit, or any macro with
+    #    "ver" in its name would be reported as a version.
+    local companions v2
+    companions=""
+    for c in "${base}.tex" "${base}-code.tex"; do
+        local found
+        found=$(kpsewhich "$c" 2>/dev/null || true)
+        [ -n "$found" ] && companions="$companions $found"
+    done
+    v2=$(grep -ohE '\\(g|x|e)?def\\[A-Za-z@]*([Vv]er(sion)?|Date) *\{[0-9][^}]*\}' \
+            "$path" $companions 2>/dev/null \
+        | head -1 | sed -E 's/.*\{([^}]*)\}.*/\1/')
+    [ -n "$v2" ] && { echo "$v2"; return; }
+
+    echo "unknown"
 }
 
 : > "$OUT/tex-versions.txt"

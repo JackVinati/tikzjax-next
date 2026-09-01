@@ -101,6 +101,18 @@ They are not written in the code fence line (` ```tikz width=420 `). Obsidian ca
 tail during PDF export, in embeds or in hover previews, so the same block would hash to two
 different cache keys and the PDF would get a differently compiled diagram.
 
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| Copy the diagram at the cursor as SVG | Puts the rendered SVG on the clipboard, theme-neutral, so it opens correctly outside Obsidian. |
+| Save the diagram at the cursor as an SVG file | Writes it to your attachment folder. |
+| Finalize the diagrams in this note | Saves each diagram as an attachment and rewrites the note as `![[diagram.svg]]` with the original fence preserved verbatim inside an Obsidian `%%` comment. The point is that the note now renders without this plugin — in Publish, in another editor, on GitHub. |
+| Un-finalize the diagrams in this note | The exact inverse. The source was never thrown away. |
+| Render all diagrams in this note | Ignores lazy rendering and compiles everything now. |
+| Open the diagram at the cursor in a zoom view | A scrollable, zoomable view of one diagram. |
+| Open TikZ diagnostics | The TeX log, the cache key and the compile timings for recent renders. Start here when a diagram does something inexplicable. |
+
 ## What is included
 
 Reported by the plugin itself, under Settings → Bundled TeX engine, because it is generated from the
@@ -120,8 +132,7 @@ plain TikZ, `pgfplots` including its libraries, `circuitikz`, `chemfig`, `tikz-c
 | `chemfig`'s `\schemestart` loses bonds | The bonds are already missing in the DVI, before any JavaScript runs. |
 | `tikz-feynman` | LuaTeX only. `tikz-feynhand` is bundled and works. |
 | CJK, Cyrillic, IPA | The engine is 8-bit. |
-| Obsidian Publish | Publish runs no community plugins. Exporting a diagram as an attachment is the answer, and is not built yet. |
-| Preambles from a vault file | Parsed but not yet resolved. Per-block `packages` and `libraries` work. |
+| Obsidian Publish | Publish runs no community plugins. Save the diagram as an SVG attachment, or finalize the note, and the result publishes as ordinary content. |
 
 Untested on iOS and iPadOS at the time of writing. `isDesktopOnly` is `false` because it is expected
 to work, not because it has been confirmed.
@@ -138,8 +149,10 @@ npm run engine:build   # tex.wasm, core.dump, tex_files, fonts -> engine-build/o
 npm run build          # main.js and styles.css
 ```
 
-Everything the engine build depends on is pinned in `engine-build/pins.env` and baked into the
-image, so a build makes no network requests and is reproducible.
+Building the image is the only step that touches the network. It pins the upstream sources by
+commit (`engine-build/pins.env`) and the Computer Modern font archive by SHA-256, then bakes them
+in, so `engine:build` itself runs entirely offline and two runs of the same image produce the same
+engine.
 
 Useful while working on it:
 

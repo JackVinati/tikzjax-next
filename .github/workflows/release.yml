@@ -59,9 +59,24 @@ jobs:
         run: npm run build
 
       - name: Record what this release contains
+        # The engine is the part of a release nobody can inspect from the outside: a WebAssembly
+        # TeX, a core dump and 245 TeX files, all inside main.js. Printing what went into it — the
+        # upstream commits, the TeX Live flavour, the package versions — is what makes a given
+        # release answerable to "which pgfplots is this?" without unpacking the bundle.
         run: |
+          MIN=$(node -p 'require("./manifest.json").minAppVersion')
           {
-            echo '## Engine'
+            echo "Renders TikZ and LaTeX diagrams inside notes. No LaTeX installation, no network"
+            echo "access: the whole TeX engine is compiled to WebAssembly and runs locally, on"
+            echo "desktop and on mobile. Requires Obsidian ${MIN}."
+            echo
+            echo '### Installing'
+            echo
+            echo 'Not in the community store yet. Either add this repository in BRAT, or download'
+            echo '`main.js`, `manifest.json` and `styles.css` below into'
+            echo '`<vault>/.obsidian/plugins/tikzjax-next/` and enable it in Settings → Community plugins.'
+            echo
+            echo '### Engine'
             echo
             echo '```'
             cat engine-build/out/BUILD-MANIFEST.txt

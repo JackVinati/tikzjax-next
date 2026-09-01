@@ -80,9 +80,26 @@ RUN git clone --quiet https://github.com/drgrice1/web2js.git /opt/src/web2js \
 RUN cd /opt/src/web2js  && npm ci --no-audit --no-fund \
     && cd /opt/src/tikzjax && npm ci --no-audit --no-fund
 
-ARG BAKOMA_URL=https://mirrors.ctan.org/fonts/cm/ps-type1/bakoma.zip
-RUN curl -fsSL "$BAKOMA_URL" -o /opt/src/bakoma.zip \
-    && test -s /opt/src/bakoma.zip
+# bakoma.zip is the Computer Modern Type 1 set the font pipeline converts to WOFF2. It is pinned
+# by CONTENT, not by URL: mirrors.ctan.org is a redirector, so the mirror you get depends on where
+# the build runs — one of them serves a certificate chain the container cannot verify, which is how
+# this failed on a GitHub runner while succeeding locally. Try mirrors in order, take the first
+# whose bytes match the pin, fail if none do. A truncated or tampered mirror cannot get in either.
+ARG BAKOMA_SHA256=6fb67f2fdaf5846fe81734d04d69096b847d2b41ca6da7923a9a73437e588734
+RUN set -eu; \
+    for url in \
+        https://mirrors.ctan.org/fonts/cm/ps-type1/bakoma.zip \
+        https://ctan.math.illinois.edu/fonts/cm/ps-type1/bakoma.zip \
+        https://mirrors.mit.edu/CTAN/fonts/cm/ps-type1/bakoma.zip \
+        https://ftp.fau.de/ctan/fonts/cm/ps-type1/bakoma.zip \
+        https://mirror.las.iastate.edu/tex-archive/fonts/cm/ps-type1/bakoma.zip ; do \
+        echo "bakoma: $url"; \
+        curl -fsSL --retry 3 --retry-delay 2 --max-time 600 "$url" -o /opt/src/bakoma.zip || continue; \
+        if echo "$BAKOMA_SHA256  /opt/src/bakoma.zip" | sha256sum -c - >/dev/null 2>&1; then break; fi; \
+        echo "bakoma: wrong checksum from $url, trying the next mirror" >&2; \
+        rm -f /opt/src/bakoma.zip; \
+    done; \
+    echo "$BAKOMA_SHA256  /opt/src/bakoma.zip" | sha256sum -c -
 
 COPY pins.env tex-files.extra.json tex-files.collected.json build-engine.sh collect-tex-files.sh /opt/engine-build/
 RUN chmod +x /opt/engine-build/build-engine.sh /opt/engine-build/collect-tex-files.sh
