@@ -222,3 +222,122 @@
 	flex-direction: column;
 	align-items: center;
 }
+
+/* --- zoom modal ------------------------------------------------------------------------------ */
+
+.tikzjax-zoom-modal {
+	width: min(90vw, 1100px);
+	height: min(85vh, 800px);
+}
+
+.tikzjax-zoom-surface {
+	flex: 1;
+	overflow: hidden;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--background-primary);
+	border-radius: 6px;
+	/* grab, not move: the surface is dragged, and the cursor is the only affordance saying so. */
+	cursor: grab;
+	touch-action: none;
+	min-height: 60vh;
+}
+
+.tikzjax-zoom-surface:active {
+	cursor: grabbing;
+}
+
+.tikzjax-zoom-surface svg {
+	max-width: none;
+	max-height: none;
+	transform-origin: center center;
+	/* No transition: a transition on transform makes a wheel-zoom feel like it is lagging behind
+	   the wheel, because it is. */
+}
+
+.tikzjax-zoom-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.5em;
+	padding-top: 0.75em;
+}
+
+/* --- diagnostics view ------------------------------------------------------------------------ */
+
+.tikzjax-debug {
+	padding: 0.75em;
+	font-size: var(--font-ui-small);
+}
+
+.tikzjax-debug-section {
+	margin-bottom: 1.25em;
+}
+
+.tikzjax-debug-section h3 {
+	margin: 0 0 0.5em;
+	font-size: var(--font-ui-small);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--text-muted);
+}
+
+.tikzjax-debug-fact {
+	display: flex;
+	justify-content: space-between;
+	gap: 1em;
+	padding: 0.15em 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.tikzjax-debug-label {
+	color: var(--text-muted);
+}
+
+.tikzjax-debug-value {
+	font-family: var(--font-monospace);
+	text-align: right;
+}
+
+.tikzjax-debug-row {
+	display: grid;
+	grid-template-columns: 4.5em 1fr auto;
+	gap: 0.5em;
+	align-items: baseline;
+	padding: 0.3em 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.tikzjax-debug-state {
+	font-size: var(--font-ui-smaller);
+	text-transform: uppercase;
+	color: var(--text-muted);
+}
+
+.tikzjax-debug-row.is-error .tikzjax-debug-state {
+	color: var(--text-error);
+}
+
+.tikzjax-debug-row.is-cached .tikzjax-debug-state {
+	color: var(--text-accent);
+}
+
+.tikzjax-debug-source {
+	font-family: var(--font-monospace);
+	font-size: var(--font-smaller);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tikzjax-debug-meta {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	white-space: nowrap;
+}
+
+.tikzjax-debug-message {
+	grid-column: 2 / -1;
+	color: var(--text-error);
+	font-size: var(--font-ui-smaller);
+}

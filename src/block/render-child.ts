@@ -28,6 +28,14 @@ import { STRINGS } from '../ui/strings';
 export interface TexJobSpec {
 	key: string;
 	source: string;
+	/**
+	 * The block exactly as written, directives and all.
+	 *
+	 * The commands find a diagram by scanning the note's markdown, which gives them this — not the
+	 * normalized, directive-stripped source. Carrying it means "which cache key is this block?" is
+	 * a lookup rather than a second, drifting copy of the key derivation.
+	 */
+	rawSource: string;
 	options: BlockOptions;
 	texOptions: {
 		texPackages?: Record<string, string>;

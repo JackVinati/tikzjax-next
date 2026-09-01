@@ -39,6 +39,17 @@ export interface RenderOptions {
 	wrap?: 'auto' | 'always' | 'never';
 	/** Capture TeX's terminal output. Off costs nothing; on is what makes errors explainable. */
 	captureLog?: boolean;
+	/**
+	 * Run TeX twice, with the files the first run wrote — `input.aux` above all — present for the
+	 * second, and draw the second run's DVI.
+	 *
+	 * This is what `\label`/`\ref`/`\pageref` and the `remember picture` family need: they resolve
+	 * against an `.aux` that only exists once a run has already happened. It costs a second full
+	 * compile, so it is per-block and never a default. The worker still runs one pass when the
+	 * first wrote nothing a second could read back, so the flag on a block that cannot benefit is
+	 * free rather than 2x.
+	 */
+	twoPass?: boolean | undefined;
 }
 
 export interface RenderRequest {

@@ -32,6 +32,15 @@ export interface BakedOptions {
 	/** Sorted "path:hash" for every vault file read into the preamble. */
 	depHashes: string[];
 	wrap: 'auto' | 'always' | 'never';
+	/**
+	 * Run TeX twice, so cross-references resolve. Baked, not presentation: the second pass changes
+	 * the bytes, so a block toggled between the two must not serve the other's artifact.
+	 *
+	 * It does NOT fix \chemmove or \polymerdelim (upstream #9, #70), measured rather than assumed:
+	 * this build's driver reports "does not support marking the current position", so the .aux comes
+	 * back holding 32 bytes and a second pass is handed nothing new.
+	 */
+	twoPass: boolean;
 }
 
 /** Options applied at mount time. Never in the cache key. */

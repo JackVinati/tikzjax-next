@@ -82,7 +82,9 @@ export function buildEngineAssets(root) {
 			// web2js applies changes/expanded.ch and changes/strcmp.ch; proven by the expl3 and
 			// xparse smoke fixtures compiling. See docs/DECISIONS.md D8.
 			expl3: true,
-			twoPass: false,
+			// The worker carries the first pass's .aux into a second when the first left anything
+			// worth re-reading, so cross-references resolve. Gated per block; never a default.
+			twoPass: true,
 		},
 	};
 

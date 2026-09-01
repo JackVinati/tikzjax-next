@@ -23,7 +23,7 @@ const host: TexHost = {
 
 function options(over: Partial<BlockOptions> = {}): BlockOptions {
 	return {
-		baked: { border: null, packages: {}, libraries: '', preamble: '', depHashes: [], wrap: 'auto' },
+		baked: { border: null, packages: {}, libraries: '', preamble: '', depHashes: [], wrap: 'auto', twoPass: false },
 		presentation: {},
 		raw: false,
 		nocache: false,
@@ -96,6 +96,7 @@ function spec(over: Partial<TexJobSpec> = {}): TexJobSpec {
 	return {
 		key: 'K',
 		source: '\\draw (0,0) circle (1);',
+		rawSource: '\\draw (0,0) circle (1);',
 		options: options(),
 		texOptions: {},
 		legacySource: null,

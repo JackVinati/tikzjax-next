@@ -177,6 +177,7 @@ describe('md5Hex', () => {
 // -------------------------------------------------------------------------------------------
 
 const BAKED: BakedOptions = {
+	twoPass: false,
 	border: null,
 	packages: { pgfplots: '', circuitikz: 'siunitx' },
 	libraries: 'arrows.meta,calc',
@@ -213,11 +214,13 @@ describe('deriveKey', () => {
 	 * truncated to 32 hex characters, and was computed independently of the implementation.
 	 */
 	it('is pinned', () => {
-		// Moved once, deliberately: `pipeline` (raw/fast/svgo) was added to KeyInputs after review
-		// showed that a block toggled to fast mode collided with its own full-quality artifact.
-		// This line changing is the intended signal — every previously cached key becomes a miss,
-		// which is correct and is swept on idle rather than wiped at startup.
-		expect(deriveKey(INPUTS)).toBe('d9932fcc0a117c7840108974eb914655');
+		// Moved twice, both deliberate:
+		//   1. `pipeline` (raw/fast/svgo) joined KeyInputs, after review showed a block toggled to
+		//      fast mode collided with its own full-quality artifact;
+		//   2. `twoPass` joined BakedOptions, because a second pass changes the stored bytes.
+		// This line changing is the intended signal. Every previously cached key becomes a miss,
+		// which is correct, and misses are swept on idle rather than wiped at startup.
+		expect(deriveKey(INPUTS)).toBe('41df0c0cae9cd60eb86fc55307200129');
 	});
 
 	it('changes when any single input changes', () => {
@@ -258,6 +261,7 @@ describe('deriveKey', () => {
 	 */
 	it('ignores the order of baked-option keys', () => {
 		const reordered: BakedOptions = {
+			twoPass: BAKED.twoPass,
 			wrap: BAKED.wrap,
 			preamble: BAKED.preamble,
 			depHashes: [...BAKED.depHashes],

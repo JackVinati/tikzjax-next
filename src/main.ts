@@ -12,6 +12,11 @@ import { ViewportGate } from './block/viewport';
 import { createProcessor } from './block/processor';
 import type { TexJobSpec } from './block/render-child';
 import { DEFAULT_SETTINGS, migrateSettings, type TikzSettings } from './settings/schema';
+import { PreambleService } from './preamble/vault';
+import { registerCommands } from './ui/commands';
+import { DebugView, DEBUG_VIEW_TYPE, type RenderRecord } from './ui/debug-view';
+import { sha256Hex } from './cache/sha256';
+import { MarkdownRenderer, MarkdownView, TFile, type WorkspaceLeaf } from 'obsidian';
 import { TikzSettingTab } from './settings/tab';
 import { STRINGS } from './ui/strings';
 
@@ -34,6 +39,12 @@ export default class TikzjaxNextPlugin extends Plugin {
 	private viewport: ViewportGate | null = null;
 	private budgets: Budgets = budgetsFor(false, 4);
 	private readonly touchedDocuments = new Set<Document>();
+	private preamble: PreambleService | null = null;
+
+	/** raw block source -> cache key, filled as blocks are processed. See TexJobSpec.rawSource. */
+	private readonly keysBySource = new Map<string, string>();
+	/** A bounded ring for the diagnostics view. Never persisted. */
+	private readonly records: RenderRecord[] = [];
 
 	get engineInventory(): EngineInventory | null {
 		return this.host?.engineInventory ?? null;
@@ -58,6 +69,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 		}
 
 		this.host = new WorkerHost();
+		this.preamble = new PreambleService(this.app, sha256Hex);
 		this.cache = new DiagramCache({
 			// `appId` is real but undocumented, so it is not on the public App type. It is what
 			// keeps each vault's store separate: every vault on a desktop install shares one
@@ -107,6 +119,49 @@ export default class TikzjaxNextPlugin extends Plugin {
 					ensureFonts(doc, COLD_FONT_CSS);
 				},
 				now: () => Date.now(),
+				preamble: this.preamble,
+				onBlock: (spec) => {
+					this.keysBySource.set(spec.rawSource, spec.key);
+					this.preamble?.track(spec.key, spec.options.baked.depHashes.map((d) => d.split(':')[0] ?? ''));
+					this.remember({
+						key: spec.key,
+						sourcePreview: spec.source.replace(/\s+/g, ' ').slice(0, 80),
+						state: 'rendering',
+						at: Date.now(),
+					});
+				},
+			}),
+		);
+
+		this.registerView(DEBUG_VIEW_TYPE, (leaf: WorkspaceLeaf) => new DebugView(leaf, {
+			records: () => this.records,
+			inventory: () => this.host?.engineInventory ?? null,
+			cacheStats: () => this.cache?.stats() ?? Promise.resolve({ entries: 0, bytes: 0 }),
+			memoryStats: () => this.cache?.memoryStats() ?? { entries: 0, bytes: 0 },
+			queueDepth: () => this.queue?.size() ?? 0,
+		}));
+
+		registerCommands(this, {
+			app: this.app,
+			markupFor: (source, _notePath) => {
+				const key = this.keysBySource.get(source);
+				const artifact = key === undefined ? undefined : this.cache?.peek(key);
+				return Promise.resolve(artifact?.template ?? null);
+			},
+			warmNote: (file) => this.warmNote(file),
+			fontCss: () => COLD_FONT_CSS,
+			openDebugView: () => this.openDebugView(),
+		});
+
+		// A preamble file changing must invalidate exactly the diagrams built from it. This is the
+		// limitation PR #77's author conceded openly: edit the preamble and nothing notices, because
+		// the key was derived from the block source alone.
+		this.registerEvent(
+			this.app.vault.on('modify', (file) => {
+				if (!(file instanceof TFile)) return;
+				const affected = this.preamble?.invalidate(file.path) ?? [];
+				for (const key of affected) void this.cache?.forget(key);
+				if (affected.length) this.rerenderOpenViews();
 			}),
 		);
 
@@ -115,7 +170,63 @@ export default class TikzjaxNextPlugin extends Plugin {
 		this.registerTeardown();
 	}
 
+	/** Bounded: the view shows the last hundred, and an unbounded log of a vault scroll is a leak. */
+	private remember(record: RenderRecord): void {
+		this.records.push(record);
+		if (this.records.length > 100) this.records.shift();
+	}
+
+	private async openDebugView(): Promise<void> {
+		const existing = this.app.workspace.getLeavesOfType(DEBUG_VIEW_TYPE)[0];
+		if (existing) {
+			await this.app.workspace.revealLeaf(existing);
+			return;
+		}
+		const leaf = this.app.workspace.getRightLeaf(false);
+		if (!leaf) return;
+		await leaf.setViewState({ type: DEBUG_VIEW_TYPE, active: true });
+		await this.app.workspace.revealLeaf(leaf);
+	}
+
+	/**
+	 * Render every diagram in a note and wait for them.
+	 *
+	 * Done by rendering the markdown off-screen rather than by driving the queue directly: that way
+	 * the blocks go through the SAME processor, key derivation and cache as a real render, so
+	 * warming cannot silently disagree with what a reader will get. It is also what makes an export
+	 * predictable — a warmed note exports from cache instead of racing the print snapshot.
+	 */
+	private async warmNote(file: TFile): Promise<{ ok: number; failed: number }> {
+		const text = await this.app.vault.cachedRead(file);
+		const holder = createDiv();
+		holder.style.position = 'fixed';
+		holder.style.left = '-99999px';
+		document.body.appendChild(holder);
+
+		const before = this.records.length;
+		try {
+			await MarkdownRenderer.render(this.app, text, holder, file.path, this);
+			const produced = this.records.slice(before);
+			return {
+				ok: produced.filter((r) => r.state !== 'error').length,
+				failed: produced.filter((r) => r.state === 'error').length,
+			};
+		} finally {
+			holder.remove();
+		}
+	}
+
+	/** Nudge open markdown views so invalidated blocks are rebuilt. */
+	private rerenderOpenViews(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+			const view = leaf.view;
+			if (view instanceof MarkdownView) view.previewMode?.rerender(true);
+		}
+	}
+
 	override onunload(): void {
+		this.preamble?.clear();
+		this.keysBySource.clear();
 		this.viewport?.disconnect();
 		this.queue?.clearPoison();
 		this.host?.dispose();

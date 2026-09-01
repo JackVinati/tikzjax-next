@@ -54,6 +54,26 @@ failing blankly.
 missing is the *definition* `#pgfpat3` (and the `#pgfsym3` it uses). That is a specific gap in the
 driver, in code this project now builds.
 
+**7. #9 / #70 are not a pass-count problem, and the table's stated cause is wrong.**
+The row gives the cause as "only one TeX pass is run" and prescribes re-running when the transcript
+asks. A second pass is now implemented and measured, and it changes nothing for these two. Pass one
+says why, in its own log:
+
+```
+Package pgf Warning: Your graphic driver pgfsys-ximera.def does not support
+marking the current position.
+```
+
+`\chemmove` and `\polymerdelim` need pgf position tracking, which writes position marks into the
+`.aux`. This driver does not implement it, so the `.aux` comes back holding 32 bytes — `\relax` and
+`\gdef\@abspage@last{1}` — and a second pass is handed nothing new. `\chemmove`, `\polymerdelim`
+and a `remember picture`/`overlay` pair all render **byte-identical** SVG with the flag on and off.
+The binding constraint is the driver, so these stay E1, not Phase 8.
+
+What the second pass *does* fix is `\label`/`\ref`: a picture node reading `\ref{e}` draws `??` on
+one pass and `1` on two. It ships behind `%!tikz twopass`, and it is free on a block that cannot
+benefit, because the worker only runs the second pass when the first left something readable behind.
+
 **What has not changed:** everything resting on the DVI being wrong before any JavaScript runs
 (#25, #54 — a contributor opened `input.dvi` in TeXShop and the bonds were already absent), on
 LuaTeX (#20), on an 8-bit engine (#19 CJK), or on Obsidian Publish running no community plugins

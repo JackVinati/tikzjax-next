@@ -402,6 +402,19 @@ function applyPair(
 			extras.preamblePath = v;
 			return;
 		}
+		case 'twopass':
+		case 'two-pass': {
+			// Baked, because the second pass changes the stored bytes. It roughly doubles the
+			// compile, so it is never global — and it is free on a block that cannot benefit,
+			// since the worker only runs the second pass when the first left something readable
+			// behind. It resolves \label/\ref; it does NOT fix \chemmove or \polymerdelim
+			// (upstream #9, #70), which are blocked on the driver, not the pass count.
+			const v = value === undefined || value === null ? 'on' : value.toLowerCase();
+			if (v === 'on' || v === 'true' || v === 'yes') options.baked.twoPass = true;
+			else if (v === 'off' || v === 'false' || v === 'no') options.baked.twoPass = false;
+			else bad(`'twopass=${value ?? ''}' is not on or off`);
+			return;
+		}
 		case 'wrap': {
 			const v = required();
 			if (v === null) return;

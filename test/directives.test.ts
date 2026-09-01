@@ -13,6 +13,7 @@ function defaults(): BlockOptions {
 			preamble: '\\def\\R{\\mathbb{R}}',
 			depHashes: ['macros.tex:abc'],
 			wrap: 'auto',
+		twoPass: false,
 		},
 		presentation: { scale: 1, colors: 'adapt' },
 		raw: false,

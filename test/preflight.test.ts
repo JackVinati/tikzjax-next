@@ -41,6 +41,7 @@ function baked(over: Partial<BakedOptions> = {}): BakedOptions {
 		preamble: '',
 		depHashes: [],
 		wrap: 'auto',
+		twoPass: false,
 	};
 	return { ...base, ...over };
 }

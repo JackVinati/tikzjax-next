@@ -107,6 +107,19 @@ export class DiagramCache {
 		return undefined;
 	}
 
+	/**
+	 * Drop one artifact from both tiers.
+	 *
+	 * Used when a preamble file changes: the key was derived from a preamble text that no longer
+	 * exists, so the stored artifact is not stale in the ordinary sense — it is an answer to a
+	 * question nobody will ask again. Removing it keeps the byte accounting honest rather than
+	 * leaving it to expire by LRU.
+	 */
+	forget(key: string): Promise<void> {
+		this.l1.delete(key);
+		return this.l2.delete(key);
+	}
+
 	put(key: string, artifact: Artifact): void {
 		this.l1.set(key, artifact);
 		// L2 is fire-and-forget: a render must never wait on, or fail because of, storage.

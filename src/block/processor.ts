@@ -11,6 +11,7 @@ import { TikzBlock, type BlockDeps, type TexJobSpec } from './render-child';
 import type { RenderQueue } from '../queue/queue';
 import type { DiagramCache } from '../cache';
 import type { Budgets } from '../types';
+import type { PreambleService } from '../preamble/vault';
 
 /**
  * The code-block processor. See docs/DESIGN.md §3.2.
@@ -36,15 +37,35 @@ export interface ProcessorDeps {
 	unobserve: BlockDeps['unobserve'];
 	ensureFonts: BlockDeps['ensureFonts'];
 	now: () => number;
+	preamble: PreambleService;
 	/** Notified so the debug view can list what happened without the child knowing about it. */
 	onBlock?: ((spec: TexJobSpec) => void) | undefined;
 }
 
 export function createProcessor(deps: ProcessorDeps) {
 	return (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext): Promise<void> => {
-		const spec = buildSpec(source, el, deps);
-		deps.onBlock?.(spec);
+		const prepared = prepare(source, el, deps, ctx.sourcePath);
 
+		// The common case — no preamble configured anywhere — stays SYNCHRONOUS, and that is not an
+		// optimisation. A cached diagram is only painted in the same frame as the text around it if
+		// the child is created before this function yields; one `await` on a resolution that had
+		// nothing to resolve would put every cache hit a microtask late and bring the placeholder
+		// back. A vault that does configure a preamble opts into the async path.
+		if (prepared instanceof Promise) {
+			return prepared.then((spec) => attach(spec, el, ctx, deps));
+		}
+		return attach(prepared, el, ctx, deps);
+	};
+}
+
+function attach(
+	spec: TexJobSpec,
+	el: HTMLElement,
+	ctx: MarkdownPostProcessorContext,
+	deps: ProcessorDeps,
+): Promise<void> {
+	deps.onBlock?.(spec);
+	{
 		const child = new TikzBlock(el, spec, {
 			cache: deps.cache,
 			queue: deps.queue,
@@ -61,15 +82,52 @@ export function createProcessor(deps: ProcessorDeps) {
 		// real lifetime instead of to a guess about when a section went away.
 		ctx.addChild(child);
 		return child.settled;
-	};
+	}
 }
 
-function buildSpec(source: string, el: HTMLElement, deps: ProcessorDeps): TexJobSpec {
-	const { settings, budgets } = deps;
+/** Returns the spec directly when nothing has to be read from the vault, a promise when it does. */
+function prepare(
+	source: string,
+	el: HTMLElement,
+	deps: ProcessorDeps,
+	notePath: string,
+): TexJobSpec | Promise<TexJobSpec> {
+	const parsed = parseDirectives(source, defaultOptions(deps.settings));
 
-	const defaults = defaultOptions(settings);
-	const parsed = parseDirectives(source, defaults);
+	const needsPreamble =
+		parsed.preamblePath !== null ||
+		parsed.inputs.length > 0 ||
+		deps.settings.preamblePath !== '' ||
+		deps.settings.autoPreambleName !== '';
+
+	if (!needsPreamble) return buildSpec(parsed, source, el, deps, notePath, null);
+
+	return deps.preamble
+		.resolve({
+			globalPath: deps.settings.preamblePath || null,
+			walkUpName: deps.settings.autoPreambleName,
+			blockPath: parsed.preamblePath,
+			inputs: parsed.inputs,
+			notePath,
+		})
+		.then((resolved) => buildSpec(parsed, source, el, deps, notePath, resolved));
+}
+
+function buildSpec(
+	parsed: ReturnType<typeof parseDirectives>,
+	rawSource: string,
+	el: HTMLElement,
+	deps: ProcessorDeps,
+	notePath: string,
+	resolved: Awaited<ReturnType<PreambleService['resolve']>> | null,
+): TexJobSpec {
+	const { settings, budgets } = deps;
 	const options = parsed.options;
+
+	if (resolved) {
+		options.baked.preamble = resolved.text;
+		options.baked.depHashes = resolved.depHashes;
+	}
 
 	const normalized =
 		settings.sourceHandling === 'legacy'
@@ -77,6 +135,7 @@ function buildSpec(source: string, el: HTMLElement, deps: ProcessorDeps): TexJob
 			: normalizeSource(parsed.body);
 
 	const isExport = isExportContext(deps.app, el);
+	void notePath;
 
 	const key = deriveKey({
 		normalizedSource: normalized,
@@ -97,6 +156,7 @@ function buildSpec(source: string, el: HTMLElement, deps: ProcessorDeps): TexJob
 	return {
 		key,
 		source: normalized,
+		rawSource,
 		options,
 		texOptions: {
 			...(Object.keys(options.baked.packages).length ? { texPackages: options.baked.packages } : {}),
@@ -104,13 +164,20 @@ function buildSpec(source: string, el: HTMLElement, deps: ProcessorDeps): TexJob
 			...(preambleFor(options.baked) ? { addToPreamble: preambleFor(options.baked) } : {}),
 			wrap: options.baked.wrap,
 			captureLog: settings.captureLog,
+			...(options.baked.twoPass ? { twoPass: true } : {}),
 		},
 		legacySource: legacySourceFor(parsed.body, options.baked, settings),
 		timeoutMs,
 		isExport,
-		preflight: settings.preflight && !options.fast
-			? preflight(normalized, options.baked, deps.host.capabilities)
-			: [],
+		preflight: [
+			// A missing preamble file or an include cycle is a diagnostic in its own right, shown
+			// beside the diagram. PR #77's author conceded that theirs spliced an empty string and
+			// said nothing; not repeating that is the point of the resolver.
+			...(resolved?.diagnostics ?? []),
+			...(settings.preflight && !options.fast
+				? preflight(normalized, options.baked, deps.host.capabilities)
+				: []),
+		],
 	};
 }
 
@@ -134,6 +201,7 @@ function preambleFor(baked: BakedOptions): string {
  */
 function legacySourceFor(body: string, baked: BakedOptions, settings: TikzSettings): string | null {
 	if (!settings.importLegacyCache) return null;
+	if (baked.twoPass) return null;
 	if (baked.border !== null) return null;
 	if (baked.preamble !== '') return null;
 	if (baked.libraries !== '') return null;
@@ -151,6 +219,7 @@ function defaultOptions(settings: TikzSettings): BlockOptions {
 			preamble: '',
 			depHashes: [],
 			wrap: 'auto',
+			twoPass: false,
 		},
 		presentation: {
 			colors: settings.colors,
