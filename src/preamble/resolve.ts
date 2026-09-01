@@ -1,7 +1,7 @@
 import type { Diagnostic } from '../types';
 
 /**
- * Preamble resolution: turns the paths a user wrote into one block of TeX. See docs/DESIGN.md §7.7.
+ * Preamble resolution: turns the paths a user wrote into one block of TeX. See internal/DESIGN.md §7.7.
  *
  * `preamble=<path>` and `%:input <path>` have been *parsed* since directives.ts, and then dropped on
  * the floor — this is the module that makes them mean something. Upstream #46, #76, #77, #83.

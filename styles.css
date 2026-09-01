@@ -3,7 +3,7 @@
  *
  * The colour model is the point of this file. The shipped plugin string-replaces "black" and
  * "white" inside the SVG markup and bakes `var(--background-primary)` into presentation
- * attributes; docs/DESIGN.md §7.5 lists the six ways that fails. Here colour leaves JavaScript
+ * attributes; internal/DESIGN.md §7.5 lists the six ways that fails. Here colour leaves JavaScript
  * entirely: the cached artifact is theme-neutral, and these tokens do the work. A theme switch
  * therefore costs zero recompiles and zero re-post-processing.
  */

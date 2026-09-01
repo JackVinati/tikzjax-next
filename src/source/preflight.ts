@@ -1,7 +1,7 @@
 import type { BakedOptions, Diagnostic, EngineCapabilities } from '../types';
 
 /**
- * Pre-flight source lint. See docs/DESIGN.md §7.6.
+ * Pre-flight source lint. See internal/DESIGN.md §7.6.
  *
  * Every rule here corresponds to a class of upstream bug report where the engine's own diagnostic
  * is absent, misleading, or arrives ten seconds late. Reading the source costs microseconds;
@@ -149,7 +149,7 @@ function packageHint(name: string, caps: EngineCapabilities): string {
 	const base =
 		'Remove the line and inline the few macros you need, or switch to an engine that bundles it.';
 
-	// D8 in docs/DECISIONS.md: this engine's web2js build applies expanded.ch and strcmp.ch, so
+	// D8 in internal/DECISIONS.md: this engine's web2js build applies expanded.ch and strcmp.ch, so
 	// expl3 runs. The old "LaTeX3 packages are permanently impossible here" advice is stale and
 	// must not be repeated in a hint — what stops the package is the file list, not the primitives.
 	return caps.expl3
@@ -193,7 +193,7 @@ function checkLibraries(
 
 function libraryHint(name: string, caps: EngineCapabilities): string {
 	// `arrows.meta` against a bundle that has only `arrows` is the concrete case (see the engine
-	// comparison in docs/DECISIONS.md D3), and the older library is a real substitute rather than
+	// comparison in internal/DECISIONS.md D3), and the older library is a real substitute rather than
 	// a guess.
 	const dot = name.indexOf('.');
 	if (dot > 0) {

@@ -1,6 +1,6 @@
 /**
  * Stage 2 of the SVG pipeline: strip active content. MANDATORY and non-skippable — `raw`, `fast`
- * and a degraded mount all still run it. See docs/DESIGN.md §7.2.
+ * and a degraded mount all still run it. See internal/DESIGN.md §7.2.
  *
  * Why this exists, since there is no upstream issue for it: the bundled dvi2html implements
  * `\special{dvisvgm:raw …}` by emitting the remainder of the special into the SVG *verbatim*. So a

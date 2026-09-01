@@ -1,7 +1,7 @@
 import type { App } from 'obsidian';
 
 /**
- * Telling apart the contexts a code block can be rendered in. See docs/DESIGN.md §7.9.
+ * Telling apart the contexts a code block can be rendered in. See internal/DESIGN.md §7.9.
  *
  * Export is the one that matters. Verified in the Obsidian 1.13.7 bundle: `printToPdf` opens
  * `window.open("about:blank", "_blank", "popup,hide=true")` — NOT a WorkspaceWindow, so

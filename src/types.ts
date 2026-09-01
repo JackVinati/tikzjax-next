@@ -24,7 +24,7 @@ export type SvgoMode = 'preset' | 'targeted' | 'off';
  */
 export interface BakedOptions {
 	/** TeX-side margin. `null` means "inject nothing", which is what keeps the legacy-cache
-	 *  import window open — see docs/DESIGN.md §8.3. */
+	 *  import window open — see internal/DESIGN.md §8.3. */
 	border: string | null;
 	packages: Record<string, string>;
 	libraries: string;

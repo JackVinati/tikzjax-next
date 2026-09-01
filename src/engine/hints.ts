@@ -9,7 +9,7 @@ import type { Diagnostic, EngineCapabilities, TexErrorKind } from '../types';
  * bundled" is a different sentence — and a different piece of advice — depending on whether the
  * engine has the expl3 primitives siunitx v3 needs. The old triage collapsed both into a flat
  * "unsupported", which is the answer that stops a user from ever filing the issue that would fix
- * it (docs/DESIGN.md §4.5, §7.6).
+ * it (internal/DESIGN.md §4.5, §7.6).
  *
  * Pure: no DOM, no clock, no `obsidian`. The error card is a rendering of what this returns.
  */
@@ -387,7 +387,7 @@ export function explain(error: TexFailure, caps: EngineCapabilities): Diagnostic
 
 	// `Overfull \hbox` is routine with node text and TeX still produced a perfectly good diagram,
 	// so it must never become a red card — that is strictly worse than the broken image it would
-	// replace (docs/DESIGN.md §7.6). The engine already filters it; this is the second wall, and it
+	// replace (internal/DESIGN.md §7.6). The engine already filters it; this is the second wall, and it
 	// tests the *headline* rather than the whole transcript so that a genuine error whose log
 	// happens to contain an overfull box further down is not silently downgraded.
 	if (OVERFULL.test(headline)) {

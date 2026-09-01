@@ -1,5 +1,5 @@
 /**
- * Geometry. See docs/DESIGN.md §7.4.
+ * Geometry. See internal/DESIGN.md §7.4.
  *
  * dvi2html emits `width="Wpt" height="Hpt" viewBox="-72 -72 W H"`: the 1-inch DVI origin shift is
  * applied to the ORIGIN but not to the EXTENT, so the frame is systematically an inch short of the

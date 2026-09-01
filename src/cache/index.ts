@@ -5,7 +5,7 @@ import { ArtifactStore } from './idb';
 import { legacyKey } from './legacy-key';
 
 /**
- * The cache, as one thing. See docs/DESIGN.md §6.
+ * The cache, as one thing. See internal/DESIGN.md §6.
  *
  *   L1  in memory, SYNCHRONOUS. This is the tier that makes a seen diagram paint in the same frame
  *       as the text around it, because the code-block processor can probe it before returning.
@@ -16,7 +16,7 @@ import { legacyKey } from './legacy-key';
  * scratch on upgrade — at ~156 MiB per render, concurrency 1, on the very iOS devices reported
  * crashing. That is not an upgrade, it is an incident.
  *
- * L3 NEVER DELETES (docs/DECISIONS.md D1). This is a fork with a different plugin id, so the
+ * L3 NEVER DELETES (internal/DECISIONS.md D1). This is a fork with a different plugin id, so the
  * original may still be installed and still using those records; draining them would break a
  * plugin we do not own. Reclaiming that space is an explicit command instead.
  */

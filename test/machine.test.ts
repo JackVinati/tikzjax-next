@@ -69,7 +69,7 @@ function stateFor(phase: Phase): State {
 }
 
 // -------------------------------------------------------------------------------------------
-// The transition table, row by row (docs/DESIGN.md §3.3)
+// The transition table, row by row (internal/DESIGN.md §3.3)
 
 describe('transition table', () => {
 	it('— + load -> KEYING, painting a placeholder before anything async', () => {

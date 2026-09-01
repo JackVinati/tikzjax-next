@@ -1,7 +1,7 @@
 import type { Budgets } from '../types';
 
 /**
- * Every time and size limit in the plugin, in one table. See docs/DESIGN.md §5.4.
+ * Every time and size limit in the plugin, in one table. See internal/DESIGN.md §5.4.
  *
  * These are not tuning knobs scattered through the code; they are a policy, and having them in one
  * place is what makes "why did this diagram not render" answerable.

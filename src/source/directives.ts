@@ -1,7 +1,7 @@
 import type { BlockOptions, ColorMode, LazyMode, SvgoMode } from '../types';
 
 /**
- * `%!tikz` per-block option directives. See docs/DESIGN.md §7.7.
+ * `%!tikz` per-block option directives. See internal/DESIGN.md §7.7.
  *
  * Options live in the BODY of the block and nowhere else. The obvious alternative — a code-fence
  * info string, ```tikz width=420 — is unreachable for a *correctness* reason, not a stylistic one:

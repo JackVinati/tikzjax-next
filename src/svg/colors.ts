@@ -1,7 +1,7 @@
 import type { ColorMode } from '../types';
 
 /**
- * The colour model. See docs/DESIGN.md §7.5.
+ * The colour model. See internal/DESIGN.md §7.5.
  *
  * The shipped plugin string-replaces "black" and "white" over `outerHTML`. That is wrong three
  * times over: it cannot see `<span style="line-height: 0; color: black; ...">` (emitter 4 below,

@@ -8,7 +8,7 @@ import { TexError, type EngineCapabilities, type TexHost, type TexJob, type TexR
  * The shipped plugin injects a 7 MB <script> into every document and lets it scan the DOM, which
  * means the plugin holds no handle on anything: no timeout, no cancellation, no error surface, no
  * way to know a render even started. Everything this class does is unreachable from that design —
- * see docs/DESIGN.md §2.1.
+ * see internal/DESIGN.md §2.1.
  */
 export class WorkerHost implements TexHost {
 	readonly id = ENGINE_ID;

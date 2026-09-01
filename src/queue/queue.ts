@@ -1,5 +1,5 @@
 /**
- * The bounded render queue. See docs/DESIGN.md §5.1 and §5.3.
+ * The bounded render queue. See internal/DESIGN.md §5.1 and §5.3.
  *
  * Pure by construction: no DOM, no `obsidian`, no wall clock, no ambient `setTimeout`. Timers come
  * in through `opts.timers` and FIFO order comes from a monotonic counter rather than a clock, so

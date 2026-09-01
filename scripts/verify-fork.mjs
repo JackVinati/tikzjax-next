@@ -6,7 +6,7 @@
  * Every fixture is rendered twice — once through engine-src/upstream/library.js exactly as
  * shipped, once through our fork — and the two SVGs are compared byte for byte. A fork of a
  * WebAssembly host is only defensible if it can show it changed nothing observable, so this is
- * the gate that lets the changes in docs/DECISIONS.md D10 be called a refactor.
+ * the gate that lets the changes in internal/DECISIONS.md D10 be called a refactor.
  *
  * It also reports the timing difference, which is the point of change 1 (synchronous bundled-file
  * resolution instead of an asyncify unwind per file).

@@ -1,7 +1,7 @@
 import { TexError } from '../types';
 
 /**
- * The single DOMParser / XMLSerializer boundary. See docs/DESIGN.md §7.2, stages 1 and 6.
+ * The single DOMParser / XMLSerializer boundary. See internal/DESIGN.md §7.2, stages 1 and 6.
  *
  * Every other module in src/svg/ takes an already-parsed document and mutates it, which is what
  * keeps them pure enough to unit-test and cheap enough to chain: the engine's SVG is parsed once

@@ -9,7 +9,7 @@ import prettier from 'eslint-config-prettier';
  * hygiene. Day-to-day linting is `npm run lint` (oxlint), which is far faster; this runs in CI.
  *
  * It pins typescript@5.9.3 through package.json `overrides`, because typescript-eslint@8 peers cap
- * at `<6.1.0` while the project's typechecker is TypeScript 7. See docs/DECISIONS.md D5.
+ * at `<6.1.0` while the project's typechecker is TypeScript 7. See internal/DECISIONS.md D5.
  *
  * TYPE-AWARE RULES ARE SCOPED, and that is the whole shape of this file. They need a program, so
  * they can only run over files tsconfig.json actually includes. Applied globally they crash the run
@@ -109,7 +109,7 @@ export default tseslint.config(
 				{
 					selector:
 						'AssignmentExpression > MemberExpression[property.name=/^(innerHTML|outerHTML)$/]',
-					message: 'Build DOM nodes instead. See docs/DESIGN.md §7.2.',
+					message: 'Build DOM nodes instead. See internal/DESIGN.md §7.2.',
 				},
 				{
 					selector: "CallExpression[callee.property.name='replaceAll']",

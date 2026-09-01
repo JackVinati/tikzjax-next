@@ -1,5 +1,5 @@
 /**
- * The SVG pipeline runner. See docs/DESIGN.md §7.2.
+ * The SVG pipeline runner. See internal/DESIGN.md §7.2.
  *
  * An ordered array of pure stages over a parsed document. The runner's whole job is error
  * isolation: a stage that throws is SKIPPED, the last good document is kept, and the result is

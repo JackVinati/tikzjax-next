@@ -7,7 +7,7 @@ import { applyColorModel } from './colors';
 import { targetedTransform, type OptimizeMode } from './optimize';
 
 /**
- * The pipeline, assembled. See docs/DESIGN.md §7.2 for the ordering rules and why each holds.
+ * The pipeline, assembled. See internal/DESIGN.md §7.2 for the ordering rules and why each holds.
  *
  * Two stages are MANDATORY and are exempt from both skipping and the `raw` escape hatch:
  *

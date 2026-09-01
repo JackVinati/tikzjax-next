@@ -181,9 +181,6 @@ device → the Obsidian window. That gives you the console and the debugger agai
 plugin. Every mobile bug report on the original repository is untriageable for want of this
 paragraph, so if you are filing one, this is how to get something worth attaching.
 
-`docs/DESIGN.md` describes the architecture, `docs/DECISIONS.md` records the decisions that override
-it and why, and `docs/BACKLOG.md` is a triage of every issue on the original repository.
-
 ## Licence
 
 GPL-3.0-or-later. The plugin embeds a TeX engine derived from

@@ -7,9 +7,9 @@ release gate, which is testing on real devices rather than writing code — plus
 marked **open** in place. A few items are marked **superseded**: they solved a problem a later
 decision removed, and are kept so the sequence still reads.
 
-- **What** — `docs/DESIGN.md` (full architecture, every claim evidence-backed)
-- **Why / which issues** — `docs/BACKLOG.md` (all 114 upstream issues triaged, each appearing exactly once)
-- **What changed since** — `docs/DECISIONS.md` (**supersedes DESIGN.md where they disagree**)
+- **What** — `internal/DESIGN.md` (full architecture, every claim evidence-backed)
+- **Why / which issues** — `internal/BACKLOG.md` (all 114 upstream issues triaged, each appearing exactly once)
+- **What changed since** — `internal/DECISIONS.md` (**supersedes DESIGN.md where they disagree**)
 
 Issue numbers refer to `artisticat1/obsidian-tikzjax`.
 
@@ -132,7 +132,7 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 
 - [x] **S1** — the missing `tikzlibrarypgfplots.*.code.tex` files are bundled. That was the whole of **#28 #79**
 - [ ] **open** — extended-engine loader: pinned URL + pinned SHA-256 + `vault.adapter.writeBinary` to `.obsidian/plugins/<id>/engines/`, fall back to core on any failure (D3). Not needed for anything that ships today; it is how a bigger TeX set would arrive without putting it in `main.js`
-- [x] ~~Evaluate `@rod2ik/tikzjax` 1.6.0~~ — superseded by D10 and answered by it. The question that mattered was whether expl3 runs; it does, on our own build (`changes/expanded.ch`, `changes/strcmp.ch`), so forest, xparse, mathtools and siunitx compile. The ~37-issue "permanently impossible" partition was wrong, and `docs/BACKLOG.md` records the correction
+- [x] ~~Evaluate `@rod2ik/tikzjax` 1.6.0~~ — superseded by D10 and answered by it. The question that mattered was whether expl3 runs; it does, on our own build (`changes/expanded.ch`, `changes/strcmp.ch`), so forest, xparse, mathtools and siunitx compile. The ~37-issue "permanently impossible" partition was wrong, and `internal/BACKLOG.md` records the correction
 - [ ] **open** — **E1**: ship the `net` TeX Live flavour (pgf 3.1.12, pgfplots 1.18.3, circuitikz 1.8.6) instead of Ubuntu's 2023 packages. The Dockerfile builds it today (`TEXLIVE=net`); what is missing is a run of the fixture corpus against it, because a package bump is a rendering change and the corpus is what would show it
 
 ## 9 · Release gate
@@ -150,7 +150,7 @@ Then: submit to `obsidianmd/obsidian-releases` for the community plugin browser.
 
 ## Not doing, and why
 
-Full reasoning in `docs/BACKLOG.md`. The short version:
+Full reasoning in `internal/BACKLOG.md`. The short version:
 
 - **The `needs-tex-rebuild` partition is much smaller than it looked.** expl3 runs, so the packages
   that depend on it are not blocked. What is genuinely blocked is narrower and mostly one thing:

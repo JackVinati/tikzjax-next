@@ -14,7 +14,7 @@ import type { Budgets } from '../types';
 import type { PreambleService } from '../preamble/vault';
 
 /**
- * The code-block processor. See docs/DESIGN.md §3.2.
+ * The code-block processor. See internal/DESIGN.md §3.2.
  *
  * It does three things and hands over: derive the key, probe L1, and register a child. Everything
  * else belongs to the child and the machine.
@@ -187,7 +187,7 @@ function preambleFor(baked: BakedOptions): string {
 }
 
 /**
- * The L3 gate, stated precisely (docs/DESIGN.md §8.3).
+ * The L3 gate, stated precisely (internal/DESIGN.md §8.3).
  *
  * A legacy record was produced by the OLD engine with NO user preamble at all, so it is only a
  * valid answer for a block that still has none. Returning the source here is what allows the

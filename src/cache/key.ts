@@ -1,5 +1,5 @@
 /**
- * Cache key derivation (docs/DESIGN.md §6.1).
+ * Cache key derivation (internal/DESIGN.md §6.1).
  *
  * The key is a pure function of everything that changes the STORED BYTES and of nothing else.
  * `Presentation` — theme, colour mode, scale, width, alignment, alt text, lazy mode, timeout — is

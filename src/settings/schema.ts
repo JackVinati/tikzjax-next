@@ -55,7 +55,7 @@ export const DEFAULT_SETTINGS: TikzSettings = {
 };
 
 /**
- * The settings that change the STORED BYTES, and nothing else. See docs/DESIGN.md §6.1.
+ * The settings that change the STORED BYTES, and nothing else. See internal/DESIGN.md §6.1.
  *
  * This list is deliberately narrow and enumerated rather than "hash the settings object". The
  * consequence is the one users will actually feel: switching theme, resizing a diagram, changing

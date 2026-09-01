@@ -1,5 +1,5 @@
 /**
- * Viewport gating. See docs/DESIGN.md §7.1.
+ * Viewport gating. See internal/DESIGN.md §7.1.
  *
  * One IntersectionObserver per scroll root, pooled — never a document-wide scanner. The shipped
  * plugin's engine installs a MutationObserver on `document.body`, which fires on every keystroke

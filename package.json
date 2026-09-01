@@ -9,7 +9,7 @@
     "node": ">=22"
   },
   "//": [
-    "Two TypeScripts, deliberately. See docs/DECISIONS.md D5.",
+    "Two TypeScripts, deliberately. See internal/DECISIONS.md D5.",
     "  typescript 5.9.3  exists ONLY to satisfy typescript-eslint, whose peer range caps at <6.1.0",
     "                    and which imports the classic compiler API that TypeScript 7 replaced with",
     "                    ./unstable/*. It never typechecks this project.",

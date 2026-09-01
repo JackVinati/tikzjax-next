@@ -3,7 +3,7 @@ import { stampIds } from '../svg/ids';
 import { parseViewBox, formatViewBox, type InkBounds } from '../svg/geometry';
 
 /**
- * Putting a finished artifact into the document. See docs/DESIGN.md §7.2 steps 7-9.
+ * Putting a finished artifact into the document. See internal/DESIGN.md §7.2 steps 7-9.
  *
  * Never `outerHTML`. The shipped plugin assigns to it (main.ts:183), which destroys node identity,
  * throws `NoModificationAllowedError` when the parent has been detached, executes event-handler

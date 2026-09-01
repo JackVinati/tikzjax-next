@@ -1,5 +1,5 @@
 /**
- * Stage 3 of the SVG pipeline, plus the mount-time counterpart. See docs/DESIGN.md §7.2.
+ * Stage 3 of the SVG pipeline, plus the mount-time counterpart. See internal/DESIGN.md §7.2.
  *
  * dvi2html numbers its ids from zero per run, so the same diagram rendered in two panes emits
  * byte-identical ids. `url(#g0)` then resolves to whichever copy the browser parsed first, and the

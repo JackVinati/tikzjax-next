@@ -16,7 +16,7 @@ import { explain } from '../engine/hints';
 import { STRINGS } from '../ui/strings';
 
 /**
- * One block, from fence to pixels. See docs/DESIGN.md §3.3.
+ * One block, from fence to pixels. See internal/DESIGN.md §3.3.
  *
  * The machine in `./machine.ts` decides WHAT happens; this class does it. Keeping the decision
  * pure is what makes the lifecycle exhaustively testable in Node, and it is why the single most

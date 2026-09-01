@@ -4,7 +4,7 @@ import type { BakedOptions, EngineCapabilities } from '../src/types';
 
 /**
  * The fixture models the engine we actually ship against, because the value of every rule here is
- * that it is true of a real bundle: pgfplots 1.16 (docs/DECISIONS.md D7), `arrows` present but
+ * that it is true of a real bundle: pgfplots 1.16 (internal/DECISIONS.md D7), `arrows` present but
  * `arrows.meta` absent, `patterns` in the pgf flavour only, `siunitx` absent, expl3 available.
  * A caps object made of round numbers would let a rule pass while being wrong about the bundle.
  */

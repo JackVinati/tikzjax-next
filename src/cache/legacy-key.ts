@@ -2,7 +2,7 @@
  * FROZEN. Never edit.
  *
  * This reproduces the cache key of the OLD vendored bundle (tikzjax.js @7030025) so that the L3
- * read-through in docs/DESIGN.md §8.3 can find records the previous plugin wrote. Its value is
+ * read-through in internal/DESIGN.md §8.3 can find records the previous plugin wrote. Its value is
  * that it is bit-identical to code we no longer run: the moment someone "improves" it — a better
  * hash, a tidier normalizer, a different dataset shape — every existing user's cache becomes
  * unreachable and their vault recompiles from scratch on upgrade. That is the incident §8.3

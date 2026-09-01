@@ -5,7 +5,7 @@
  * derived from kisonecat/tikzjax. Copyright the original authors: Jim Fowler, Glenn Rice.
  * This file remains GPL-3.0-or-later. See NOTICE.
  *
- * CHANGES FROM UPSTREAM (see docs/DECISIONS.md D10):
+ * CHANGES FROM UPSTREAM (see internal/DECISIONS.md D10):
  *
  *  1. Bundled TeX files resolve SYNCHRONOUSLY from an injected map. Upstream unwinds the entire
  *     asyncify stack, setTimeout(0)s, awaits a fetch of `tex_files/<name>.gz`, then rewinds —

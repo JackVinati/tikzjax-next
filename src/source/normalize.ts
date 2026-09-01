@@ -1,5 +1,5 @@
 /**
- * Source normalization — the `corrected` half of the `Source handling` setting (docs/DESIGN.md §8.2).
+ * Source normalization — the `corrected` half of the `Source handling` setting (internal/DESIGN.md §8.2).
  *
  * The job is to remove characters that a paste from a browser, a PDF or a chat client smuggles into
  * a ```tikz block and that TeX cannot read, while changing nothing a user could have meant. The old

@@ -1,7 +1,7 @@
 /**
  * Finalize: commit a rendered diagram into the note as a real attachment, and undo it.
  *
- * See docs/DESIGN.md §7.9. This is the answer to upstream #95 and #33 ("get the SVG out"), and it
+ * See internal/DESIGN.md §7.9. This is the answer to upstream #95 and #33 ("get the SVG out"), and it
  * is the ONLY possible answer to #37/#47: Obsidian Publish runs zero community plugins, so a
  * committed `.svg` attachment is the only thing a visitor can ever see. It is also the mitigation
  * for the cache being deliberately device-local (§8) — an attachment syncs, an IndexedDB record

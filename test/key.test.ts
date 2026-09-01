@@ -11,7 +11,7 @@ import type { BakedOptions, BlockOptions, KeyInputs, Presentation } from '../src
  * remembered" is exactly how a subtly wrong one ships.
  *
  * SHA-256 gets a live oracle: `crypto.subtle`, which is the implementation we would have used if
- * it were synchronous (docs/DESIGN.md §6.1). MD5 has no WebCrypto equivalent, so its expectations
+ * it were synchronous (internal/DESIGN.md §6.1). MD5 has no WebCrypto equivalent, so its expectations
  * are literals produced by node:crypto and frozen here. They are reproducible with:
  *
  *   node -e "console.log(require('node:crypto').createHash('md5').update(S,'utf8').digest('hex'))"

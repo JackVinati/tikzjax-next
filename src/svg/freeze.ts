@@ -3,7 +3,7 @@ import { PAPER_FILL_CLASS, PAPER_STROKE_CLASS } from './colors';
 import { parseViewBox, formatNumber } from './geometry';
 
 /**
- * Freeze a mounted diagram into a standalone SVG file. See docs/DESIGN.md §7.9.
+ * Freeze a mounted diagram into a standalone SVG file. See internal/DESIGN.md §7.9.
  *
  * WHY THIS EXISTS. The stored artifact is theme-neutral ON PURPOSE (svg/colors.ts): TeX's default
  * ink became `currentColor` and its paper became a `tz-paper-fill` / `tz-paper-stroke` CLASS, which

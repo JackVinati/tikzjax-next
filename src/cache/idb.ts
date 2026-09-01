@@ -2,7 +2,7 @@ import { openDB, type IDBPDatabase } from 'idb';
 import type { Artifact } from '../types';
 
 /**
- * L2: the persistent artifact store. See docs/DESIGN.md §6.2.
+ * L2: the persistent artifact store. See internal/DESIGN.md §6.2.
  *
  * Not localForage. That package is unmaintained (last published 2021-08-18), the shipped plugin
  * already wraps its configuration in a try/catch *because it breaks plugin load on mobile*

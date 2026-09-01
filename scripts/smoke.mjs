@@ -3,7 +3,7 @@
  *
  *   node scripts/smoke.mjs [fixture-name ...]
  *
- * This exists to answer, with evidence rather than argument, the questions docs/DECISIONS.md D8
+ * This exists to answer, with evidence rather than argument, the questions internal/DECISIONS.md D8
  * opened: does pgfplots compile, does expl3 actually run on this engine, does a broken source
  * produce a diagnosable error instead of hanging.
  *
@@ -109,7 +109,7 @@ async function texify(source, dataset = {}) {
 	// `code` is a pre-compiled WebAssembly.Module, so instantiate() resolves to the Instance
 	// itself — not the { module, instance } pair you get when passing bytes. Upstream passes
 	// bytes and recompiles 526 KB of wasm on every single render; compiling once is the win
-	// docs/DECISIONS.md D10 item 3 describes, and this is what it looks like.
+	// internal/DECISIONS.md D10 item 3 describes, and this is what it looks like.
 	const instance = await WebAssembly.instantiate(code, { library, env: { memory } });
 	await library.executeAsync(instance.exports);
 

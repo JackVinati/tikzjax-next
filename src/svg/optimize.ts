@@ -1,7 +1,7 @@
 import type { Stage } from './pipeline';
 
 /**
- * SVG optimisation. See docs/DESIGN.md §7.3.
+ * SVG optimisation. See internal/DESIGN.md §7.3.
  *
  * Three modes, and the interesting one is `targeted`.
  *

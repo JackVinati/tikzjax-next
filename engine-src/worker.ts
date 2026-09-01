@@ -4,7 +4,7 @@
  * Forked from drgrice1/tikzjax src/run-tex.js @ 461ac15f (GPL-3.0-or-later). Copyright the
  * original authors: Jim Fowler, Glenn Rice. This file remains GPL-3.0-or-later. See NOTICE.
  *
- * CHANGES FROM UPSTREAM (docs/DECISIONS.md D10):
+ * CHANGES FROM UPSTREAM (internal/DECISIONS.md D10):
  *  - assets are injected at build time instead of fetched from a urlRoot;
  *  - the WebAssembly.Module is compiled ONCE, not on every render;
  *  - no `coredump.slice(0)` — at pages=2500 that copy is 156.25 MiB per render;
@@ -217,7 +217,7 @@ const diagnose = (t: Transcript, missing: string[]): Diagnosis => {
  *     so the .aux comes back holding nothing but boilerplate and the second pass is handed no new
  *     information. Verified: every chemfig/tikz fixture in test/fixtures/tex writes a 32-byte .aux
  *     and renders byte-identical SVG on one pass and two. #9 and #70 stay open behind engine work
- *     (docs/BACKLOG.md, track E1 — a driver that emits position marks), not behind this flag.
+ *     (internal/BACKLOG.md, track E1 — a driver that emits position marks), not behind this flag.
  *
  * The flag ships anyway because the cross-reference family is real, and because the plumbing is
  * what a future driver needs in place. It is opt-in per block for the obvious reason: it is two

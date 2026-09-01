@@ -2,7 +2,7 @@ import { Notice } from 'obsidian';
 import type { Diagnostic } from '../types';
 
 /**
- * What a failed diagram looks like. See docs/DESIGN.md §7.6.
+ * What a failed diagram looks like. See internal/DESIGN.md §7.6.
  *
  * Today a failure is `<img src='//invalid.site/img-not-found.png'>` — a broken-image icon, plus an
  * outbound DNS lookup and HTTP request from a plugin whose headline feature is offline operation.

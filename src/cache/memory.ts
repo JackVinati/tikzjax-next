@@ -1,7 +1,7 @@
 import type { Artifact } from '../types';
 
 /**
- * L1: the in-memory artifact cache. See docs/DESIGN.md §6.2 and §6.3.
+ * L1: the in-memory artifact cache. See internal/DESIGN.md §6.2 and §6.3.
  *
  * This is the tier the *synchronous* code-block probe reads, which is what makes Live Preview ↔
  * Reading switching and scroll-back instant. So every operation is O(1): recency order is the Map's

@@ -1,5 +1,5 @@
 /**
- * Stage 2b of the SVG pipeline: the soft-hyphen glyph remap. See docs/DESIGN.md §7.2.
+ * Stage 2b of the SVG pipeline: the soft-hyphen glyph remap. See internal/DESIGN.md §7.2.
  *
  * WHY THIS EXISTS, and why deleting it would look harmless. `\Omega` and `\otimes` rendered as
  * nothing (upstream #2). The fix was two-sided: the bundled fonts were patched with fontforge to
@@ -16,7 +16,7 @@
  * The known cost, recorded rather than hidden: a diagram that legitimately contains a soft hyphen
  * in its text gets a NOT SIGN instead. That is upstream's behaviour and this preserves it
  * deliberately; the real fix is a font whose glyph positions match TeX's, which belongs to the
- * engine rebuild (docs/DECISIONS.md D8), not to a string pass over the output.
+ * engine rebuild (internal/DECISIONS.md D8), not to a string pass over the output.
  */
 
 /**

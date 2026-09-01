@@ -1,7 +1,7 @@
 import type { LazyMode, TexErrorKind } from '../types';
 
 /**
- * The per-block lifecycle, as a pure reducer. See docs/DESIGN.md §3.3 for the transition table.
+ * The per-block lifecycle, as a pure reducer. See internal/DESIGN.md §3.3 for the transition table.
  *
  * Nothing here touches the DOM, awaits anything, or reads a clock. Effects are *descriptions*;
  * `block/render-child.ts` executes them. That split is the whole point: the lifecycle of a diagram
