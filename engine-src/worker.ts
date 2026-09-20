@@ -28,6 +28,7 @@ import { dvi2html } from '@drgrice1/dvi2html';
 import * as library from './library';
 import { CORE_DUMP_GZ, ENGINE_ID, INVENTORY, TEX_FILES, TEX_WASM_GZ } from 'virtual:engine-assets';
 import type { ErrorMessage, OkMessage, RenderOptions, TexErrorKind, WorkerRequest } from './protocol';
+import { bridgeUnicode, restoreUnicode } from './unicode';
 
 // --- base64 -------------------------------------------------------------------------------------
 
@@ -72,7 +73,7 @@ if (coreDump.length !== library.pages * 65536) {
 
 const DOCUMENT_START = /\\begin\s*\{document\}/;
 
-const buildInput = (source: string, options: RenderOptions): string => {
+const buildInput = (source: string, options: RenderOptions, bridgePreamble = ''): string => {
 	const packages = Object.entries(options.texPackages ?? {})
 		.map(([name, opts]) => `\\usepackage${opts ? `[${opts}]` : ''}{${name}}`)
 		.join('');
@@ -83,7 +84,7 @@ const buildInput = (source: string, options: RenderOptions): string => {
 	// TeX reaches the interactive `? ` prompt and suspends the asyncify'd wasm, and a suspended
 	// asyncify continuation cannot be resumed — only terminated. Upstream #18 #23 #27 #39 #51
 	// #82 #85 #89, roughly 22 reporters, are all downstream of this one token.
-	const preamble = `\\nonstopmode${packages}${libraries}${options.addToPreamble ?? ''}`;
+	const preamble = `\\nonstopmode${packages}${libraries}${options.addToPreamble ?? ''}${bridgePreamble}`;
 
 	const wrap = options.wrap ?? 'auto';
 	const needsWrap = wrap === 'always' || (wrap === 'auto' && !DOCUMENT_START.test(source));
@@ -423,7 +424,8 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	const logging = options.captureLog !== false;
 	if (logging) library.setShowConsole();
 
-	const input = new TextEncoder().encode(buildInput(source, options));
+	const unicode = bridgeUnicode(source);
+	const input = new TextEncoder().encode(buildInput(unicode.source, options, unicode.preamble));
 
 	/** Where the first pass's transcript ends, so its diagnosis can never be read out of pass two. */
 	let firstEnd: number;
@@ -526,7 +528,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	return {
 		type: 'ok',
 		id,
-		svg: reported.svg,
+		svg: restoreUnicode(reported.svg, unicode.runs),
 		log,
 		missing,
 		durationMs,

@@ -150,9 +150,7 @@ plain TikZ, `pgfplots` including its libraries, `circuitikz`, `chemfig`, `tikz-c
 | `patterns` draws nothing | The driver emits the pattern reference but not the pattern definition. |
 | `chemfig`'s `\schemestart` loses bonds | The bonds are already missing in the DVI, before any JavaScript runs. |
 | `tikz-feynman` | LuaTeX only. `tikz-feynhand` is bundled and works. |
-| Greek, Cyrillic, CJK, IPA, emoji | Not set up in this engine's LaTeX format: TeX leaves them out with an error. Most accented Latin letters work as typed (Dvořák, Erdős, İstanbul, café), as do curly quotes, dashes and `…` — the exact set is measured from the engine and listed in `src/source/native-unicode.ts`. |
-| Letters with a dieresis: ä ö ü ë ï ÿ | The SVG converter has no metrics for the dieresis accent, so the whole diagram fails — also when written as `\"u`. Pre-flight warns before you get there. |
-| `°` `×` `€` `™` `→` typed directly | They come from a font the SVG converter cannot draw, and the diagram fails. Use `$^\circ$`, `$\times$`, `$\rightarrow$`. |
+| Unicode in control-sequence names and structural arguments | The engine is 8-bit. Literal Unicode text in diagram labels is bridged into the output SVG and supports CJK, Cyrillic, IPA and emoji; TeX syntax itself must remain ASCII. |
 | Obsidian Sync Standard does not sync `main.js` | It is 11.7 MB, and that plan caps a file at 5 MB. The plugin still installs from the community browser or a release on every device; only syncing the plugin folder itself is affected. The size is the TeX engine — a 156 MiB core dump, gzipped and base64'd — and shrinking it means a smaller engine, not tighter code. |
 | Obsidian Publish | Publish runs no community plugins. Save the diagram as an SVG attachment, or finalize the note, and the result publishes as ordinary content. |
 

@@ -165,8 +165,9 @@ Full reasoning in `internal/BACKLOG.md`. The short version:
   `@drgrice1/dvi2html` has a fixed font table covering Computer Modern only, and it is not
   extensible from outside — which is `\mathfrak`, `\mathscr` and siunitx's unit symbols (#55 #84
   #113). The `patterns` driver gap (#59) is a missing pattern definition in the DVI, chemfig's
-  `\schemestart` (#25 #54) loses its bonds before any JavaScript runs, CJK (#19) is impossible on
-  an 8-bit engine, and LuaTeX-only packages (#20) stay LuaTeX-only.
+  `\schemestart` (#25 #54) loses its bonds before any JavaScript runs, Unicode in TeX syntax (as
+  opposed to bridged label text) still needs a Unicode engine, and LuaTeX-only packages (#20) stay
+  LuaTeX-only.
 - **13 issues close as answered or out of scope** — including Obsidian Publish (#37 #47: Publish
   runs no community plugins; finalize-to-attachment is the answer, and is better for visitors than
   a WASM TeX per page view) and the inline `$tikz:…$` renderer (#112).
