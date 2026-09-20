@@ -55,6 +55,7 @@ import type {
 	TexErrorKind,
 	WorkerRequest,
 } from './protocol';
+import { bridgeUnicode, restoreUnicode } from './unicode';
 
 // --- base64 -------------------------------------------------------------------------------------
 
@@ -480,8 +481,9 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	const logging = options.captureLog !== false;
 	if (logging) library.setShowConsole();
 
+	const unicode = bridgeUnicode(source);
 	// Both passes read this same text, so `bodyLine` holds for an `l.NN` from either.
-	const { text, bodyLine } = buildInput(source, options);
+	const { text, bodyLine } = buildInput(unicode.source, options, unicode.preamble);
 	const input = new TextEncoder().encode(text);
 	/** Where the time went, over both passes when there are two. */
 	const spent: RenderTimings = { resetMs: 0, texMs: 0, svgMs: 0, passes: 0 };
@@ -615,7 +617,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	return {
 		type: 'ok',
 		id,
-		svg: reported.svg,
+		svg: restoreUnicode(reported.svg, unicode.runs),
 		log,
 		missing,
 		durationMs,

@@ -44,7 +44,7 @@ export const MISSING_PACKAGE =
 	'{This engine does not have the file, so LaTeX goes on without it, as when Return is pressed here.}' +
 	'\\global\\let\\@currpath\\@empty\\global\\let\\@currname\\@empty\\gdef\\@currext{tex}}\\makeatother';
 
-export const buildInput = (source: string, options: RenderOptions): TexInput => {
+export const buildInput = (source: string, options: RenderOptions, bridgePreamble = ''): TexInput => {
 	const packages = Object.entries(options.texPackages ?? {})
 		.map(([name, opts]) => `\\usepackage${opts ? `[${opts}]` : ''}{${name}}`)
 		.join('');
@@ -61,7 +61,7 @@ export const buildInput = (source: string, options: RenderOptions): TexInput => 
 	// its asyncify'd wasm for good, and this one, which reads the end of its terminal input there,
 	// stops the run with "Emergency stop" and draws nothing. Upstream #18 #23 #27 #39 #51 #82 #85
 	// #89, roughly 22 reporters, are all downstream of this one token.
-	const preamble = `\\nonstopmode${MISSING_PACKAGE}${shim}${given}`;
+	const preamble = `\\nonstopmode${MISSING_PACKAGE}${shim}${bridgePreamble}${given}`;
 
 	const wrap = options.wrap ?? 'auto';
 	const needsWrap = wrap === 'always' || (wrap === 'auto' && !DOCUMENT_START.test(source));
