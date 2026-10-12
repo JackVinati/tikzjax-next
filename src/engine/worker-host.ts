@@ -1,6 +1,16 @@
-import { WORKER_SOURCE, ENGINE_ID } from 'virtual:engine';
+import { WORKER_SOURCE, ENGINE_ID, ENGINE_INVENTORY } from 'virtual:engine';
 import type { EngineInventory, WorkerRequest, WorkerResponse } from '../../engine-src/protocol';
 import { TexError, type EngineCapabilities, type TexHost, type TexJob, type TexResult } from '../types';
+
+/** The capability view of an inventory: what pre-flight and the error hints actually read. */
+function capabilitiesOf(inventory: EngineInventory | null): EngineCapabilities {
+	return {
+		expl3: inventory?.capabilities.expl3 ?? false,
+		twoPass: inventory?.capabilities.twoPass ?? false,
+		packages: inventory?.packages ?? {},
+		files: new Set(inventory?.files ?? []),
+	};
+}
 
 /**
  * Owns the TeX worker.
@@ -16,7 +26,7 @@ export class WorkerHost implements TexHost {
 	private worker: Worker | null = null;
 	private blobUrl: string | null = null;
 	private booting: Promise<void> | null = null;
-	private inventory: EngineInventory | null = null;
+	private inventory: EngineInventory | null = ENGINE_INVENTORY;
 
 	private nextId = 1;
 	private readonly pending = new Map<
@@ -27,13 +37,16 @@ export class WorkerHost implements TexHost {
 	/** Streams TeX output per job, so a slow compile is watchable rather than silent until it ends. */
 	private readonly onLog: ((jobKey: string, line: string) => void) | undefined;
 
-	/** Set once the worker has announced itself; used for error copy, not just the README. */
-	private caps: EngineCapabilities = {
-		expl3: false,
-		twoPass: false,
-		packages: {},
-		files: new Set(),
-	};
+	/**
+	 * Known from the moment the plugin loads, from the inventory baked in at build time.
+	 *
+	 * It used to start empty and be filled only when the worker announced itself, and pre-flight
+	 * reads it while a block is being PROCESSED — before any render, and in a session that only shows
+	 * cached diagrams, before a boot that never comes. Every library and package on a diagram that
+	 * had rendered perfectly was then reported as "not bundled". The worker's announcement still
+	 * replaces this below; it describes the same build, so the two agree.
+	 */
+	private caps: EngineCapabilities = capabilitiesOf(ENGINE_INVENTORY);
 
 	// Not a parameter property: `erasableSyntaxOnly` forbids them, because they are the one piece of
 	// TypeScript class syntax that emits runtime code rather than being erased.
@@ -75,12 +88,7 @@ export class WorkerHost implements TexHost {
 	private receive(message: WorkerResponse, onReady: () => void): void {
 		if (message.type === 'ready') {
 			this.inventory = message.inventory;
-			this.caps = {
-				expl3: message.inventory.capabilities.expl3,
-				twoPass: message.inventory.capabilities.twoPass,
-				packages: message.inventory.packages,
-				files: new Set(message.inventory.files),
-			};
+			this.caps = capabilitiesOf(message.inventory);
 			// The blob URL has done its job the moment the worker is running. Upstream never revokes
 			// it, so the whole 9 MB source stays pinned in memory for the life of the app.
 			if (this.blobUrl) {

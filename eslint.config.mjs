@@ -138,6 +138,17 @@ export default tseslint.config(
 	},
 
 	{
+		// Ambient module declarations have to name their types as `import('…')` types. The tidier
+		// `import type { … }` inside a `declare module` block resolves under TypeScript 7 but becomes
+		// an error type — `any` — under the TypeScript 5 this linter and the community store use, and
+		// every value declared with it silently lost its type. See types/virtual-engine-assets.d.ts.
+		files: ['types/**/*.d.ts'],
+		rules: {
+			'@typescript-eslint/consistent-type-imports': ['error', { disallowTypeAnnotations: false }],
+		},
+	},
+
+	{
 		// Hash inner loops. `noUncheckedIndexedAccess` types every array read as possibly undefined,
 		// which in a byte-shuffling loop means an assertion per access or a branch per access; the
 		// branch would be dead code in a fixed-size buffer. Scoped to these two files so the rule

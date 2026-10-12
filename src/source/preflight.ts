@@ -27,10 +27,20 @@ export function preflight(source: string, baked: BakedOptions, caps: EngineCapab
 	const text = maskComments(source);
 
 	checkDocumentClass(text, out);
-	checkPackages(text, baked, caps, out);
-	checkLibraries(text, baked, caps, out);
-	checkPgfplotsLibraries(text, caps, out);
-	checkPgfplotsCompat(text, caps, out);
+
+	// The rules below compare the source against the engine's file list, and an EMPTY list is not
+	// "nothing is bundled" — the engine ships hundreds of files — it is "the list is not known yet".
+	// Answering that with "X is not bundled" put false warnings under perfectly rendered diagrams:
+	// the list used to arrive only when the worker booted, and a cached diagram never boots it.
+	// WorkerHost now has the list from the start; this guard is what keeps any future caller that
+	// passes an empty set from making the same claim.
+	if (caps.files.size > 0) {
+		checkPackages(text, baked, caps, out);
+		checkLibraries(text, baked, caps, out);
+		checkPgfplotsLibraries(text, caps, out);
+		checkPgfplotsCompat(text, caps, out);
+	}
+
 	checkEncoding(text, caps, out);
 	checkRedefinitions(text, out);
 

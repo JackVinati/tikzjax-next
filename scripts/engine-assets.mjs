@@ -119,6 +119,7 @@ export function buildEngineAssets(root) {
 	return {
 		source,
 		engineId,
+		inventory,
 		stats: {
 			wasmGz: wasmGz.length,
 			dumpGz: dumpGz.length,

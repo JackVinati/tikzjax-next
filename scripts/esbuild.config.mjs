@@ -50,7 +50,7 @@ async function buildWorker() {
 	try {
 		await access(entry);
 	} catch {
-		return { source: '', engineId: 'unbuilt' };
+		return { source: '', engineId: 'unbuilt', inventory: null };
 	}
 
 	if (!engineIsBuilt(root)) {
@@ -77,16 +77,16 @@ async function buildWorker() {
 	});
 
 	const source = result.outputFiles[0].text;
-	const { engineId, stats } = buildEngineAssets(root);
+	const { engineId, stats, inventory } = buildEngineAssets(root);
 	const mb = (n) => `${(n / 1048576).toFixed(2)} MB`;
 	console.log(
 		`  worker ${mb(source.length)}  (wasm ${mb(stats.wasmGz)} + dump ${mb(stats.dumpGz)} gz, ` +
 			`${stats.texFiles} tex files ${mb(stats.texFilesBytes)} b64)  ENGINE_ID ${engineId.slice(0, 12)}…`,
 	);
-	return { source, engineId };
+	return { source, engineId, inventory };
 }
 
-const { source: workerSource, engineId } = await buildWorker();
+const { source: workerSource, engineId, inventory: engineInventory } = await buildWorker();
 
 const styles = buildStyles(root);
 {
@@ -108,7 +108,11 @@ const virtualEngine = {
 		build.onLoad({ filter: /^virtual:engine$/, namespace: 'virtual' }, () => ({
 			contents:
 				`export const WORKER_SOURCE = ${JSON.stringify(workerSource)};\n` +
-				`export const ENGINE_ID = ${JSON.stringify(engineId)};\n`,
+				`export const ENGINE_ID = ${JSON.stringify(engineId)};\n` +
+				// The file list, package versions and capabilities, known at build time. The main
+				// thread needs them BEFORE the worker has booted — and a session that only shows cached
+				// diagrams never boots it at all. ~10 KB; the worker string above carries a copy too.
+				`export const ENGINE_INVENTORY = ${JSON.stringify(engineInventory)};\n`,
 			loader: 'js',
 		}));
 	},

@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { describe, expect, it } from 'vitest';
 import { preflight } from '../src/source/preflight';
 import type { BakedOptions, EngineCapabilities } from '../src/types';
@@ -397,5 +398,90 @@ describe('rule 3b - usepgfplotslibrary (upstream #28, #79)', () => {
 	it('handles a comma list', () => {
 		const out = preflight('\\usepgfplotslibrary{groupplots,polar}', baked(), caps());
 		expect(out.filter((d) => d.kind === 'warning').length).toBeGreaterThanOrEqual(2);
+	});
+});
+
+/**
+ * The inventory before the engine has spoken.
+ *
+ * WorkerHost used to start with an EMPTY file list and fill it only when the worker announced
+ * itself — and a cached diagram never needs the worker, so in a session that opened only notes
+ * already seen, the list stayed empty for good. Every `\usetikzlibrary` and `\usepackage` on a
+ * perfectly rendered diagram then carried "is not bundled" underneath it. Reported from real use:
+ * arrows.meta, decorations.pathreplacing and shapes.geometric, all bundled, all flagged.
+ *
+ * An empty set is never a real inventory — the engine ships hundreds of files — so it has to mean
+ * "not known yet", and "not known" must produce no claim at all about what is missing.
+ */
+describe('preflight with no inventory yet', () => {
+	const unknown = (): EngineCapabilities => ({
+		expl3: false,
+		twoPass: false,
+		packages: {},
+		files: new Set<string>(),
+	});
+
+	it('does not call a library missing just because the file list has not arrived', () => {
+		const source =
+			'\\usetikzlibrary{arrows.meta,decorations.pathreplacing,shapes.geometric}\n\\draw (0,0) -- (1,1);';
+		expect(preflight(source, baked(), unknown())).toEqual([]);
+	});
+
+	it('does not call a package or a pgfplots library missing either', () => {
+		const source = '\\usepackage{pgfplots}\n\\usepgfplotslibrary{fillbetween}\n\\draw (0,0);';
+		expect(preflight(source, baked(), unknown())).toEqual([]);
+	});
+
+	it('still runs the rules that need no inventory', () => {
+		const found = preflight('\\documentclass{article}\n\\draw (0,0);', baked(), unknown());
+		expect(found).toHaveLength(1);
+		expect(found[0]?.message).toContain('documentclass');
+	});
+});
+
+/**
+ * Against the engine that actually ships, not a hand-made file list.
+ *
+ * The compressed engine is committed (internal/DECISIONS.md D12), so the real inventory is right
+ * here. Every TikZ or PGF library in it must be accepted by `\usetikzlibrary` — whichever flavour
+ * of file it ships as, since `\usetikzlibrary{arrows.meta}` resolves to pgflibraryarrows.meta and
+ * there is no tikzlibrary file for it at all. A warning on any of these is a false positive under a
+ * diagram that renders, which is exactly the report this suite was written for.
+ */
+describe('preflight against the shipped engine', () => {
+	// Vite's glob, not node:fs: these tests run without Node's types by design, and the glob is
+	// expanded when the file is transformed, so only the file NAMES are used and nothing is loaded.
+	const shipped = new Set<string>(
+		Object.keys(import.meta.glob('../engine-build/out/dist/tex_files/*.gz')).map((path) =>
+			path.slice(path.lastIndexOf('/') + 1, -'.gz'.length),
+		),
+	);
+	const real = caps({ files: shipped, packages: {} });
+
+	const libraries = [...shipped]
+		.map((f) => /^(?:tikz|pgf)library(.+)\.code\.tex$/.exec(f)?.[1])
+		.filter((name): name is string => name !== undefined && !name.startsWith('pgfplots.'));
+
+	it('has a real inventory to test against', () => {
+		expect(shipped.size).toBeGreaterThan(200);
+		expect(libraries.length).toBeGreaterThan(30);
+	});
+
+	it('accepts every library the engine ships, in either flavour', () => {
+		const flagged = libraries.filter(
+			(name) => preflight(`\\usetikzlibrary{${name}}`, baked(), real).length > 0,
+		);
+		expect(flagged).toEqual([]);
+	});
+
+	it('accepts the three a user saw flagged under diagrams that rendered', () => {
+		const source = '\\usetikzlibrary{arrows.meta,decorations.pathreplacing,shapes.geometric}';
+		expect(preflight(source, baked(), real)).toEqual([]);
+	});
+
+	it('still names a library that is genuinely not there', () => {
+		const found = preflight('\\usetikzlibrary{nosuchlibrary}', baked(), real);
+		expect(found).toHaveLength(1);
+		expect(found[0]?.message).toContain('nosuchlibrary');
 	});
 });
