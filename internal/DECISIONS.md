@@ -412,6 +412,9 @@ So we fork `run-tex.js` + `library.js` into `engine-src/`, apply our changes as 
 edits under review**, and compile with esbuild into the worker string embedded in `main.js`. Every
 patch in `DESIGN.md` §4.4's table becomes a readable diff instead of a regex against minified
 identifiers. `ENGINE_ID` is still the sha256 of the built worker, and still a cache-key input.
+(Since 0.1.5, literally so: the sha256 of the minified worker bundle with the id replaced by a
+placeholder, `scripts/engine-assets.mjs` `buildWorker`. Before that it hashed a list of the
+worker's inputs, which left out the npm packages bundled into it and the contents of the TeX files.)
 
 The `TODO.md` §2 checklist items for extraction, re-splicing and match-assertions are void.
 What replaces them, from reading the actual source:
@@ -454,13 +457,14 @@ and Glenn Rice, and a `CHANGES` note listing our modifications.
 
 ---
 
-## D11 — The two patches the build does apply, and why they are patches
+## D11 — The patches the build does apply, and why they are patches
 
 D10 says there is no blob to patch, and there is not: the shipped worker is our own source. But the
 BUILD still runs upstream's `web2js` and `tikzjax` repositories to produce the engine, and two of
 their files are wrong for what we ask of them. Both are patched in `build-engine.sh`, each guarded
 by a grep before and a grep after, so a silent no-op fails the build rather than shipping something
-subtly broken.
+subtly broken. A third patch, added in 0.1.5, is to an npm package the worker bundles, and is
+applied by the bundler (3, below).
 
 **1. `tikzjax/genTexFiles.js` reads every bundled file as UTF-8.**
 
@@ -494,6 +498,20 @@ The runtime never had this problem: `engine-src/library.ts` has no filesystem, o
 Applying the patch changes no artifact. `tex.wasm` and `tex_files.json` come out with the same
 sha256 as before it; `core.dump` differs only because TeX freezes the current date into memory,
 which is the known non-determinism recorded in D8's list.
+
+**3. `@drgrice1/dvi2html` never reads the last character of a font.**
+
+Its TFM reader loops `c < this.largest_character_code`, one short, so the last character of every
+font has no metrics: `cmr10`'s 127 is the dieresis accent, `cmsy10`'s is `\spadesuit`, and a diagram
+that uses one fails with "Could not find font metric for 127" — every ä, ö and ü, and `\"u` written
+by hand. `scripts/dvi2html-patch.mjs` is an esbuild plugin that changes the `<` to `<=` as the worker
+is bundled. It requires exactly one match before, checks the fix is there after, and fails any build
+that bundles dvi2html without applying it, so it cannot become a silent no-op, and it will fail
+loudly the day an upstream release carries the fix. Every bundling of dvi2html goes through it —
+the worker, smoke, verify-fork and scan-native. All 17 SVGs that rendered before are byte-identical
+after it, and all 112 fonts in dvi2html's table end on a character of real width, so none reads a
+character that is not there. The upstream patch is prepared; when a release includes it, this one
+goes.
 
 **Why patch rather than fork these two as well.** They run at build time, in a container, and their
 output is checked by everything downstream: the dump has to be exactly `pages × 65536` bytes, 21

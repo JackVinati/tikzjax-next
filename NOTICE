@@ -12,7 +12,12 @@ The distributed plugin is not only this repository's source. `main.js` and
 `styles.css` embed a complete TeX engine, a set of TeX packages and a set of
 fonts, all of which carry their own terms. The list below is what is actually
 inside the files you install, with the licence each part is redistributed under.
-Full texts are in vendor/LICENSES/.
+The licence texts are in vendor/LICENSES/: the GPL, LPPL and OFL, the BaKoMa
+licence, and each bundled npm package's own under vendor/LICENSES/npm/. TeX's
+terms are the notice at the head of tex.web (https://ctan.org/pkg/tex), and
+the rsfs and ec metrics' are on their CTAN pages, linked where they are listed.
+The banners at the top of main.js and styles.css carry the npm and BaKoMa
+texts in full, since those two files are what a vault receives.
 
 The plugin as a whole is GPL-3.0-or-later because the engine it embeds is.
 
@@ -25,7 +30,9 @@ drgrice1/tikzjax                                              GPL-3.0-or-later
   Copyright Jim Fowler, Glenn Rice.
   engine-src/library.ts and engine-src/worker.ts are modified forks of
   src/library.js and src/run-tex.js. Changes are listed in the header of each
-  file and in internal/DECISIONS.md D10.
+  file and in internal/DECISIONS.md D10. The other files in engine-src/
+  (convert-error.ts, document.ts, inflate.ts, protocol.ts, ts1-shim.ts) are
+  this project's own, not forks.
   Itself derived from kisonecat/tikzjax (https://github.com/kisonecat/tikzjax).
 
 drgrice1/web2js                                               GPL-3.0
@@ -36,7 +43,9 @@ drgrice1/web2js                                               GPL-3.0
 
 @drgrice1/dvi2html                                            GPL-3.0
   https://github.com/drgrice1/dvi2html
-  Converts TeX's DVI output to SVG. Bundled unmodified from npm.
+  Converts TeX's DVI output to SVG. Bundled from npm with one build-time
+  patch: its TFM reader reads the last character of every font
+  (scripts/dvi2html-patch.mjs; offered upstream).
 
 TeX                                                           Knuth licence
   Copyright (C) 1982 Donald E. Knuth.
