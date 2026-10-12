@@ -780,3 +780,62 @@ describe('a diagram TeX recovered from an error in', () => {
 		);
 	});
 });
+
+/** A queue that records the band each block asked for, and never answers. */
+function recordingBands(): { queue: BlockDeps['queue']; bands: number[] } {
+	const bands: number[] = [];
+	const queue = {
+		submit: (_k: string, _j: TexJobSpec, priority: number) => {
+			bands.push(priority);
+			return new Promise(() => undefined);
+		},
+		release: () => undefined,
+	} as unknown as BlockDeps['queue'];
+	return { queue, bands };
+}
+
+describe('fast mode', () => {
+	/**
+	 * Fast mode is a preset (settings: "Preset: no SVGO, no pre-flight lint, one priority band up"),
+	 * and the band was never moved: a fast diagram waited behind the full renders beside it.
+	 */
+	it('asks the queue for one band more urgent than the same block at full quality', async () => {
+		const { queue, bands } = recordingBands();
+		new TikzBlock(container(), spec(), deps({ queue })).onload();
+		new TikzBlock(container(), spec({ options: options({ fast: true }) }), deps({ queue })).onload();
+		await vi.waitFor(() => expect(bands).toHaveLength(2));
+		expect(bands).toEqual([1, 0]);
+	});
+
+	it('cannot go above the export band', async () => {
+		const { queue, bands } = recordingBands();
+		new TikzBlock(
+			container(),
+			spec({ isExport: true, options: options({ fast: true }) }),
+			deps({ queue }),
+		).onload();
+		await vi.waitFor(() => expect(bands).toHaveLength(1));
+		expect(bands).toEqual([0]);
+	});
+
+	it('is still framed by the measurement: without it, the right and bottom edges are cut off', async () => {
+		const restore = measurable();
+		try {
+			const el = container();
+			const engineSvg =
+				'<svg xmlns="http://www.w3.org/2000/svg" width="100pt" height="50pt" viewBox="-72 -72 100 50"><rect width="10" height="10"/></svg>';
+			const child = new TikzBlock(
+				el,
+				spec({ options: options({ fast: true }) }),
+				deps({ queue: answering({ svg: engineSvg, log: [], durationMs: 1 }) }),
+			);
+			child.onload();
+			await child.settled;
+			await vi.waitFor(() =>
+				expect(el.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 40 20'),
+			);
+		} finally {
+			restore();
+		}
+	});
+});

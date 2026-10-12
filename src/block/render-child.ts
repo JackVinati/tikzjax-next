@@ -304,23 +304,22 @@ export class TikzBlock extends MarkdownRenderChild {
 	}
 
 	private async submit(priority: Priority): Promise<void> {
+		// Fast mode is a preset, and one band up is part of it (internal/DESIGN.md §7.11): a fast
+		// diagram is the cheapest work in the queue, so it goes ahead of the full renders around it.
+		// Here rather than in the machine, which decides the band from where the block is and
+		// would otherwise have to know about fast mode at every one of its submits.
+		const band = this.spec.options.fast && priority > 0 ? ((priority - 1) as Priority) : priority;
 		try {
-			const result = await this.deps.queue.submit(
-				this.spec.key,
-				this.spec,
-				priority,
-				this.spec.timeoutMs,
-				{
-					owner: this,
-					// `slot` is what leaves SCHEDULING, and it must NOT be guessed at submit time: the
-					// queue settles three of its four ways before the job starts (depth-cap, poisoned,
-					// cancelled), and those arrive as `rejected`, which SCHEDULING handles and
-					// COMPILING does not. So the queue says when — to this block, not to whichever
-					// block submitted the key first.
-					onStart: () => this.dispatch({ type: 'slot' }),
-					...(this.spec.isExport ? { ignorePoison: true } : {}),
-				},
-			);
+			const result = await this.deps.queue.submit(this.spec.key, this.spec, band, this.spec.timeoutMs, {
+				owner: this,
+				// `slot` is what leaves SCHEDULING, and it must NOT be guessed at submit time: the
+				// queue settles three of its four ways before the job starts (depth-cap, poisoned,
+				// cancelled), and those arrive as `rejected`, which SCHEDULING handles and
+				// COMPILING does not. So the queue says when — to this block, not to whichever
+				// block submitted the key first.
+				onStart: () => this.dispatch({ type: 'slot' }),
+				...(this.spec.isExport ? { ignorePoison: true } : {}),
+			});
 
 			// The RAW engine output, not a finished artifact: the pipeline is a separate phase, and
 			// running it here would put the sanitize stage inside the queue's slot.

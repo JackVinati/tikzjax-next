@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { installObsidianDom } from './stubs/obsidian-dom';
 import { processBlock, processorDeps } from './stubs/processor';
 import { rendersDifferently } from '../src/block/processor';
+import { budgetsFor } from '../src/platform/budgets';
 import { DEFAULT_SETTINGS, type TikzSettings } from '../src/settings/schema';
 
 beforeAll(() => {
@@ -58,5 +59,36 @@ describe('rendersDifferently', () => {
 		];
 		for (const change of changes) expect(rendersDifferently(base, { ...base, ...change })).toBe(false);
 		expect(rendersDifferently(base, { ...base })).toBe(false);
+	});
+});
+
+describe('the time limit from the settings', () => {
+	it('gives every diagram that long on a desktop', async () => {
+		const { deps, seen, settings } = processorDeps();
+		settings.current = { ...settings.current, timeoutSeconds: 60 };
+		const { spec } = await processBlock(deps, seen, SOURCE, { load: false });
+		expect(spec.timeoutMs).toBe(60_000);
+	});
+
+	it('is clamped to the platform budget on a phone, as the setting says', async () => {
+		// The setting syncs between devices: a limit chosen for a desktop's heavy diagrams would let
+		// one diagram hold the phone's only engine, and its memory, for that long.
+		const { deps, seen, settings } = processorDeps({ budgets: budgetsFor(true) });
+		settings.current = { ...settings.current, timeoutSeconds: 60 };
+		const { spec } = await processBlock(deps, seen, SOURCE, { load: false });
+		expect(spec.timeoutMs).toBe(budgetsFor(true).timeoutMs);
+	});
+
+	it('may still be lowered on a phone', async () => {
+		const { deps, seen, settings } = processorDeps({ budgets: budgetsFor(true) });
+		settings.current = { ...settings.current, timeoutSeconds: 5 };
+		const { spec } = await processBlock(deps, seen, SOURCE, { load: false });
+		expect(spec.timeoutMs).toBe(5_000);
+	});
+
+	it("does not clamp a block's own timeout= — it is what the timeout card tells the user to write", async () => {
+		const { deps, seen } = processorDeps({ budgets: budgetsFor(true) });
+		const { spec } = await processBlock(deps, seen, `%!tikz timeout=60\n${SOURCE}`, { load: false });
+		expect(spec.timeoutMs).toBe(60_000);
 	});
 });

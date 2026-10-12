@@ -62,7 +62,13 @@ export interface BlockOptions {
 	raw: boolean;
 	/** Skip the cache entirely, in both directions. */
 	nocache: boolean;
-	/** Preset: no SVGO, no mount-time measurement, no pre-flight lint, one priority band up. */
+	/**
+	 * Preset: no SVG optimisation, no pre-flight lint, one priority band up.
+	 *
+	 * NOT "no mount-time measurement", which §7.11 also lists. The engine's frame is an inch short
+	 * of the drawing (svg/geometry.ts), so a fast diagram mounted without it would lose its right
+	 * and bottom edges, for the price of one layout per new diagram.
+	 */
 	fast: boolean;
 	/** Directives that parsed but were not recognised, surfaced as a warning rather than ignored. */
 	warnings: string[];
@@ -212,6 +218,8 @@ export interface Diagnostic {
 export interface Budgets {
 	concurrency: number;
 	timeoutMs: number;
+	/** The most the time limit SETTING may give a diagram. Null: whatever it says. */
+	timeoutSettingCapMs: number | null;
 	firstJobGraceMs: number;
 	exportBlockTimeoutMs: number;
 	exportTotalBudgetMs: number;

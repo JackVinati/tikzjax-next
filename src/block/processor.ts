@@ -168,7 +168,7 @@ function prepare(
 	// Once, so a block whose preamble resolves after a settings change is still built from one
 	// set of settings rather than half of each.
 	const settings = deps.settings();
-	const parsed = parseDirectives(source, defaultOptions(settings));
+	const parsed = parseDirectives(source, defaultOptions(settings, deps.budgets));
 
 	const needsPreamble =
 		parsed.preamblePath !== null ||
@@ -281,7 +281,9 @@ function legacySourceFor(body: string, baked: BakedOptions, settings: TikzSettin
 	return body;
 }
 
-function defaultOptions(settings: TikzSettings): BlockOptions {
+/** What a block gets before its own `%!tikz` lines are read: the settings, under the budgets. */
+function defaultOptions(settings: TikzSettings, budgets: Budgets): BlockOptions {
+	const timeoutMs = settingTimeoutMs(settings, budgets);
 	return {
 		baked: {
 			border: null,
@@ -295,11 +297,18 @@ function defaultOptions(settings: TikzSettings): BlockOptions {
 		presentation: {
 			colors: settings.colors,
 			lazy: settings.lazy,
-			...(settings.timeoutSeconds > 0 ? { timeoutMs: settings.timeoutSeconds * 1000 } : {}),
+			...(timeoutMs === undefined ? {} : { timeoutMs }),
 		},
 		raw: false,
 		nocache: false,
 		fast: settings.fast,
 		warnings: [],
 	};
+}
+
+/** The time limit setting in ms, capped where the platform caps it; undefined for the budget's own. */
+function settingTimeoutMs(settings: TikzSettings, budgets: Budgets): number | undefined {
+	if (!(settings.timeoutSeconds > 0)) return undefined;
+	const ms = settings.timeoutSeconds * 1000;
+	return budgets.timeoutSettingCapMs === null ? ms : Math.min(ms, budgets.timeoutSettingCapMs);
 }
