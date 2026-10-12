@@ -83,57 +83,85 @@ export class ArtifactStore {
 	private open(): Promise<IDBPDatabase | null> {
 		if (this.disabled || this.closed) return Promise.resolve(null);
 		if (this.db) return Promise.resolve(this.db);
-		if (!this.opening) {
-			this.opening = this.connect().finally(() => {
-				this.opening = null;
-			});
-		}
+		if (!this.opening) this.opening = this.connect();
 		return this.opening;
 	}
 
-	private async connect(): Promise<IDBPDatabase | null> {
-		let connection: IDBPDatabase | null = null;
-		try {
-			connection = await openDB(this.name, SCHEMA, {
-				upgrade(db, oldVersion, _newVersion, transaction) {
-					if (oldVersion < 1) {
-						db.createObjectStore('renders', { keyPath: 'key' });
-						db.createObjectStore('meta', { keyPath: 'key' });
+	/**
+	 * Open the database: the connection, or null to run without it.
+	 *
+	 * Null at once, too, when the open is blocked: an older connection holds the database at an
+	 * older schema, and the upgrade cannot start until it closes. That is not only another window.
+	 * 0.1.4 opened a connection for each of a note's first lookups, closed only the last on unload
+	 * and never closed one when asked to, so updating it without restarting Obsidian left this open
+	 * waiting until the browser collected the rest, which it may never do. Every get and put waited
+	 * with it, and every diagram's lookup with them. Now they run memory-only meanwhile, while the
+	 * open goes on: `opening` keeps answering null until it is over, so no second open queues
+	 * behind it, and once the upgrade is through the store is used again.
+	 */
+	private connect(): Promise<IDBPDatabase | null> {
+		return new Promise((release) => {
+			let connection: IDBPDatabase | null = null;
+			const done = (db: IDBPDatabase | null): void => {
+				this.opening = null;
+				release(db);
+			};
+			let opened: Promise<IDBPDatabase>;
+			try {
+				opened = openDB(this.name, SCHEMA, {
+					upgrade(db, oldVersion, _newVersion, transaction) {
+						if (oldVersion < 1) {
+							db.createObjectStore('renders', { keyPath: 'key' });
+							db.createObjectStore('meta', { keyPath: 'key' });
+						}
+						if (oldVersion < 3) {
+							db.createObjectStore('usage', { keyPath: 'key' }).createIndex(
+								'lastUsed',
+								'lastUsed',
+							);
+						}
+						if (oldVersion >= 1 && oldVersion < 3) {
+							// What a schema-1 or -2 store holds was written by 0.1.4 or earlier, under keys
+							// with no pipeline revision in them (cache/key.ts), so no lookup can reach it
+							// again — dropping it turns no hit into a miss. Moving it into `usage` would
+							// read the whole store, on a phone, to keep data nothing can ask for, under a
+							// byte count that had drifted far past the truth. So the store starts over; the
+							// "never a startup wipe" rule is about not discarding answers, and these are not.
+							const renders = transaction.objectStore('renders');
+							if (renders.indexNames.contains('lastUsed')) renders.deleteIndex('lastUsed');
+							void renders.clear();
+							void transaction.objectStore('meta').clear();
+						}
+					},
+					blocked: () => release(null),
+					// Another window wants to upgrade the schema, and an open connection would block it.
+					blocking: () => this.drop(connection),
+					// The browser closed the connection abnormally; the next operation opens a new one.
+					terminated: () => this.drop(connection),
+				});
+			} catch {
+				// No IndexedDB at all.
+				this.disabled = true;
+				done(null);
+				return;
+			}
+			opened.then(
+				(db) => {
+					connection = db;
+					if (this.closed) {
+						db.close();
+						done(null);
+						return;
 					}
-					if (oldVersion < 3) {
-						db.createObjectStore('usage', { keyPath: 'key' }).createIndex('lastUsed', 'lastUsed');
-					}
-					if (oldVersion >= 1 && oldVersion < 3) {
-						// What a schema-1 or -2 store holds was written by 0.1.4 or earlier, under keys
-						// with no pipeline revision in them (cache/key.ts), so no lookup can reach it
-						// again — dropping it turns no hit into a miss. Moving it into `usage` would read
-						// the whole store, on a phone, to keep data nothing can ask for, under a byte
-						// count that had drifted far past the truth. So the store starts over; the
-						// "never a startup wipe" rule is about not discarding answers, and these are not.
-						const renders = transaction.objectStore('renders');
-						if (renders.indexNames.contains('lastUsed')) renders.deleteIndex('lastUsed');
-						void renders.clear();
-						void transaction.objectStore('meta').clear();
-					}
+					this.db = db;
+					done(db);
 				},
-				blocked: () => {
-					/* another tab holds an old version; we simply run memory-only */
+				() => {
+					this.disabled = true;
+					done(null);
 				},
-				// Another window wants to upgrade the schema, and an open connection would block it.
-				blocking: () => this.drop(connection),
-				// The browser closed the connection abnormally; the next operation opens a new one.
-				terminated: () => this.drop(connection),
-			});
-		} catch {
-			this.disabled = true;
-			return null;
-		}
-		if (this.closed) {
-			connection.close();
-			return null;
-		}
-		this.db = connection;
-		return connection;
+			);
+		});
 	}
 
 	/** Let go of a connection that has died, so the next operation opens a new one. */

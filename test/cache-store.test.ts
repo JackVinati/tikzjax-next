@@ -159,6 +159,41 @@ describe('ArtifactStore — upgrading a 0.1.4 store', () => {
 		await store.put('fresh', artifact(100));
 		expect(await store.stats()).toEqual({ entries: 1, bytes: 100 });
 	});
+
+	/**
+	 * 0.1.4 updated to 0.1.5 without restarting Obsidian. 0.1.4 opened a connection for each of a
+	 * note's first lookups, closed only the last one on unload, and never closed one when asked to,
+	 * so 0.1.5's upgrade to schema 3 waits until the browser collects the rest — which may be never.
+	 * Every get and put waited with it, and every diagram's lookup with them: placeholders, and
+	 * nothing compiled.
+	 */
+	it('runs without the store while an older connection holds up the upgrade, and with it once it is through', async () => {
+		const old = await openDB(DB, 2, {
+			upgrade(db) {
+				db.createObjectStore('renders', { keyPath: 'key' }).createIndex('lastUsed', 'lastUsed');
+				db.createObjectStore('meta', { keyPath: 'key' });
+			},
+		});
+		store = new ArtifactStore(APP, 10_000);
+
+		const waited = (work: Promise<unknown>): Promise<string> =>
+			Promise.race([
+				work.then(() => 'settled'),
+				new Promise<string>((resolve) => setTimeout(() => resolve('still waiting'), 200)),
+			]);
+		expect(await waited(store.get('a'))).toBe('settled');
+		expect(await waited(store.put('a', artifact(100)))).toBe('settled');
+		expect(await waited(store.stats())).toBe('settled');
+		// One open, waiting: not one more for every call made meanwhile.
+		expect(fake.opens.get(DB)).toBe(2);
+
+		old.close();
+		await fake.idle();
+		await store.put('b', artifact(50));
+		expect((await store.get('b'))?.bytes).toBe(50);
+		expect(await store.stats()).toEqual({ entries: 1, bytes: 50 });
+		expect(fake.opens.get(DB)).toBe(2);
+	});
 });
 
 /**
