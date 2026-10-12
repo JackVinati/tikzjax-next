@@ -5,6 +5,8 @@ import {
 	type PreambleEntry,
 	type PreambleSource,
 } from '../src/preamble/resolve';
+import type { App } from 'obsidian';
+import { PreambleService } from '../src/preamble/vault';
 
 // ------------------------------------------------------------------------------------------
 // Harness
@@ -513,5 +515,46 @@ describe('deps and depHashes', () => {
 		const nested = await resolve(vault(), { inputs: ['c.tex'] });
 
 		expect(nested.depHashes).toContain(`notes/c.tex:${fakeHash('%:input a.tex\n\\def\\c{1}')}`);
+	});
+});
+
+// ------------------------------------------------------------------------------------------
+// The service's dependents: which diagrams a file change invalidates
+
+describe('PreambleService: who depends on a file', () => {
+	/**
+	 * Every block processed added its key under each file it read, and only a change to that file
+	 * ever removed it — so a long session of editing a diagram that uses a preamble kept a key for
+	 * every version of it. A block that is gone no longer depends on anything.
+	 */
+	const service = () => new PreambleService({} as App, fakeHash);
+
+	it('forgets a block once it is unloaded', () => {
+		const preamble = service();
+		preamble.track('k1', ['tikz-preamble.tex']);
+		preamble.untrack('k1', ['tikz-preamble.tex']);
+
+		expect(preamble.trackedFiles()).toEqual([]);
+		expect(preamble.invalidate('tikz-preamble.tex')).toEqual([]);
+	});
+
+	it('keeps a key while any block showing it is still there', () => {
+		// The same diagram in two panes is one key and two blocks.
+		const preamble = service();
+		preamble.track('k1', ['tikz-preamble.tex']);
+		preamble.track('k1', ['tikz-preamble.tex']);
+		preamble.untrack('k1', ['tikz-preamble.tex']);
+
+		expect(preamble.invalidate('tikz-preamble.tex')).toEqual(['k1']);
+	});
+
+	it('takes an unload after an invalidation in its stride', () => {
+		const preamble = service();
+		preamble.track('k1', ['a.tex', 'b.tex']);
+		expect(preamble.invalidate('a.tex')).toEqual(['k1']);
+		preamble.untrack('k1', ['a.tex', 'b.tex']);
+		preamble.untrack('k1', ['a.tex', 'b.tex']);
+
+		expect(preamble.trackedFiles()).toEqual([]);
 	});
 });

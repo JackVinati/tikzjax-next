@@ -173,6 +173,15 @@ function attach(
 			report,
 		});
 
+		// A change to a preamble file has to reach the blocks built from it — for as long as they
+		// are on the page, and no longer. Each entry is `path:hash`, and a path may itself hold a
+		// colon, so the hash is what follows the last one.
+		const files = spec.options.baked.depHashes.map((d) => d.slice(0, d.lastIndexOf(':')));
+		if (files.length > 0) {
+			deps.preamble.track(spec.key, files);
+			child.register(() => deps.preamble.untrack(spec.key, files));
+		}
+
 		// Obsidian owns load()/unload() from here, which is what ties cancellation to the block's
 		// real lifetime instead of to a guess about when a section went away.
 		ctx.addChild(child);

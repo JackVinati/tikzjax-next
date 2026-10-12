@@ -2,6 +2,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { installObsidianDom } from './stubs/obsidian-dom';
 import { artifact, processBlock, processorDeps } from './stubs/processor';
+import { fakeApp } from './stubs/vault';
 import { BlockTally, OFFSCREEN_CLASS, rendersDifferently } from '../src/block/processor';
 import type { BlockOutcome } from '../src/block/render-child';
 import { budgetsFor } from '../src/platform/budgets';
@@ -271,5 +272,17 @@ describe('BlockTally', () => {
 		report?.({ state: 'error', message: 'x' });
 		report?.({ state: 'ok' });
 		expect(tally.counts()).toEqual({ ok: 1, failed: 0 });
+	});
+});
+
+describe('the preamble files a block depends on', () => {
+	it('are tracked while the block is on the page, and not after', async () => {
+		const app = fakeApp({ 'tikz-preamble.tex': '\\usetikzlibrary{arrows}' });
+		const { deps, seen } = processorDeps({}, app);
+		const block = await processBlock(deps, seen, SOURCE);
+		expect(deps.preamble.trackedFiles()).toEqual(['tikz-preamble.tex']);
+
+		block.parent.unload();
+		expect(deps.preamble.trackedFiles()).toEqual([]);
 	});
 });

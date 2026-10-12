@@ -130,6 +130,13 @@ export default class TikzjaxNextPlugin extends Plugin {
 				observe: (el, onChange) => this.viewport?.observe(el, onChange),
 				unobserve: (el) => this.viewport?.unobserve(el),
 				ensureFonts: (doc) => {
+					// Only the documents still open are worth keeping for the unload sweep. Every PDF
+					// export's popup used to stay here, with the fonts injected into it, until the
+					// plugin unloaded — the one thing platform/context.ts says this must not do.
+					for (const touched of this.touchedDocuments) {
+						if (!touched.defaultView || touched.defaultView.closed)
+							this.touchedDocuments.delete(touched);
+					}
 					this.touchedDocuments.add(doc);
 					ensureFonts(doc, COLD_FONT_CSS);
 				},
@@ -137,10 +144,6 @@ export default class TikzjaxNextPlugin extends Plugin {
 				timers,
 				preamble: this.preamble,
 				onBlock: (spec, el) => {
-					this.preamble?.track(
-						spec.key,
-						spec.options.baked.depHashes.map((d) => d.split(':')[0] ?? ''),
-					);
 					const record: RenderRecord = {
 						key: spec.key,
 						sourcePreview: spec.source.replace(/\s+/g, ' ').slice(0, 80),
