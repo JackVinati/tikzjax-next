@@ -111,14 +111,15 @@ export type Event =
 	 *
 	 * `RenderQueue` rejects with `depth-cap`, `poisoned` or `cancelled` before `run` is ever
 	 * called (src/queue/queue.ts), which means no `slot` will arrive, and no job result either.
-	 * Without this row an over-cap note (17 blocks on mobile, where `depthCap`
-	 * is 16) leaves every evicted block sitting in SCHEDULING with its processor promise
-	 * unresolved forever, which is precisely the never-settling class of #18 #23 #27 #39 #51 #82
-	 * #85 #89. `depthCap` is the "offer the button" branch — map the queue's `cancelled` here
-	 * too — and every other reason is an error card.
+	 * Without this row an over-cap note (17 blocks on mobile, where `depthCap` is 16) leaves every
+	 * evicted block sitting in SCHEDULING with its processor promise unresolved forever, which is
+	 * precisely the never-settling class of #18 #23 #27 #39 #51 #82 #85 #89. `depthCap` is the
+	 * "offer the button" branch — map the queue's `cancelled` here too — and every other reason is
+	 * an error card.
 	 *
 	 * Strictly pre-start: once `slot` has fired the job is running and the queue's settlement
-	 * arrives as `ok` / `err` / `timeout`, which is what carries `terminateWorker` + `poison`.
+	 * arrives as `ok` / `err` / `timeout` / `interrupted`, which is what carries `terminateWorker`
+	 * + `poison` for a timeout.
 	 */
 	| { type: 'rejected'; reason: 'depthCap' | FailureReason }
 	| { type: 'ok' }
@@ -234,7 +235,8 @@ function unload(state: State): [State, Effect[]] {
 	if (state.phase === 'COMPILING') {
 		if (state.unloaded) return noop(state);
 		// Stays COMPILING, and deliberately does NOT settle: the running job always ends in ok,
-		// err or timeout — the timeout is the backstop — and the settle happens at DISPOSED then.
+		// err, timeout or interrupted — the timeout is the backstop — and the settle happens at
+		// DISPOSED then.
 		// `release` is still safe here: the queue drops an *unstarted* job at refs 0 and leaves a
 		// started one to finish and cache. Timers are NOT cleared, because the timeout timer is
 		// what terminates a wedged worker whether or not this block still cares.

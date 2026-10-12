@@ -241,8 +241,9 @@ describe('concurrency', () => {
 	});
 
 	it('still makes progress when handed a concurrency below one', async () => {
-		// `min(2, hardwareConcurrency - 1)` is 0 on a single-core device, and a queue with zero slots
-		// would never start anything and never settle anything — a silent, total stall.
+		// The desktop budget was once `min(2, hardwareConcurrency - 1)`, which is 0 on a single-core
+		// device, and a queue with zero slots would never start anything and never settle anything —
+		// a silent, total stall.
 		const h = harness({ concurrency: 0, depthCap: 64 });
 		const a = h.submit('a', 1);
 		await tick();
