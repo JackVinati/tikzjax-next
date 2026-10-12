@@ -16,7 +16,20 @@
 FROM ubuntu:24.04
 
 ARG TEXLIVE=apt
-ARG NODE_MAJOR=20
+
+# Node runs the engine BUILD only — web2js's tangle/compile/asyncify/initex and tikzjax's font and
+# tex_files pipeline — and none of it ships. It is pinned to an exact release, taken from
+# nodejs.org's own archive and checked against its published SHA-256, the way bakoma.zip is below:
+# that archive keeps every release forever, where a distribution repository drops old packages and
+# would one day leave this image unbuildable. Exact, not a major, because BUILD-MANIFEST.txt records
+# `node --version` and is committed — a floating major would surface every Node patch release as a
+# change to the committed engine.
+#
+# 22, not 24 or 26: web2js's lockfile pins nan 2.22.0 for node-kpathsea, and nan 2.22.0's
+# ScriptOrigin shim does not compile against the V8 in Node 24 and later (nodejs/nan#978). Revisit
+# when web2js moves to nan >= 2.23. Node 20, used until 2026-10, has been end-of-life since April.
+ARG NODE_VERSION=22.23.3
+ARG NODE_SHA256=df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de
 
 ENV DEBIAN_FRONTEND=noninteractive \
     DEBCONF_NONINTERACTIVE_SEEN=true \
@@ -28,9 +41,15 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends --no-install-suggests \
         ca-certificates curl git gnupg g++ make perl unzip xz-utils \
         libkpathsea-dev \
-    && curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
-    && apt-get install -y --no-install-recommends --no-install-suggests nodejs \
     && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/*
+
+RUN set -eu; \
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+        -o /tmp/node.tar.xz; \
+    echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c -; \
+    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner; \
+    rm /tmp/node.tar.xz; \
+    [ "$(node --version)" = "v${NODE_VERSION}" ]
 
 # --- TeX distribution -------------------------------------------------------------------------
 # apt path: Ubuntu's texlive. Mirrors upstream's Dockerfile exactly.
