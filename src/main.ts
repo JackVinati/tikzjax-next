@@ -264,7 +264,13 @@ export default class TikzjaxNextPlugin extends Plugin {
 		this.touchedDocuments.clear();
 	}
 
+	/**
+	 * Every change in the settings tab comes through here, and each one gives the diagrams that
+	 * timed out this session another chance: a longer timeout is exactly what one may have needed,
+	 * and it applies to every block rendered from now on. The poison set is what kept refusing them.
+	 */
 	async saveSettings(): Promise<void> {
+		this.queue?.clearPoison();
 		await this.saveData(this.settings);
 	}
 

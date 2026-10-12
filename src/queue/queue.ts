@@ -211,8 +211,8 @@ export class RenderQueue<J, T> {
 	}
 
 	/**
-	 * Cleared by Retry (for that key), by "Restart the TeX engine" and on unload. Never persisted,
-	 * so a reload clears it too. A settings change does not: nothing calls this when one is saved.
+	 * Cleared by Retry (for that key), by any change saved in the settings tab, by "Restart the TeX
+	 * engine" and on unload. Never persisted, so a reload clears it too.
 	 */
 	clearPoison(key?: string): void {
 		if (key === undefined) this.poisoned.clear();
@@ -443,7 +443,8 @@ export class RenderQueue<J, T> {
 			} else {
 				const error = new QueueError('timeout', entry.key, `render exceeded ${entry.timeoutMs}ms`);
 				// Session-scoped: one wedging block must not starve the vault for the rest of the
-				// session, but it must come back after a reload, a Retry or an engine restart.
+				// session, but it must come back after a reload, a Retry, a settings change or an
+				// engine restart.
 				this.poisoned.add(entry.key);
 				controller.abort(error);
 				entry.reject(error);
