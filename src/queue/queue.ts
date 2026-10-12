@@ -56,6 +56,18 @@ export function isQueueError(error: unknown, kind?: QueueRejectionKind): error i
 	return error instanceof QueueError && (kind === undefined || error.kind === kind);
 }
 
+/**
+ * Tell one caller its job started. A notification is the caller's own business: one that throws
+ * must not fail a job other callers share, nor leave the queue's bookkeeping half-done.
+ */
+function notify(onStart: (() => void) | undefined): void {
+	try {
+		onStart?.();
+	} catch {
+		// Deliberately swallowed; see above.
+	}
+}
+
 export interface SubmitOptions {
 	/**
 	 * Identifies the caller, so a release can be matched to the submission that made it.
@@ -81,6 +93,16 @@ export interface SubmitOptions {
 	 * band 0 is not synonymous with export and a fast block must stay refused.
 	 */
 	ignorePoison?: boolean | undefined;
+
+	/**
+	 * Called once when the job this caller is waiting for starts — at once, if it already has.
+	 *
+	 * Per caller, not per job, because dedup gives every caller of a key the FIRST caller's job. The
+	 * notification used to ride on that job object, so only the first caller ever heard; a second
+	 * block on the same key waited in SCHEDULING for a word that never came, and never settled. A
+	 * caller that releases before the start is not told.
+	 */
+	onStart?: (() => void) | undefined;
 }
 
 export interface RenderQueueOptions<J, T> {
@@ -109,8 +131,10 @@ interface Entry<J, T> {
 	 *
 	 * Callers that pass no owner fall back to an anonymous token, i.e. the old counting behaviour,
 	 * so a release without an owner still means "one fewer caller".
+	 *
+	 * Each owner maps to its own start notification (SubmitOptions.onStart).
 	 */
-	owners: Set<unknown>;
+	owners: Map<unknown, (() => void) | undefined>;
 	started: boolean;
 	promise: Promise<T>;
 	resolve: (value: T) => void;
@@ -181,7 +205,8 @@ export class RenderQueue<J, T> {
 		const existing = this.entries.get(key);
 		if (existing !== undefined) {
 			// The same diagram in two panes, or twice in one note: one compile, two resolutions.
-			existing.owners.add(owner);
+			existing.owners.set(owner, opts?.onStart);
+			if (existing.started) notify(opts?.onStart);
 			// A block queued as a prefetch and then scrolled into view must not wait out the rest of
 			// the prefetch band, so the shared job takes the most urgent caller's priority and the
 			// most generous caller's timeout (export's 30 s must not be cut to a visible block's
@@ -206,7 +231,7 @@ export class RenderQueue<J, T> {
 			priority,
 			timeoutMs,
 			seq: this.seq++,
-			owners: new Set([owner]),
+			owners: new Map([[owner, opts?.onStart]]),
 			started: false,
 			promise,
 			resolve,
@@ -245,7 +270,7 @@ export class RenderQueue<J, T> {
 
 		if (owner === undefined) {
 			// Anonymous release: drop any one owner, preserving the old counting semantics.
-			const first = entry.owners.values().next();
+			const first = entry.owners.keys().next();
 			if (!first.done) entry.owners.delete(first.value);
 		} else if (!entry.owners.delete(owner)) {
 			// This owner never held this entry — a release arriving after its own job settled and a
@@ -277,6 +302,8 @@ export class RenderQueue<J, T> {
 		let timerId: number | undefined;
 
 		try {
+			for (const onStart of entry.owners.values()) notify(onStart);
+
 			// §5.3: a bare setTimeout around the await is not enough — `Worker.terminate()` fires no
 			// message, so the pending deferred inside the host never settles and the await hangs
 			// forever. Racing an explicit timer is the contract.

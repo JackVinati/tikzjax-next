@@ -654,9 +654,9 @@ const ALL_PHASES: Phase[] = [
 // `RenderQueue` (src/queue/queue.ts) settles `submit` four ways: `timeout`, `poisoned`,
 // `depth-cap`, `cancelled`. Only `timeout` happens after the job started, so only `timeout`
 // reaches a COMPILING block. The other three settle the submit promise WITHOUT ever calling
-// `run`, i.e. while the block is still in SCHEDULING — and SCHEDULING has exactly one other
-// exit, `slot`, which by definition will never come. That is a stranded processor promise,
-// which is the whole failure class this module exists to close.
+// `run`, i.e. while the block is still in SCHEDULING — and neither `slot` nor a job result will
+// ever come. That is a stranded processor promise, which is the whole failure class this module
+// exists to close.
 
 describe('a queue rejection before the job starts', () => {
 	it('SCHEDULING + rejected(depthCap) -> IDLE_MANUAL, the button the queue promises', () => {
@@ -699,6 +699,23 @@ describe('a queue rejection before the job starts', () => {
 		const [state, fx] = reduce(capped, { type: 'retry' });
 		expect(state).toMatchObject({ phase: 'SCHEDULING', priority: 1 });
 		expect(fx).toEqual([{ kind: 'submit', priority: 1 }]);
+	});
+
+	it('a settlement that arrives without a `slot` still leaves SCHEDULING', () => {
+		// The queue tells every owner when a shared job starts, but SCHEDULING used to wait for
+		// that word and nothing else: a block that missed it ignored its own result and sat in
+		// SCHEDULING forever, unsettled. A settlement is proof the job ran.
+		const ok = drive(initialState(), [...TO_SCHEDULING, { type: 'ok' }]);
+		expect(ok.state).toMatchObject({ phase: 'TRANSFORMING', origin: 'render' });
+		expect(kinds(ok.effects)).toContain('transform');
+
+		const err = drive(initialState(), [...TO_SCHEDULING, { type: 'err', reason: 'tex-error' }]);
+		expect(err.state).toMatchObject({ phase: 'FAILED', reason: 'tex-error' });
+		expect(countSettles(err.effects)).toBe(1);
+
+		const [timedOut, fx] = reduce(stateFor('SCHEDULING'), { type: 'timeout' });
+		expect(timedOut).toMatchObject({ phase: 'FAILED', reason: 'timeout' });
+		expect(kinds(fx)).toEqual(['terminateWorker', 'poison', 'mountErrorCard', 'settle']);
 	});
 
 	it('a rejection arriving after the job started is not a pre-start rejection', () => {

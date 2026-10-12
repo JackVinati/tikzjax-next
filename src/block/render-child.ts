@@ -49,16 +49,6 @@ export interface TexJobSpec {
 	timeoutMs: number;
 	isExport: boolean;
 	preflight: Diagnostic[];
-	/**
-	 * Called by the queue's runner the moment this job actually starts.
-	 *
-	 * The machine needs `slot` to leave SCHEDULING, and it must NOT be emitted at submit time:
-	 * the queue settles three of its four ways before `run` is ever called (depth-cap, poisoned,
-	 * cancelled), and those arrive as `rejected`, which SCHEDULING handles and COMPILING does not.
-	 * Guessing the start would send a pre-start rejection to a state with no route out of it —
-	 * the never-settling class again.
-	 */
-	onStart?: (() => void) | undefined;
 }
 
 export interface BlockDeps {
@@ -299,14 +289,22 @@ export class TikzBlock extends MarkdownRenderChild {
 	}
 
 	private async submit(priority: Priority): Promise<void> {
-		this.spec.onStart = () => this.dispatch({ type: 'slot' });
 		try {
 			const result = await this.deps.queue.submit(
 				this.spec.key,
 				this.spec,
 				priority,
 				this.spec.timeoutMs,
-				{ owner: this, ...(this.spec.isExport ? { ignorePoison: true } : {}) },
+				{
+					owner: this,
+					// `slot` is what leaves SCHEDULING, and it must NOT be guessed at submit time: the
+					// queue settles three of its four ways before the job starts (depth-cap, poisoned,
+					// cancelled), and those arrive as `rejected`, which SCHEDULING handles and
+					// COMPILING does not. So the queue says when — to this block, not to whichever
+					// block submitted the key first.
+					onStart: () => this.dispatch({ type: 'slot' }),
+					...(this.spec.isExport ? { ignorePoison: true } : {}),
+				},
 			);
 
 			// The RAW engine output, not a finished artifact: the pipeline is a separate phase, and
@@ -350,16 +348,9 @@ export class TikzBlock extends MarkdownRenderChild {
 			}
 
 			this.failure = error instanceof TexError ? error : new TexError('tex-error', [], String(error));
-
-			// `err` is a COMPILING event. If the job never started — the runner threw before
-			// calling onStart, or the queue failed for a reason of its own — we are still in
-			// SCHEDULING, where `err` is a no-op and the block would sit unsettled forever.
-			// Route it through `rejected`, which SCHEDULING does handle. Found by a test that
-			// stubbed a queue rejecting without ever starting the job.
-			if (this.state.phase === 'SCHEDULING') {
-				this.dispatch({ type: 'rejected', reason: this.failure.kind });
-				return;
-			}
+			// Valid in SCHEDULING too: a job can fail without this block ever hearing that it
+			// started — the queue failed for a reason of its own — and the machine takes any
+			// settlement as the end of the wait.
 			this.dispatch({ type: 'err', reason: this.failure.kind });
 		}
 	}

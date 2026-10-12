@@ -2,6 +2,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { installObsidianDom } from './stubs/obsidian-dom';
 import { TikzBlock, type BlockDeps, type TexJobSpec } from '../src/block/render-child';
+import { RenderQueue } from '../src/queue/queue';
 import type { Artifact, BlockOptions, EngineCapabilities, TexHost, TexResult } from '../src/types';
 import { TexError } from '../src/types';
 
@@ -198,8 +199,14 @@ describe('the promise handed to Obsidian', () => {
 				queue: {
 					// Starts the job, as the real runner does, and THEN fails — the ordinary
 					// "TeX did not like your diagram" path.
-					submit: (_k: string, job: TexJobSpec) => {
-						job.onStart?.();
+					submit: (
+						_k: string,
+						_job: TexJobSpec,
+						_p: number,
+						_t: number,
+						opts?: { onStart?: () => void },
+					) => {
+						opts?.onStart?.();
 						return Promise.reject(
 							new TexError(
 								'tex-error',
@@ -243,5 +250,120 @@ describe('a job that fails before it starts', () => {
 		child.onload();
 		await expect(child.settled).resolves.toBeUndefined();
 		expect(el.querySelector('.tikzjax-placeholder')).toBeNull();
+	});
+});
+
+// -------------------------------------------------------------------------------------------
+// Against the real queue
+//
+// The stubs above settle `submit` in one step, which is exactly what hid the bugs below: the
+// queue's dedup hands a second caller the FIRST caller's job, and only a real queue does that.
+
+interface Run {
+	job: TexJobSpec;
+	signal: AbortSignal;
+	resolve: (result: TexResult) => void;
+	reject: (error: unknown) => void;
+}
+
+/** The real RenderQueue on real timers, with a runner the test settles by hand. */
+function realQueue() {
+	const runs: Run[] = [];
+	const queue = new RenderQueue<TexJobSpec, TexResult>({
+		concurrency: 1,
+		depthCap: 64,
+		run: (job, signal) =>
+			new Promise<TexResult>((resolve, reject) => runs.push({ job, signal, resolve, reject })),
+		timers: {
+			setTimeout: (fn, ms) => window.setTimeout(fn, ms),
+			clearTimeout: (id) => window.clearTimeout(id),
+		},
+	});
+	return { queue, runs };
+}
+
+const RESULT: TexResult = { svg: SVG, log: [], durationMs: 1 };
+
+function tracked(child: TikzBlock): { done: boolean } {
+	const state = { done: false };
+	void child.settled.then(() => (state.done = true));
+	return state;
+}
+
+describe('two blocks showing the same diagram', () => {
+	/**
+	 * The same uncached diagram in two panes, twice in one note, or in a hover preview while it
+	 * compiles: the queue runs ONE job for both. Only the block that submitted first used to hear
+	 * that it had started, so the other stayed in SCHEDULING — a spinner forever and a promise
+	 * that never settled, which hangs "Export to PDF" when the export joins a compile in flight.
+	 */
+	it('both mount when the second joins a compile already running', async () => {
+		const { queue, runs } = realQueue();
+		const a = container();
+		const b = container();
+		const first = new TikzBlock(a, spec(), deps({ queue }));
+		const second = new TikzBlock(b, spec(), deps({ queue }));
+		const firstDone = tracked(first);
+		const secondDone = tracked(second);
+
+		first.onload();
+		await vi.waitFor(() => expect(runs).toHaveLength(1));
+		second.onload();
+		// Long enough for the second block's debounce to fire and its submit to join.
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(runs).toHaveLength(1);
+
+		runs[0]?.resolve(RESULT);
+		await vi.waitFor(() => expect(secondDone.done).toBe(true));
+
+		expect(firstDone.done).toBe(true);
+		expect(a.querySelector('svg')).not.toBeNull();
+		expect(b.querySelector('svg')).not.toBeNull();
+		expect(b.querySelector('.tikzjax-placeholder')).toBeNull();
+	});
+
+	it('both mount when they queue together behind other work', async () => {
+		const { queue, runs } = realQueue();
+		// Something else holds the only slot, so both blocks wait in the same pending entry.
+		const blocker = queue.submit('X', spec({ key: 'X' }), 1, 1000);
+		await vi.waitFor(() => expect(runs).toHaveLength(1));
+
+		const a = container();
+		const b = container();
+		const first = new TikzBlock(a, spec(), deps({ queue }));
+		const second = new TikzBlock(b, spec(), deps({ queue }));
+		const secondDone = tracked(second);
+		first.onload();
+		second.onload();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(queue.size()).toBe(1);
+
+		runs[0]?.resolve(RESULT);
+		await blocker;
+		await vi.waitFor(() => expect(runs).toHaveLength(2));
+		runs[1]?.resolve(RESULT);
+
+		await vi.waitFor(() => expect(secondDone.done).toBe(true));
+		expect(b.querySelector('svg')).not.toBeNull();
+		await expect(first.settled).resolves.toBeUndefined();
+		expect(a.querySelector('svg')).not.toBeNull();
+	});
+
+	it('an export that joins a compile in flight settles, so the PDF does not wait forever', async () => {
+		const { queue, runs } = realQueue();
+		const visible = new TikzBlock(container(), spec(), deps({ queue }));
+		visible.onload();
+		await vi.waitFor(() => expect(runs).toHaveLength(1));
+
+		const el = container();
+		const exported = new TikzBlock(el, spec({ isExport: true, timeoutMs: 30_000 }), deps({ queue }));
+		const exportDone = tracked(exported);
+		exported.onload();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(runs).toHaveLength(1);
+
+		runs[0]?.resolve(RESULT);
+		await vi.waitFor(() => expect(exportDone.done).toBe(true));
+		expect(el.querySelector('svg')).not.toBeNull();
 	});
 });

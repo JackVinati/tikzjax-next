@@ -274,7 +274,6 @@ export default class TikzjaxNextPlugin extends Plugin {
 	 * line number instead of hanging — but it is the optimisation; this is the guarantee.
 	 */
 	private async runJob(job: TexJobSpec, signal: AbortSignal): Promise<TexResult> {
-		job.onStart?.();
 		const host = this.host;
 		if (!host) throw new Error('engine unavailable');
 

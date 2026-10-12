@@ -107,8 +107,8 @@ export type Event =
 	 * The queue settled `submit` without ever starting the job.
 	 *
 	 * `RenderQueue` rejects with `depth-cap`, `poisoned` or `cancelled` before `run` is ever
-	 * called (src/queue/queue.ts), which means no `slot` will arrive — and `slot` is SCHEDULING's
-	 * only other exit. Without this row an over-cap note (17 blocks on mobile, where `depthCap`
+	 * called (src/queue/queue.ts), which means no `slot` will arrive, and no job result either.
+	 * Without this row an over-cap note (17 blocks on mobile, where `depthCap`
 	 * is 16) leaves every evicted block sitting in SCHEDULING with its processor promise
 	 * unresolved forever, which is precisely the never-settling class of #18 #23 #27 #39 #51 #82
 	 * #85 #89. `depthCap` is the "offer the button" branch — map the queue's `cancelled` here
@@ -348,6 +348,14 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 					: go(state, { phase: 'FAILED', reason: event.reason }, [
 							{ kind: 'mountErrorCard', reason: event.reason },
 						]);
+			}
+			if (event.type === 'ok' || event.type === 'err' || event.type === 'timeout') {
+				// A settlement with no `slot` before it. The queue tells every owner when a job
+				// starts, but a block that missed the word must not ignore its own result: that was
+				// a second block on the same key, left here unsettled for good while the first one
+				// mounted. A settlement is proof the job ran, so it is taken as one.
+				const [compiling] = go(state, { phase: 'COMPILING', priority: state.priority }, []);
+				return reduce(compiling, event);
 			}
 			return noop(state);
 

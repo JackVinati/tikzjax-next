@@ -297,6 +297,73 @@ describe('dedup by key', () => {
 	});
 });
 
+describe('start notification is per owner', () => {
+	/**
+	 * Dedup hands every caller of a key the same job, so "your job has started" has to reach every
+	 * one of them. It used to ride on the job object, which is the FIRST caller's: the second block
+	 * never heard, stayed in SCHEDULING, and never settled.
+	 */
+	it('tells every owner of a shared job, including one who joins after the start', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		h.submit('blocker', 1);
+		await tick();
+
+		const started: string[] = [];
+		track(h.queue.submit('k', { id: 'k' }, 1, 1000, { owner: 'a', onStart: () => started.push('a') }));
+		track(h.queue.submit('k', { id: 'k' }, 2, 1000, { owner: 'b', onStart: () => started.push('b') }));
+		expect(started).toEqual([]);
+
+		h.runs.finish('blocker');
+		await tick();
+		expect(started).toEqual(['a', 'b']);
+
+		// Joining a job that is already running: told at once, not never.
+		track(h.queue.submit('k', { id: 'k' }, 1, 1000, { owner: 'c', onStart: () => started.push('c') }));
+		expect(started).toEqual(['a', 'b', 'c']);
+		expect(h.runs.countOf('k')).toBe(1);
+	});
+
+	it('does not tell an owner who released before the job started', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		h.submit('blocker', 1);
+		await tick();
+
+		const started: string[] = [];
+		track(h.queue.submit('k', { id: 'k' }, 1, 1000, { owner: 'a', onStart: () => started.push('a') }));
+		track(h.queue.submit('k', { id: 'k' }, 1, 1000, { owner: 'b', onStart: () => started.push('b') }));
+		h.queue.release('k', 'a');
+
+		h.runs.finish('blocker');
+		await tick();
+		expect(started).toEqual(['b']);
+	});
+
+	it('keeps the job going when one owner’s notification throws', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		const started: string[] = [];
+		const a = track(
+			h.queue.submit('k', { id: 'k' }, 1, 1000, {
+				owner: 'a',
+				onStart: () => {
+					throw new Error('a broken listener');
+				},
+			}),
+		);
+		const b = track(
+			h.queue.submit('k', { id: 'k' }, 1, 1000, { owner: 'b', onStart: () => started.push('b') }),
+		);
+		await tick();
+
+		expect(started).toEqual(['b']);
+
+		h.runs.finish('k', 'shared');
+		await tick();
+		expect(a.value).toBe('shared');
+		expect(b.value).toBe('shared');
+		expect(h.queue.inflightCount()).toBe(0);
+	});
+});
+
 describe('release is per owner, not per key', () => {
 	/**
 	 * The failure this closes, from review: refcounting per KEY means a release arriving after the
