@@ -31,8 +31,8 @@ export type ManualReason = 'manual' | 'depthCap';
 
 /**
  * `poisoned` is deliberately distinct from `timeout`: the first says "a previous run of this exact
- * key wedged a worker, reload to retry", the second is this render's own failure. Same kind of
- * card, different copy and different truth.
+ * key timed out, so this one was not run; Retry runs it", the second is this render's own failure.
+ * Same kind of card, different copy and different truth.
  */
 export type FailureReason = TexErrorKind | 'empty-source' | 'preflight' | 'poisoned';
 

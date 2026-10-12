@@ -10,7 +10,7 @@ const caps = (over: Partial<EngineCapabilities> = {}): EngineCapabilities => ({
 	...over,
 });
 
-const failure = (over: Partial<TexFailure> & { kind: TexErrorKind }): TexFailure => ({
+const failure = (over: Partial<TexFailure> & { kind: TexFailure['kind'] }): TexFailure => ({
 	message: '',
 	...over,
 });
@@ -319,6 +319,32 @@ describe('the remaining kinds', () => {
 		expect(d.kind).toBe('timeout');
 		expect(d.message).toMatch(/time budget/);
 		expect(d.hint).toMatch(/restarted/);
+	});
+
+	it('gives a timeout advice that works on the block in front of the user', () => {
+		// The setting is read when a block is processed, so raising it does nothing for a card
+		// already on screen; the per-block directive does, once the edited block re-renders.
+		const d = explain(failure({ kind: 'timeout', message: 'Timed out' }), caps());
+
+		expect(d.hint).toMatch(/%!tikz timeout=/);
+		expect(d.hint).toMatch(/Retry/);
+	});
+
+	it('says a diagram refused for an earlier timeout was not run, and that Retry runs it', () => {
+		const d = explain(failure({ kind: 'poisoned', message: '' }), caps());
+
+		expect(d.kind).toBe('timeout');
+		expect(d.message).toBe('This diagram timed out earlier in this session, so it was not run again.');
+		expect(d.hint).toMatch(/Retry/);
+		expect(d.hint).not.toMatch(/Reload Obsidian/);
+	});
+
+	it('does not say TeX ran for a block with nothing in it to run', () => {
+		const d = explain(failure({ kind: 'empty-source', message: '' }), caps());
+
+		expect(d.kind).toBe('empty-output');
+		expect(d.message).toBe('This block is empty.');
+		expect(d.message).not.toMatch(/TeX ran/);
 	});
 
 	it('explains a dead engine as affecting the whole page', () => {

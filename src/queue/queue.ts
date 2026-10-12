@@ -94,13 +94,12 @@ export interface SubmitOptions {
 	/**
 	 * Try a key the poison set has already refused.
 	 *
-	 * Export/print only, and not optional politeness: §3.3's `miss()` fan-out deliberately puts export
-	 * *ahead* of poison, and it does not emit an `unpoison` effect first (a real unpoison would
-	 * re-offer the key to every ordinary block, and a key that wedged one worker must not be handed a
-	 * second worker behind a button). Refusing the export at the door instead strands that block in
-	 * SCHEDULING — the driver has no event for a submit rejected before it ever got a slot — so
-	 * `Promise.all(ctx.promises)` never resolves and "Preparing PDF" hangs, which is the exact failure
-	 * §5.4's total export budget exists to bound.
+	 * Export/print only: §3.3's `miss()` fan-out deliberately puts export *ahead* of poison, so a PDF
+	 * gets one more attempt at a diagram rather than a card. It does not emit an `unpoison` first: a
+	 * real unpoison re-offers the key to every ordinary block, and only the user's own Retry — on a
+	 * card that says the diagram timed out — should do that. Refusing the export at the door used to
+	 * strand that block in SCHEDULING with "Preparing PDF" hanging; SCHEDULING now handles the
+	 * refusal, but the export would still print a card it did not need to.
 	 *
 	 * Deliberately NOT inferred from `priority === 0`: `fast` also promotes a block one band (§7), so
 	 * band 0 is not synonymous with export and a fast block must stay refused.
@@ -211,7 +210,10 @@ export class RenderQueue<J, T> {
 		return this.poisoned.has(key);
 	}
 
-	/** Cleared by Retry, by any settings change, and by reload. Never persisted. */
+	/**
+	 * Cleared by Retry (for that key), by "Restart the TeX engine" and on unload. Never persisted,
+	 * so a reload clears it too. A settings change does not: nothing calls this when one is saved.
+	 */
 	clearPoison(key?: string): void {
 		if (key === undefined) this.poisoned.clear();
 		else this.poisoned.delete(key);
@@ -441,7 +443,7 @@ export class RenderQueue<J, T> {
 			} else {
 				const error = new QueueError('timeout', entry.key, `render exceeded ${entry.timeoutMs}ms`);
 				// Session-scoped: one wedging block must not starve the vault for the rest of the
-				// session, but it must come back after a reload, a Retry or a settings change.
+				// session, but it must come back after a reload, a Retry or an engine restart.
 				this.poisoned.add(entry.key);
 				controller.abort(error);
 				entry.reject(error);

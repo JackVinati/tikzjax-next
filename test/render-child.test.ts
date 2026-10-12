@@ -183,6 +183,16 @@ describe('an empty block', () => {
 		expect(el.querySelector('.tikzjax-error')).not.toBeNull();
 		expect(el.querySelector('.tikzjax-placeholder')).toBeNull();
 	});
+
+	it('does not claim that TeX ran', async () => {
+		const el = container();
+		const child = new TikzBlock(el, spec({ source: '' }), deps());
+
+		child.onload();
+		await child.settled;
+
+		expect(el.querySelector('.tikzjax-error-message')?.textContent).toBe('This block is empty.');
+	});
 });
 
 describe('the promise handed to Obsidian', () => {
@@ -433,5 +443,93 @@ describe('a compile the engine was stopped under', () => {
 		await expect(first.settled).resolves.toBeUndefined();
 		expect(a.querySelector('svg')).not.toBeNull();
 		expect(b.querySelector('svg')).not.toBeNull();
+	});
+});
+
+/** Press the button with this label, as a reader would. */
+function press(el: HTMLElement, label: string): void {
+	const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === label);
+	if (!button) throw new Error(`no "${label}" button`);
+	button.click();
+}
+
+const cardText = (el: HTMLElement): string | null | undefined =>
+	el.querySelector('.tikzjax-error-message')?.textContent;
+
+describe('Retry', () => {
+	/**
+	 * A timeout poisons the key for the session, and Retry is the documented way out. It emitted
+	 * `unpoison`, which nothing carried out, so the queue refused the key again at the door: the
+	 * job never re-ran, and the card it put back was the old one.
+	 */
+	it('runs a diagram that timed out again, and mounts it', async () => {
+		const { queue, runs } = realQueue();
+		const el = container();
+		const child = new TikzBlock(el, spec({ timeoutMs: 20 }), deps({ queue }));
+		child.onload();
+		await child.settled;
+		expect(cardText(el)).toBe('The diagram took longer than its time budget.');
+		expect(queue.isPoisoned('K')).toBe(true);
+
+		press(el, 'Retry');
+		await vi.waitFor(() => expect(runs).toHaveLength(2));
+		runs[1]?.resolve(RESULT);
+		await vi.waitFor(() => expect(el.querySelector('svg')).not.toBeNull());
+	});
+
+	it('shows what went wrong this time, not last time', async () => {
+		const { queue, runs } = realQueue();
+		const el = container();
+		const child = new TikzBlock(el, spec({ timeoutMs: 20 }), deps({ queue }));
+		child.onload();
+		await child.settled;
+
+		press(el, 'Retry');
+		await vi.waitFor(() => expect(runs).toHaveLength(2));
+		runs[1]?.reject(
+			new TexError('tex-error', ['! Undefined control sequence.'], 'Undefined control sequence.', 3),
+		);
+		await vi.waitFor(() => expect(cardText(el)).toMatch(/Undefined control sequence/));
+	});
+});
+
+describe('the card for an undefined macro', () => {
+	it('names the macro from the log, where TeX echoed it', async () => {
+		// The worker sends the bare `!` line as the message; the macro survives only in the log.
+		// The card used to be built without it and said TeX had not echoed the macro at all.
+		const { queue, runs } = realQueue();
+		const el = container();
+		const child = new TikzBlock(el, spec(), deps({ queue }));
+		child.onload();
+		await vi.waitFor(() => expect(runs).toHaveLength(1));
+
+		runs[0]?.reject(
+			new TexError(
+				'tex-error',
+				['! Undefined control sequence.', 'l.5 \\draw (0,0) -- \\myTypo', '?'],
+				'Undefined control sequence.',
+				5,
+				'Undefined control sequence.',
+			),
+		);
+		await child.settled;
+		expect(cardText(el)).toBe('Undefined control sequence \\myTypo');
+	});
+});
+
+describe('the card for a diagram that timed out earlier', () => {
+	it('says so, and points at the Retry that now works — not at "TeX ran successfully"', async () => {
+		const { queue } = realQueue();
+		const first = new TikzBlock(container(), spec({ timeoutMs: 20 }), deps({ queue }));
+		first.onload();
+		await first.settled;
+
+		const el = container();
+		const second = new TikzBlock(el, spec(), deps({ queue }));
+		second.onload();
+		await second.settled;
+
+		expect(cardText(el)).toBe('This diagram timed out earlier in this session, so it was not run again.');
+		expect(el.querySelector('.tikzjax-error-hint')?.textContent).toMatch(/Retry/);
 	});
 });

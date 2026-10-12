@@ -1,7 +1,15 @@
 import { MarkdownRenderChild } from 'obsidian';
 import type { Artifact, BlockOptions, Diagnostic, TexHost, TexResult } from '../types';
 import { InterruptedError, TexError } from '../types';
-import { initialState, reduce, type Effect, type Event, type Priority, type State } from './machine';
+import {
+	initialState,
+	reduce,
+	type Effect,
+	type Event,
+	type FailureReason,
+	type Priority,
+	type State,
+} from './machine';
 import { renderPlaceholder, renderManualTrigger } from './placeholder';
 import { renderErrorCard, renderWarningChip } from './error-card';
 import { measureInk, mountArtifact, withMeasuredBounds } from './mount';
@@ -199,6 +207,8 @@ export class TikzBlock extends MarkdownRenderChild {
 				return;
 
 			case 'submit':
+				// A new attempt: whatever failed last time is not what this one will say.
+				this.failure = null;
 				void this.submit(effect.priority);
 				return;
 
@@ -206,13 +216,20 @@ export class TikzBlock extends MarkdownRenderChild {
 				this.deps.queue.release(this.spec.key, this);
 				return;
 
+			case 'unpoison':
+				// The user pressed Retry. A timeout poisons the key for the session; this was listed
+				// below as "owned by the queue" and did nothing, so the queue refused the key again
+				// at the door and Retry never re-ran anything.
+				this.deps.queue.clearPoison(this.spec.key);
+				return;
+
 			case 'startRender':
 			case 'abort':
 			case 'terminateWorker':
 			case 'poison':
-			case 'unpoison':
-				// Owned by the queue: it holds the AbortController, the poison set and the host.
-				// Listed explicitly so a new effect cannot be silently ignored by a default branch.
+				// Owned by the queue and the host: they hold the AbortController, the poison set and
+				// the worker. Listed explicitly so a new effect cannot be silently ignored by a
+				// default branch.
 				return;
 
 			case 'mount':
@@ -224,7 +241,7 @@ export class TikzBlock extends MarkdownRenderChild {
 				return;
 
 			case 'mountErrorCard':
-				this.mountError();
+				this.mountError(effect.reason);
 				return;
 
 			case 'mountManualButton':
@@ -468,7 +485,7 @@ export class TikzBlock extends MarkdownRenderChild {
 		if (!this.spec.options.nocache) this.deps.cache.put(this.spec.key, this.artifact);
 	}
 
-	private mountError(): void {
+	private mountError(reason: FailureReason): void {
 		this.placeholder?.remove();
 		this.placeholder = null;
 
@@ -476,10 +493,15 @@ export class TikzBlock extends MarkdownRenderChild {
 		renderErrorCard(this.body, {
 			diagnostic: explain(
 				{
-					kind: failure.kind,
+					// The two failures found without running TeX have no TexError to describe them,
+					// and falling back to `empty-output` told the user TeX had run.
+					kind: reason === 'poisoned' || reason === 'empty-source' ? reason : failure.kind,
 					message: failure.message,
 					firstError: failure.firstError,
 					line: failure.line,
+					// The worker's message for a TeX error is the bare `!` line: the macro it choked
+					// on is only in the log, and without it the card said TeX had not echoed one.
+					log: failure.log,
 				},
 				this.deps.host.capabilities,
 			),

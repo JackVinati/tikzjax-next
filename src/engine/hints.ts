@@ -14,9 +14,16 @@ import type { Diagnostic, EngineCapabilities, TexErrorKind } from '../types';
  * Pure: no DOM, no clock, no `obsidian`. The error card is a rendering of what this returns.
  */
 
-/** The failure as the worker reports it; matches `ErrorMessage` minus the transport fields. */
+/**
+ * The failure as the worker reports it; matches `ErrorMessage` minus the transport fields.
+ *
+ * Plus the two the plugin finds without running TeX, which need copy of their own because the
+ * engine's would be false: `poisoned` (refused because the same diagram timed out earlier this
+ * session) and `empty-source` (nothing between the fences). Both used to fall through to
+ * `empty-output` — "TeX ran successfully but produced no diagram" — when TeX had not run at all.
+ */
 export interface TexFailure {
-	kind: TexErrorKind;
+	kind: TexErrorKind | 'poisoned' | 'empty-source';
 	message: string;
 	/** The first `! …` line, when there was one. */
 	firstError?: string | undefined;
@@ -417,12 +424,33 @@ export function explain(error: TexFailure, caps: EngineCapabilities): Diagnostic
 				hint: 'Nothing was drawn, so the block is most likely empty or entirely commented out. Check that a \\begin{tikzpicture} exists and that no % comments it out.',
 			};
 
+		case 'empty-source':
+			return {
+				kind: 'empty-output',
+				message: 'This block is empty.',
+				hint: 'There is no TeX in it to compile, only blank lines or %!tikz options. Write the diagram between the fences, e.g. a \\begin{tikzpicture} … \\end{tikzpicture}.',
+			};
+
+		// The budget counts only the time TeX itself ran: the engine's boot is not charged to the
+		// diagram, so "it took too long" is a statement about the diagram. Raising the timeout
+		// SETTING is not offered as the fix — it is read when a block is processed, so it does
+		// nothing for the card already on screen; the block's own directive does, once the edited
+		// block renders again.
 		case 'timeout':
 			return {
 				kind: 'timeout',
 				message: 'The diagram took longer than its time budget.',
 				line: error.line,
-				hint: 'The engine was terminated and restarted, so nothing is stuck. Simplify the diagram — fewer samples, fewer plots, less \\foreach nesting — or raise the timeout in settings if you know it just needs longer.',
+				hint: 'The engine was terminated and restarted, so nothing is stuck. Simplify the diagram — fewer samples, fewer plots, less \\foreach nesting — or, if it just needs longer, add a line like %!tikz timeout=30 (seconds) to the block. Retry runs it again.',
+			};
+
+		// A timeout poisons the key for the session, so every other copy of the diagram is refused
+		// without being run. Retry clears that and runs it.
+		case 'poisoned':
+			return {
+				kind: 'timeout',
+				message: 'This diagram timed out earlier in this session, so it was not run again.',
+				hint: 'Press Retry to run it once more. If it needs longer, add a line like %!tikz timeout=30 (seconds) to the block first; if it keeps timing out, simplify it.',
 			};
 
 		case 'engine-unavailable':
