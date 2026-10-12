@@ -82,7 +82,8 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] Render queue: priority bands, dedup by key with refcounting, depth cap → manual demotion, session poison set, **every job settles in a `finally`**
 - [x] Viewport gate (one `IntersectionObserver` per scroll root) **+ the 2 s zero-record escape hatch**
 - [x] Debounce; pre-start cancellation on unload. Mid-flight termination only on timeout / plugin unload / backpressure
-- [x] Export detection from `el.doc` + per-block and total export budgets — **closes #45 #114 #101 #109**
+- [x] Export detection from `el.doc` + per-block export budget — **closes #45 #114 #101 #109**
+- [ ] **reopened** — the TOTAL export budget. `exportTotalBudgetMs` is defined in `src/platform/budgets.ts` and read nowhere, so this line was ticked for code that does not exist: an export of a note with many uncached diagrams is bounded only per diagram (30 s each, one at a time on mobile). Found by the October review of issue #1
 - [x] Per-mount id stamping — **closes #12**
 - [x] Sized placeholders from the persisted bbox — no layout shift
 - [x] Pre-flight source lint (§7.6's six rules) — **closes #52 #49 #67, partial #96**
@@ -125,15 +126,19 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] Dependency tracking → `vault.on('modify')` invalidation
 - [x] `freezeSvg` — resolve `currentColor`, inline **only** the referenced `@font-face` subset
 - [x] Copy SVG / Save SVG / Finalize / Un-finalize; render-note; zoom modal — **closes #21 #33 #95 #97 #104 #37 #47**
-- [ ] **not doing for now** — declarative settings (`getSettingDefinitions`). It is 1.13-only, and the floor is 1.5.7 so that the plugin installs on mobile at all (D6). Adopting it means carrying both paths; it buys settings-search discoverability on 1.13+ and costs everyone below it
+- [ ] **not doing for now** — declarative settings (`getSettingDefinitions`). It is 1.13-only, and the floor is 1.7.2 so that the plugin installs on mobile at all (D6). Adopting it means carrying both paths; it buys settings-search discoverability on 1.13+ and costs everyone below it
 - [ ] **open** — render-vault. render-note ships; a vault-wide pass needs a progress UI and a cancel path, and is the kind of thing that wants a device measurement first
+- [ ] **planned, after 0.1.4** — `![[file.tex]]` renders the diagram in place (issue #1). Only `app.embedRegistry.registerExtension('tex', …)` reaches Live Preview, and it is undocumented: feature-detected, guarded against another plugin owning `tex`, falling back to today's grey box. The embed hands the file to the same path a block takes (refactor `createProcessor` into an exported `processSource`), with `sourcePath` = the .tex file so `%:input` resolves like LaTeX's `\input`, and a small adapter that comments out `\documentclass` — today a second one only warns, then hangs to the timeout. Waiting on the reporter: full documents or bare `tikzpicture`s?
+- [ ] **open** — a preamble change re-renders Reading view only (`rerenderOpenViews` calls `previewMode.rerender`); Live Preview blocks keep the stale diagram until the note is reopened
+- [ ] **open** — `keysBySource` in `main.ts` is unbounded; harmless for blocks, but it would hold whole file texts once embeds exist
 
 ## 8 · pgfplots
 
 - [x] **S1** — the missing `tikzlibrarypgfplots.*.code.tex` files are bundled. That was the whole of **#28 #79**
 - [ ] **open** — extended-engine loader: pinned URL + pinned SHA-256 + `vault.adapter.writeBinary` to `.obsidian/plugins/<id>/engines/`, fall back to core on any failure (D3). Not needed for anything that ships today; it is how a bigger TeX set would arrive without putting it in `main.js`
 - [x] ~~Evaluate `@rod2ik/tikzjax` 1.6.0~~ — superseded by D10 and answered by it. The question that mattered was whether expl3 runs; it does, on our own build (`changes/expanded.ch`, `changes/strcmp.ch`), so forest, xparse, mathtools and siunitx compile. The ~37-issue "permanently impossible" partition was wrong, and `internal/BACKLOG.md` records the correction
-- [ ] **open** — **E1**: ship the `net` TeX Live flavour (pgf 3.1.12, pgfplots 1.18.3, circuitikz 1.8.6) instead of Ubuntu's 2023 packages. The Dockerfile builds it today (`TEXLIVE=net`); what is missing is a run of the fixture corpus against it, because a package bump is a rendering change and the corpus is what would show it
+- [ ] **open** — **E1**: ship the `net` TeX Live flavour instead of Ubuntu's 2023 packages. As of 2026-10: pgf 3.1.12, pgfplots 1.18.3, circuitikz 1.8.7, chemfig 1.82, siunitx 3.6.3 (we ship 3.1.10, 1.18.1, 1.6.6, 1.66, 3.3.10). Its own engine release, not a dependency bump: the `net` path has never actually been built, pgf 3.1.12 changes every bp→pt coordinate so every diagram's output moves, and tlnet changes daily — it has to be pinned to a dated snapshot (`texlive.info/tlnet-archive/YYYY/MM/DD`) to be reproducible. Validation: build both flavours, diff the fixture SVGs, read every difference
+- [ ] **open** — ENGINE_ID hashes the engine archives and every `engine-src/*.ts`, but not the npm packages bundled into the worker (`@drgrice1/dvi2html`, `pako`, `buffer`). A dvi2html release that changed its SVG would not invalidate caches. Today all three are at their latest and dvi2html upstream is dormant; the fix is to hash the bundled worker with the id replaced by a placeholder
 
 ## 9 · Release gate
 
@@ -145,7 +150,9 @@ The manual matrix in DESIGN.md §10.4, in full. The three that catch the most:
 - [ ] **Devtools Network tab** across a full session including a failing diagram: assert zero requests
 - [ ] **Finalize a fence with no blank line above it**, then un-finalize: the embed must render as an embed, the `%%` must open a comment, and the note must come back byte for byte (the open question in `src/note/finalize.ts`)
 
-Then: submit to `obsidianmd/obsidian-releases` for the community plugin browser.
+Submitted to the community plugin browser on 2026-09-01 through Obsidian's developer portal. The automated review runs on every version and pulls a failing one from search within a day, so each release is held to it: 0.1.3 passed with zero errors and a byte-for-byte reproducible `main.js`.
+
+Open contributions: PR #2 (Unicode labels through an SVG bridge) — changes requested, see the review on the PR.
 
 ---
 
