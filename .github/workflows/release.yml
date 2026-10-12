@@ -109,8 +109,8 @@ jobs:
             echo
             echo '### Installing'
             echo
-            echo 'Not in the community store yet. Either add this repository in BRAT, or download'
-            echo '`main.js`, `manifest.json` and `styles.css` below into'
+            echo 'In Obsidian: Settings → Community plugins → Browse, search for TikZJax Next. To install by hand,'
+            echo 'download `main.js`, `manifest.json` and `styles.css` below into'
             echo '`<vault>/.obsidian/plugins/tikzjax-next/` and enable it in Settings → Community plugins.'
             echo
             echo '### Engine'
@@ -122,8 +122,8 @@ jobs:
             echo '```'
           } > release-notes.md
 
-      # Published, not a draft. BRAT — which is how this gets onto an iPhone before the community
-      # store review — reads the latest RELEASE, and a draft is invisible to it. Add --draft back if
+      # Published, not a draft. The community store installs from the latest RELEASE and its automated
+      # review scans it, and neither can see a draft. Add --draft back if
       # a release should ever be reviewed before it is downloadable.
       - name: Publish
         env:

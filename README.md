@@ -74,9 +74,11 @@ it, and to fix things that were previously assumed to be immovable.
 
 ## Installing
 
-Not yet in the community plugin browser. Until then, download `main.js`, `manifest.json` and
-`styles.css` from a [release](../../releases) and put them in
-`<vault>/.obsidian/plugins/tikzjax-next/`, then enable the plugin in Settings.
+In Obsidian: Settings → Community plugins → Browse, search for **TikZJax Next**, install, enable.
+It works the same on desktop, iPhone and iPad, and needs Obsidian 1.7.2 or later.
+
+To install by hand instead, download `main.js`, `manifest.json` and `styles.css` from a
+[release](../../releases) into `<vault>/.obsidian/plugins/tikzjax-next/` and enable it in Settings.
 
 Disable the original TikZJax plugin first if you have it. Both register the `tikz` code block, so
 both would render every diagram twice. The plugin checks for this and refuses to start rather than
