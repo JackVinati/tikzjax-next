@@ -85,6 +85,11 @@ describe('colour modes in base.css', () => {
 		expect(filter).toBe('invert(1) hue-rotate(180deg)');
 	});
 
+	it('lets a diagram fill a wrapper the block sized, so it can grow as well as shrink', () => {
+		expect(declarationsOf('.tikzjax-figure-wrapper.is-sized svg').get('width')).toBe('100%');
+		expect(declarationsOf('.tikzjax-figure svg').get('height')).toBe('auto');
+	});
+
 	it('gives the zoom view each block mode the figure has, so it draws the diagram the same way', () => {
 		for (const mode of ['preserve', 'paper', 'invert']) {
 			const figure = declarationsOf(`.tikzjax-figure.is-${mode}`);

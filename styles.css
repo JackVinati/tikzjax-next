@@ -251,6 +251,14 @@ The @font-face rules below embed TeX fonts as WOFF2, under the licences listed i
 	align-items: center;
 }
 
+/* A wrapper the block sized with width= or scale= (mount.ts). Left to its own width attribute the
+   svg can shrink into a narrower wrapper but never grow into a wider one, so scale=2 changed
+   nothing; filling the wrapper, with height: auto above keeping the aspect, it draws at that size,
+   and a wrapper wider than the note still shrinks to it. Measured in Chromium. */
+.tikzjax-figure-wrapper.is-sized svg {
+	width: 100%;
+}
+
 /* --- zoom modal ------------------------------------------------------------------------------ */
 
 .tikzjax-zoom-modal {

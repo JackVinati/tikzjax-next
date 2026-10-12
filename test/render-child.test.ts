@@ -768,7 +768,7 @@ describe('the first measurement', () => {
 			expect(svg?.getAttribute('width')).toBe('40pt');
 			expect(svg?.getAttribute('height')).toBe('20pt');
 			// Scaled from the measured width, not the engine's.
-			expect(el.querySelector<HTMLElement>('.tikzjax-figure-wrapper')?.style.width).toBe('80px');
+			expect(el.querySelector<HTMLElement>('.tikzjax-figure-wrapper')?.style.width).toBe('80pt');
 			expect(put).toHaveBeenLastCalledWith(
 				'K',
 				expect.objectContaining({ viewBox: '0 0 40 20', w: 40 }),

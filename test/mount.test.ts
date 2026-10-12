@@ -140,13 +140,47 @@ describe('mountArtifact: scale', () => {
 		// reopened. The frame on screen until the measurement lands is the engine's.
 		const { container } = mountStored(stored({}), { scale: 2 });
 
-		expect(container.style.width).toBe('171.5px');
+		expect(container.style.width).toBe('171.5pt');
 	});
 
-	it('uses the measured width once there is one', () => {
+	/**
+	 * In points, the unit the svg's own width is written in. It was set in pixels, so `scale=0.5`
+	 * drew a diagram at three eighths of its size — measured in Chromium: 20 px for a 53.3 px
+	 * diagram — and the svg, sized by its own `width`, never grew past it, so `scale=2` changed
+	 * nothing at all. `is-sized` lets base.css have the svg fill the wrapper.
+	 */
+	it('uses the measured width once there is one, in points, and lets the svg fill it', () => {
 		const { container } = mountStored(stored({ viewBox: '0 0 120 100', w: 120, h: 100 }), { scale: 0.5 });
 
-		expect(container.style.width).toBe('60px');
+		expect(container.style.width).toBe('60pt');
+		expect(container.classList.contains('is-sized')).toBe(true);
+	});
+
+	it('does nothing at scale 1', () => {
+		const { container } = mountStored(stored({ viewBox: '0 0 120 100', w: 120, h: 100 }), { scale: 1 });
+
+		expect(container.style.width).toBe('');
+		expect(container.classList.contains('is-sized')).toBe(false);
+	});
+});
+
+describe('mountArtifact: width', () => {
+	// `width=420` only ever capped a diagram, which is what max-width is for: a small diagram stayed
+	// small inside a 420 px wrapper.
+	it('sizes the diagram to the width it asks for', () => {
+		const { container } = mountStored(stored({}), { width: '420px' });
+
+		expect(container.style.width).toBe('420px');
+		expect(container.classList.contains('is-sized')).toBe(true);
+	});
+
+	it('leaves the diagram its own size for width=auto and for max-width', () => {
+		expect(mountStored(stored({}), { width: 'auto' }).container.classList.contains('is-sized')).toBe(
+			false,
+		);
+		expect(mountStored(stored({}), { maxWidth: '300px' }).container.classList.contains('is-sized')).toBe(
+			false,
+		);
 	});
 });
 

@@ -109,9 +109,21 @@ function rescaleExtent(
 }
 
 /**
+ * A wrapper whose width the block chose, with `width=` or `scale=`. base.css has the svg fill it:
+ * left to its own `width` attribute the svg can shrink into a narrower wrapper (`max-width`) but
+ * never grow into a wider one, so `scale=2` drew a diagram at its natural size and `width=420`
+ * worked only as a cap.
+ */
+const SIZED_CLASS = 'is-sized';
+
+/**
  * `scale` sizes the wrapper from the diagram's width: the measured one when there is one, and
  * until then the frame the engine drew, which is what is on screen. Waiting for the measurement
  * meant `scale=` did nothing at all the first time a diagram rendered.
+ *
+ * In points, because that is the unit of the width: one user unit is one point (svg/geometry.ts).
+ * It used to be written in pixels, which put every scale three quarters of the way to where it
+ * meant to be.
  */
 export function applyScale(
 	container: HTMLElement,
@@ -121,7 +133,9 @@ export function applyScale(
 ): void {
 	if (!presentation.scale || presentation.scale === 1) return;
 	const width = artifact.w > 0 ? artifact.w : (parseViewBox(svg.getAttribute('viewBox'))?.width ?? 0);
-	if (width > 0) container.setCssStyles({ width: `${formatNumber(width * presentation.scale)}px` });
+	if (width <= 0) return;
+	container.setCssStyles({ width: `${formatNumber(width * presentation.scale)}pt` });
+	container.addClass(SIZED_CLASS);
 }
 
 /**
@@ -145,7 +159,10 @@ function applyPresentation(
 
 	// setCssStyles rather than `.style.x =`: it is the API Obsidian documents for setting a real CSS
 	// property from code, and every value here comes from the block's own options.
-	if (presentation.width) container.setCssStyles({ width: presentation.width });
+	if (presentation.width) {
+		container.setCssStyles({ width: presentation.width });
+		if (presentation.width !== 'auto') container.addClass(SIZED_CLASS);
+	}
 	if (presentation.maxWidth) container.setCssStyles({ maxWidth: presentation.maxWidth });
 	applyScale(container, svg, presentation, artifact);
 
