@@ -17,6 +17,13 @@ import type { App } from 'obsidian';
 /**
  * Fails OPEN: an unrecognised context is treated as an export and rendered eagerly.
  *
+ * The `.print` container is the real signal: printToPdf builds it and puts the note in it before
+ * any processor runs. A document the workspace does not know is the fallback, and a pop-out window
+ * is one it does know — one of its leaves lives there. It used to be enough for a block to be in
+ * any document but the main one, and that took in every pop-out: its blocks rendered at once at
+ * the export band, under the export's time limit and past the session's poison set, for as long as
+ * the window stayed open.
+ *
  * Deliberately not `el.doc !== activeDocument`. `activeDocument` follows focus, so a pop-out window
  * in the background would be misclassified as an export. Failing open costs a little extra
  * compilation; failing closed costs blank PDFs.
@@ -27,7 +34,13 @@ import type { App } from 'obsidian';
 export function isExportContext(app: App, el: HTMLElement): boolean {
 	if (el.closest('.print')) return true;
 	try {
-		return el.doc !== app.workspace.containerEl.doc;
+		const doc = el.doc;
+		if (doc === app.workspace.containerEl.doc) return false;
+		let workspaceWindow = false;
+		app.workspace.iterateAllLeaves((leaf) => {
+			if (leaf.getContainer().doc === doc) workspaceWindow = true;
+		});
+		return !workspaceWindow;
 	} catch {
 		return true;
 	}
