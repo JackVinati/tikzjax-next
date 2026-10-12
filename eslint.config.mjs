@@ -9,11 +9,12 @@ import prettier from 'eslint-config-prettier';
  * hygiene. Day-to-day linting is `npm run lint` (oxlint), which is far faster; this runs in CI.
  *
  * It runs on TypeScript 5.9.3, the plain `typescript` devDependency — not an `overrides` entry, as this
- * comment used to claim — because typescript-eslint caps its peer range at `<6.1.0` and refuses to
- * load on TypeScript 7 ("typescript-eslint does not support TS 7.0", checked with 8.71.1). The
- * project's real typechecker is TypeScript 7, installed as the `tsgo` alias. Both packages ship a
- * `tsc` bin and the alias wins, which is why every script names its compiler by path. Support for
- * TypeScript 7 upstream is a draft, opt-in backend that needs TypeScript 7.1. See internal/DECISIONS.md D5.
+ * comment used to claim. typescript-eslint refuses to load on TypeScript 7 (its supported range is
+ * `>=4.8.4 <6.1.0` in 8.71.2), but that range would allow 6.0.x; what keeps this on a TypeScript 5 is
+ * the community store, whose review lints this code through TypeScript 5, and a linter meant to see
+ * what that review sees has to read the code the same way. The project's real typechecker is
+ * TypeScript 7, installed as the `tsgo` alias. Both packages ship a `tsc` bin and the alias wins,
+ * which is why every script names its compiler by path. See internal/DECISIONS.md D5.
  *
  * TYPE-AWARE RULES ARE SCOPED, and that is the whole shape of this file. They need a program, so
  * they can only run over files tsconfig.json actually includes. Applied globally they crash the run

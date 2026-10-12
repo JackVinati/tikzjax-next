@@ -10,13 +10,16 @@
   },
   "//": [
     "Two TypeScripts, deliberately. See internal/DECISIONS.md D5.",
-    "  typescript 5.9.3  exists ONLY to satisfy typescript-eslint, whose peer range caps at <6.1.0",
-    "                    and which imports the classic compiler API that TypeScript 7 replaced with",
-    "                    ./unstable/*. It never typechecks this project.",
+    "  typescript 5.9.3  is what lint:store runs on and what typecheck:legacy compiles with. It is a",
+    "                    TypeScript 5 on purpose: the community store's review lints this code through",
+    "                    TypeScript 5 (eslint-plugin-obsidianmd depends on typescript 5.4.5), and a",
+    "                    typing TS 7 accepts has already come out of TS 5 as `any` once. typescript-",
+    "                    eslint's peer range would allow 6.0.x; that is not what holds it here.",
     "  tsgo              is the real typechecker: an alias for typescript@7.0.2, the native Go",
-    "                    compiler. Aliased so it does not collide with the above; `npm run",
-    "                    typecheck` invokes it by path because both packages ship a `tsc` bin.",
-    "When typescript-eslint supports TS 7: delete the alias, bump typescript, drop typecheck:legacy."
+    "                    compiler. Aliased so it does not collide with the above; every script names",
+    "                    its compiler by path because both packages ship a `tsc` bin.",
+    "When the store lints with TS 7 and typescript-eslint loads on it: delete the alias, bump",
+    "typescript, drop typecheck:legacy."
   ],
   "scripts": {
     "dev": "node scripts/esbuild.config.mjs",
@@ -60,7 +63,7 @@
     "svgo": "4.1.0",
     "tsgo": "npm:typescript@7.0.2",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.71.1",
+    "typescript-eslint": "8.71.2",
     "vite": "8.3.4",
     "vitest": "5.0.4"
   },

@@ -945,6 +945,8 @@ Required work, none of it large: a `vendor/LICENSES/` directory carrying each up
 
 **Dependency-resolution caveat CI must handle.** `eslint-plugin-obsidianmd@0.4.2` declares peers `{ eslint: ">=9.19.0", "@eslint/js": "^9.30.1", "@eslint/json": "0.14.0", obsidian: "1.8.7", "typescript-eslint": "^8.35.1" }` — an *exact* pin on `obsidian` and a caret on `@eslint/js` 9, both of which the stack in §9.1 (obsidian 1.13.1, `@eslint/js` 10.0.1) violates. Plain `npm ci` will fail on peer resolution, so `package.json` must carry explicit `overrides` for those two peers (never `--legacy-peer-deps` in CI, which disables peer checking wholesale and would hide a real conflict later). `typescript` is pinned at **5.9.3** although 7.0.2 is current, because `typescript-eslint@8.68.0` declares `typescript: ">=4.8.4 <6.1.0"` — verified against the registry; revisit when typescript-eslint ships TS 7 support.
 
+*Superseded, 2026-10-12 (`DECISIONS.md` D5): plain `npm ci` resolves this tree without the overrides — npm nests the plugin's own `obsidian` and `@eslint/js` 9 under it — so the overrides dedupe rather than unblock. And the linter's TypeScript is held at 5 to match the TypeScript 5 the store's review lints with, not by this peer cap, which would allow 6.0.x.*
+
 ---
 
 ## 10. Testing strategy

@@ -154,7 +154,8 @@ Verified against the npm registry on 2026-08-31:
 
 - `typescript@7.0.2` is `latest`, published 2026-07-08. It is the native Go port: 20
   platform-specific optional deps (`@typescript/typescript-win32-x64@7.0.2` …), 2.38 MB unpacked
-  against 23.14 MB for `typescript@6.0.0-beta` (the last JS-based line), one `tsc` bin and no
+  against 23.14 MB for `typescript@6.0.0-beta` (the last JS-based line — which this list got wrong:
+  6.0.2 and 6.0.3 were already released, on 2026-03-23 and 2026-04-16), one `tsc` bin and no
   `tsserver`, and the classic compiler API replaced by `./unstable/{ast,fs,sync,async}` exports.
 - `engines: node >=16.20.0`; the dev machine is Node 22.19.
 
@@ -163,14 +164,33 @@ Decision:
 | Job | Tool |
 |---|---|
 | Typecheck (`npm run typecheck`, CI, pre-commit) | **`typescript@7.0.2`**, `tsc --noEmit` |
-| Fast lint in the dev loop | **`oxlint@1.80.0`** — Rust, no TS program, milliseconds |
-| Store-compliance lint (CI gate) | **`eslint@10.12.0` + `typescript-eslint@8.71.1` + `eslint-plugin-obsidianmd@0.4.2`**, on `typescript@5.9.3` installed as a plain devDependency. The original note said npm `overrides` supplied it; it never did, and `overrides` only covers the plugin's `obsidian` and `@eslint/js`. Rechecked 2026-10-12: no typescript-eslint release supports TypeScript 7; upstream support is a draft, opt-in backend waiting on TypeScript 7.1 |
+| Fast lint in the dev loop | **`oxlint@1.87.0`** — Rust, no TS program, milliseconds |
+| Store-compliance lint (CI gate) | **`eslint@10.12.0` + `typescript-eslint@8.71.2` + `eslint-plugin-obsidianmd@0.4.2`**, on `typescript@5.9.3` installed as a plain devDependency. The original note said npm `overrides` supplied it; it never did, and `overrides` only covers the plugin's `obsidian` and `@eslint/js`. Rechecked 2026-10-12: no typescript-eslint release supports TypeScript 7; upstream support is a draft, opt-in backend waiting on TypeScript 7.1 |
+| TypeScript 5 cross-check (`npm run typecheck:legacy`, CI) | the same **`typescript@5.9.3`**, by path |
 
 `eslint-plugin-obsidianmd` is kept deliberately: it encodes the community-store rules
 (`§9.7`) — no `innerHTML`/`outerHTML`, no global `app`, teardown registration, settings casing —
 and losing them to save a devDependency would be a bad trade on a plugin that intends to be
 published. Two TypeScript versions in `devDependencies` is a real wart; it is pinned, documented
-here, and collapses to one line the day typescript-eslint supports TS 7.
+here, and collapses to one line the day the store's review lints with TypeScript 7 and
+typescript-eslint loads on it.
+
+**Why the linter's TypeScript is 5.9.3 and not 6.0.3 — corrected 2026-10-12.** Until this date the
+reason given here, in `package.json` and in the lint config was typescript-eslint's peer cap,
+`>=4.8.4 <6.1.0`. That cap alone would allow `typescript@6.0.3`, and the October dependency audit
+tried it: `tsc --noEmit` clean and `eslint .` byte-identical to the 5.9.3 run. The cap was never
+what held 5.9.3. What does is the community store. Its review lints this code through TypeScript 5
+— `eslint-plugin-obsidianmd` itself depends on `typescript` 5.4.5 — and from September until
+2026-10-12 it flagged a declaration that TypeScript 7 accepted and TypeScript 5 turned into an error
+type, silently untyping the worker's inventory (`types/virtual-engine-assets.d.ts`). `lint:store`
+and `typecheck:legacy` exist to see the code the way that review does, so they stay on a
+TypeScript 5. The trigger to move is the store's toolchain moving, not a release on npm.
+
+The `overrides` block is not needed to install, contrary to `DESIGN.md` §9.7's warning: with it
+removed, npm resolves the tree without a peer conflict by nesting `obsidian@1.12.3` and `@eslint/js`
+9 under `eslint-plugin-obsidianmd` (checked 2026-10-12, npm 10.9.3). What it does is make the store
+rules read the root `obsidian` typings and `@eslint/js` rather than their own older copies, and that
+is the reason it stays.
 
 **Fallback, and it is one line:** if `tsgo` rejects a `tsconfig.json` option, `npm run typecheck`
 drops to the already-present 5.9.3. Nothing else in the build depends on the compiler version.
