@@ -84,7 +84,7 @@ jobs:
             echo "::warning::The files the TeX format is built from differ from the committed engine's."
             echo "Do not assume texlive moved: last time it was a config file written in random order."
             echo "Compare tex-versions.txt above, and the language.dat hash in the image build log,"
-            echo "before rebuilding with: npm run engine:image && npm run engine:build"
+            echo "before rebuilding with: npm run engine:image && npm run engine:build && npm run scan:native"
             exit 0
           fi
 

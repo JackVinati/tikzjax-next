@@ -687,7 +687,7 @@ Once L3 is retired, `showConsole` becomes a real per-job flag driven by the debu
 - no `\begin{document}` (#49's real cause);
 - `\usepackage{X}` where `X ∉ INVENTORY.files` (#17, #34, #40, #56, #88, #92, #99);
 - `\pgfplotsset{compat=…}` above 1.16 (#110);
-- non-Latin-1 codepoints (#19, #36, #53);
+- characters above Latin-1 that the engine cannot typeset (#19, #36, #53). Not every one above U+00FF: the format builds Dvořák, Erdős, curly quotes, dashes and the ﬁ ligature itself. Which ones it does is measured from the committed engine into `source/native-unicode.ts` by `npm run scan:native`, and CI checks the two still agree;
 - `\pgfmathsetmacro` redefining a TeX/TikZ built-in such as `\epsilon` (#96 — a case that produces *no* TeX diagnostic at all, so a lint is the only possible mechanism).
 
 **Debug surface.** A Debug view (`ItemView`): last 100 renders with source preview, state, duration, engine, cache tier, log, retry; cache stats; engine capabilities; queue depth. A status-bar indicator **gated on `Platform.isDesktop`** (`addStatusBarItem` is documented as unavailable on mobile). And a documented Safari Web Inspector workflow in CONTRIBUTING (device Settings → Safari → Advanced → Web Inspector, then Develop over USB) — every mobile issue in the tracker is currently untriageable for want of that one paragraph. #82's reporter literally wrote *"I'm not sure if there's an easy way to get debug output from the plugin."*

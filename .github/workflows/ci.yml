@@ -99,3 +99,26 @@ jobs:
               process.exit(1);
             }
           '
+
+  native-unicode:
+    # The pre-flight lint's list of characters the engine typesets by itself is measured from the
+    # committed engine, and this measures it again: about 1,500 TeX runs, a minute or so, several
+    # times what the steps in `check` take together. It is a job of its own so that it runs beside
+    # `check` rather than after it — a push waits for the longer of the two, not for their sum.
+    #
+    # It runs on every push rather than behind a path filter. The list goes stale when the engine
+    # changes, when anything under engine-src/ changes (that moves the ENGINE_ID the file records),
+    # when dvi2html changes or when the scan does; a filter naming all of those is one more list to
+    # keep in step, and the one it forgot would be the one that shipped a stale list.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: src/source/native-unicode.ts describes the committed engine
+        run: npm run scan:native -- --check

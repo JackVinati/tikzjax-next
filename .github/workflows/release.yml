@@ -74,6 +74,14 @@ jobs:
       - name: Verify the engine
         run: npm run smoke && npm run verify:fork && npm run verify:worker
 
+      - name: The native-character list describes the engine being shipped
+        # CI checks this too, but not for the commit being released: the tag is pushed before main,
+        # so CI on main runs after this workflow has published. Here is the only place the check runs
+        # on the released commit before it ships — and a stale list is not a cosmetic fault, it is
+        # the pre-flight lint warning under characters that render, or keeping quiet about ones that
+        # do not.
+        run: npm run scan:native -- --check
+
       - name: Build the plugin
         run: npm run build
 

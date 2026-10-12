@@ -490,14 +490,26 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	// Output decides success; the transcript decides what to say about it. Under \nonstopmode a
 	// mistyped macro usually yields BOTH a diagram and an error, and the user needs both.
 	if (reported.convertError !== undefined) {
-		const font = /Could not find font (\S+)/.exec(reported.convertError)?.[1];
+		// Two different failures share a prefix. dvi2html says "Could not find font metric for 127"
+		// when a font it knows lacks one character's metrics, and "Could not find font tcrm1000"
+		// when it does not know the font at all. Matched the other way round, the first read as a
+		// font named "metric", and a German label showed "The font metric is not supported". 127 in
+		// cmr10 is the dieresis accent: ä, ö, ü — and \"u written by hand — all end up here.
+		const glyph = /Could not find font metric for (\d+)/.exec(reported.convertError)?.[1];
+		const font =
+			glyph === undefined ? /Could not find font (\S+)/.exec(reported.convertError)?.[1] : undefined;
 		return {
 			type: 'error',
 			id,
 			kind: 'missing-file',
-			message: font
-				? `The font ${font} is not supported by the SVG converter.`
-				: `The diagram compiled but could not be converted: ${reported.convertError}`,
+			message:
+				glyph === '127'
+					? 'The SVG converter cannot draw the dieresis accent (¨), so a letter like ä, ö or ü — typed, or written as \\"u — loses the whole diagram. Remove it for now.'
+					: glyph !== undefined
+						? `The SVG converter has no metrics for character ${glyph} of a font this diagram uses.`
+						: font
+							? `The font ${font} is not supported by the SVG converter.`
+							: `The diagram compiled but could not be converted: ${reported.convertError}`,
 			firstError: diagnostics.firstError,
 			line: diagnostics.line,
 			log,

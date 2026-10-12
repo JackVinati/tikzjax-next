@@ -1,4 +1,5 @@
 import type { BakedOptions, Diagnostic, EngineCapabilities } from '../types';
+import { isNativeUnicode } from './native-unicode';
 
 /**
  * Pre-flight source lint. See internal/DESIGN.md §7.6.
@@ -11,7 +12,9 @@ import type { BakedOptions, Diagnostic, EngineCapabilities } from '../types';
  *
  * Pure by construction: no DOM, no clock, no engine. Everything it knows about the engine arrives
  * in `caps`, which is generated from the built image (protocol.ts `EngineInventory`) rather than
- * hand-maintained, so the hints stay true across an engine bump instead of rotting into lies.
+ * hand-maintained, so the hints stay true across an engine bump instead of rotting into lies. The
+ * one exception is which characters the engine can typeset, and it is generated too: measured from
+ * the committed engine into ./native-unicode, which CI checks against that engine.
  *
  * Every Diagnostic is `kind: 'warning'`. Pre-flight NEVER blocks a render: the file list is an
  * inventory of what the virtual filesystem can serve, not a proof of what TeX will need — a
@@ -41,7 +44,7 @@ export function preflight(source: string, baked: BakedOptions, caps: EngineCapab
 		checkPgfplotsCompat(text, caps, out);
 	}
 
-	checkEncoding(text, caps, out);
+	checkEncoding(text, out);
 	checkRedefinitions(text, out);
 
 	// Sorted by position so the warning strip reads in source order regardless of rule order.
@@ -303,12 +306,38 @@ function compareVersions(a: string, b: string): number {
 }
 
 // -------------------------------------------------------------------------------------------
-// Rule 5 — codepoints outside Latin-1. Upstream #19, #36, #53.
+// Rule 5 — characters the engine cannot typeset. Upstream #19, #36, #53.
 
 /** Enough to identify the characters without turning the warning strip into a hex dump. */
 const MAX_REPORTED_CHARS = 5;
 
-function checkEncoding(text: string, caps: EngineCapabilities, out: Diagnostic[]): void {
+/**
+ * Characters above Latin-1 that this engine cannot typeset — which is not every character above
+ * Latin-1.
+ *
+ * The source reaches TeX as UTF-8 (engine-src/worker.ts writes input.tex through TextEncoder), and
+ * the format's LaTeX reads UTF-8 by default: it reassembles each character from its bytes and
+ * builds a great many of them out of Computer Modern glyphs and accents — Dvořák, Erdős, İstanbul,
+ * the ﬁ ligature, and the curly quotes, dashes and ellipsis that iOS substitutes as you type. This
+ * rule used to warn about every codepoint above U+00FF on the theory that an 8-bit engine prints
+ * them all as garbage, which put a false warning under those diagrams, and on a phone under nearly
+ * every one.
+ *
+ * Which characters are native is measured from the engine build, not written down here:
+ * scripts/scan-native-unicode.mjs renders each one through the committed engine and writes
+ * ./native-unicode. It is the same reason `caps` is generated — a hand-kept list would be true of
+ * one engine and quietly wrong after the next rebuild. What remains genuinely fails: TeX leaves
+ * Greek, Cyrillic and CJK out with "Unicode character … not set up for use with LaTeX", and €, ™
+ * and → compile into a TS1 font the SVG converter cannot draw, which loses the whole diagram.
+ *
+ * Latin-1 is covered too, because the scan measured it and most of it is native but not all: ° and
+ * × need the same TS1 font as €, and ä, ö, ü — any letter with a dieresis — fail inside the SVG
+ * converter, which has no metrics for the accent. The cause there is the converter, and \"u
+ * written by hand fails the same way, so the warning cannot offer a spelling that works. It says
+ * so instead, before the user meets a blank diagram: the alternative was silence here and a card
+ * that, until the worker's message was fixed, named a font called "metric".
+ */
+function checkEncoding(text: string, out: Diagnostic[]): void {
 	const offenders = new Map<string, number>();
 
 	let i = 0;
@@ -316,7 +345,7 @@ function checkEncoding(text: string, caps: EngineCapabilities, out: Diagnostic[]
 		// `for..of` iterates codepoints, so an astral character is one entry rather than two
 		// surrogate halves — otherwise the report would name characters that do not exist.
 		const cp = ch.codePointAt(0) ?? 0;
-		if (cp > 0xff && !offenders.has(ch)) offenders.set(ch, i);
+		if (cp > 0x7f && !isNativeUnicode(cp) && !offenders.has(ch)) offenders.set(ch, i);
 		i += ch.length;
 	}
 	if (offenders.size === 0) return;
@@ -329,25 +358,36 @@ function checkEncoding(text: string, caps: EngineCapabilities, out: Diagnostic[]
 
 	out.push({
 		kind: 'warning',
-		message:
-			`Characters outside Latin-1: ${listed.join(', ')}${rest > 0 ? ` and ${rest} more` : ''}. ` +
-			'This TeX engine is 8-bit.',
+		message: `Characters this engine cannot typeset: ${listed.join(', ')}${rest > 0 ? ` and ${rest} more` : ''}.`,
 		line: lineOf(text, first),
-		hint: encodingHint(caps),
+		// No inputenc here, although the old hint offered it: the format already reads UTF-8, and
+		// what stops these characters is that nothing defines them, which inputenc does not change.
+		// The examples are ones this engine draws; `\"o` and `\textdegree` were in this hint, and on
+		// this engine neither renders.
+		hint: encodingHint([...offenders.keys()]),
 	});
 }
 
-function encodingHint(caps: EngineCapabilities): string {
-	// The source reaches TeX as UTF-8 bytes (engine-src/worker.ts writes input.tex through
-	// TextEncoder), so a multi-byte character arrives as two or three separate 8-bit characters.
-	// Plain TeX renders that as mojibake; a LaTeX with inputenc reassembles it — which is why the
-	// second sentence is gated on the .sty actually being bundled rather than offered blind.
-	const base =
-		'Each of these reaches TeX as two or three separate 8-bit characters, so it prints as garbage or errors outright. ' +
-		'Write them as TeX commands instead — $\\alpha$, \\"o, \\textdegree.';
-	return caps.files.has('inputenc.sty')
-		? `${base} Alternatively \\usepackage[utf8]{inputenc}, which is bundled, teaches LaTeX to reassemble them.`
-		: base;
+/**
+ * Advice that is true for the characters actually found. A dieresis has no spelling that works on
+ * this engine, so offering `\"u` — the old hint did — would send the user from one blank diagram to
+ * another; ° and × do have math equivalents that render.
+ */
+function encodingHint(found: string[]): string {
+	const dieresis = found.some((ch) => ch.normalize('NFD').includes('̈'));
+	const parts = [
+		'The engine typesets most accented letters, curly quotes and dashes itself, but not these: TeX either ' +
+			'leaves each one out with an error or produces a diagram the SVG converter cannot draw.',
+	];
+	if (dieresis) {
+		parts.push(
+			'Letters with a dieresis (ä, ö, ü) cannot be drawn at all yet, however they are written — \\"u fails the same way.',
+		);
+	}
+	parts.push(
+		'Where TeX has a command, write that instead: $^\\circ$, $\\times$, $\\Omega$, $\\rightarrow$.',
+	);
+	return parts.join(' ');
 }
 
 function codepoint(ch: string): string {
