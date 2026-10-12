@@ -52,8 +52,12 @@
 	stroke: var(--tikz-paper);
 }
 
-/* Per-block colour modes (%!tikz colors=...). */
-.tikzjax-figure.is-preserve {
+/* Per-block colour modes (%!tikz colors=...). Every mode mounts the same stored artifact, whose ink
+   is currentColor and whose paper is a class, so a mode is nothing but these two tokens. Invert pins
+   them like preserve and filters the result: without that, its dark-theme filter was applied to the
+   theme's light ink and turned it dark. */
+.tikzjax-figure.is-preserve,
+.tikzjax-figure.is-invert {
 	--tikz-ink: #000;
 	--tikz-paper: #fff;
 }

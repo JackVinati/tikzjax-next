@@ -1,5 +1,3 @@
-import type { ColorMode } from '../types';
-
 /**
  * The colour model. See internal/DESIGN.md §7.5.
  *
@@ -72,15 +70,19 @@ export function classifyColor(value: string): PaintClass {
 /**
  * Rewrite the document's paints so the stored artifact is theme-neutral.
  *
- * `preserve` and `invert` are no-ops here on purpose: `invert` is a CSS filter over the literal
- * black-on-white the engine produced, and it only works if that literal survives to mount time.
- * `paper` runs the same DOM pass as `adapt` — the difference between the two is entirely in the
- * `--tikz-ink` / `--tikz-paper` values the wrapper class sets, which is what keeps the colour mode
- * out of the cache key (types.ts: `colors` lives in `Presentation`, not `BakedOptions`).
+ * The same pass for every colour mode, and that is what keeps the mode out of the cache key
+ * (types.ts: `colors` lives in `Presentation`, not `BakedOptions`). One artifact is served to every
+ * block with the same source, so it must not depend on which block rendered it first. The modes
+ * differ only in the `--tikz-ink` / `--tikz-paper` values the wrapper class sets in base.css:
+ * `preserve` and `paper` pin them to TeX's own black and white, and `invert` pins them too, then
+ * filters the result in a dark theme.
+ *
+ * It used to skip `preserve` and `invert`, on the reasoning that the filter needs the literal
+ * black-on-white to survive. The filter only needs black-on-white to be what is DRAWN, which the
+ * pinned tokens give it. Skipping stored the literal instead, and the first mode to render a
+ * diagram then decided the colours of every other mode served that artifact.
  */
-export function applyColorModel(doc: Document, mode: ColorMode): void {
-	if (mode !== 'adapt' && mode !== 'paper') return;
-
+export function applyColorModel(doc: Document): void {
 	const root = doc.documentElement as Element | null;
 	if (root === null) return;
 

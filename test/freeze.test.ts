@@ -437,7 +437,7 @@ describe('freezeSvg: the standalone file', () => {
 			'<text id="lbl" style="line-height: 0; color: black" font-family="cmr10">n</text>' +
 			'</svg>';
 		const doc = parse(engine);
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 		const neutral = new XMLSerializer().serializeToString(doc.documentElement);
 
 		// The stored artifact leans on Obsidian for both halves.

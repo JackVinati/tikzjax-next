@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { applyColorModel, classifyColor, PAPER_FILL_CLASS, PAPER_STROKE_CLASS } from '../src/svg/colors';
 import { applyInkBounds, formatNumber, formatViewBox, parseViewBox } from '../src/svg/geometry';
 import { PipelineError, runPipeline, type Stage } from '../src/svg/pipeline';
+import { buildStages } from '../src/svg/stages';
+import type { ColorMode } from '../src/types';
 
 function parse(svg: string): Document {
 	return new DOMParser().parseFromString(svg, 'image/svg+xml');
@@ -91,7 +93,7 @@ describe('applyColorModel — the four emitters', () => {
 
 	it('rewrites all four to currentColor', () => {
 		const doc = svgDoc(emitters);
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		expect(one(doc, 'rect').getAttribute('fill')).toBe('currentColor');
 		expect(one(doc, 'text').getAttribute('fill')).toBe('currentColor');
@@ -103,7 +105,7 @@ describe('applyColorModel — the four emitters', () => {
 
 	it('preserves the rest of an unquoted style declaration', () => {
 		const doc = svgDoc(emitters);
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		const style = one(doc, 'span').getAttribute('style') ?? '';
 		expect(style).toContain('line-height: 0');
@@ -112,7 +114,7 @@ describe('applyColorModel — the four emitters', () => {
 
 	it('does not disturb the attributes it has no opinion about', () => {
 		const doc = svgDoc(emitters);
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		expect(one(doc, 'text').getAttribute('alignment-baseline')).toBe('baseline');
 		expect(one(doc, 'path').getAttribute('fill')).toBe('none');
@@ -120,7 +122,7 @@ describe('applyColorModel — the four emitters', () => {
 
 	it('handles a style declaration with no spaces and in upper case', () => {
 		const doc = svgDoc('<span style="COLOR:BLACK">y</span><g style="fill:#000;stroke:#000"/>');
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		expect(one(doc, 'span').getAttribute('style')).toBe('color: currentColor');
 		expect(one(doc, 'g').getAttribute('style')).toBe('fill: currentColor; stroke: currentColor');
@@ -128,21 +130,21 @@ describe('applyColorModel — the four emitters', () => {
 
 	it('keeps !important when rewriting a declaration', () => {
 		const doc = svgDoc('<g style="stroke: rgb(0%,0%,0%) !important"/>');
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		expect(one(doc, 'g').getAttribute('style')).toBe('stroke: currentColor !important');
 	});
 
 	it('leaves a style attribute byte-identical when nothing in it matched', () => {
 		const doc = svgDoc('<g style="fill:red;stroke-width:.4pt"/>');
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		expect(one(doc, 'g').getAttribute('style')).toBe('fill:red;stroke-width:.4pt');
 	});
 
 	it('splits declarations on top-level semicolons only', () => {
 		const doc = svgDoc(`<g style="fill:white;background-image:url('a;b.png')"/>`);
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		const g = one(doc, 'g');
 		expect(g.getAttribute('style')).toBe(`background-image:url('a;b.png')`);
@@ -151,7 +153,7 @@ describe('applyColorModel — the four emitters', () => {
 
 	it('removes the style attribute when the paper paint was all it held', () => {
 		const doc = svgDoc('<g style="fill: white"/>');
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		expect(one(doc, 'g').hasAttribute('style')).toBe(false);
 		expect(one(doc, 'g').getAttribute('class')).toBe(PAPER_FILL_CLASS);
@@ -161,7 +163,7 @@ describe('applyColorModel — the four emitters', () => {
 describe('applyColorModel — paper', () => {
 	it('removes the attribute and adds a class rather than writing var()', () => {
 		const doc = svgDoc('<circle fill="white"/><line stroke="#FFFFFF"/>');
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		const circle = one(doc, 'circle');
 		expect(circle.hasAttribute('fill')).toBe(false);
@@ -178,15 +180,15 @@ describe('applyColorModel — paper', () => {
 
 	it('appends to an existing class list without duplicating', () => {
 		const doc = svgDoc(`<g class="pgfsys" fill="white" stroke="white"/>`);
-		applyColorModel(doc, 'adapt');
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
+		applyColorModel(doc);
 
 		expect(one(doc, 'g').getAttribute('class')).toBe(`pgfsys ${PAPER_FILL_CLASS} ${PAPER_STROKE_CLASS}`);
 	});
 
 	it('leaves a white `color` verbatim — there is no tz-paper-color rule to resolve it', () => {
 		const doc = svgDoc('<span style="color: white">y</span><text color="white">z</text>');
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		expect(one(doc, 'span').getAttribute('style')).toBe('color: white');
 		expect(one(doc, 'text').getAttribute('color')).toBe('white');
@@ -202,7 +204,7 @@ describe("applyColorModel — the author's deliberate white (#15)", () => {
 
 	it('adapt: the white disc becomes paper, never black, and the orange is untouched', () => {
 		const doc = svgDoc(fixture);
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		const disc = doc.querySelectorAll('circle')[0];
 		expect(disc?.hasAttribute('fill')).toBe(false);
@@ -217,36 +219,31 @@ describe("applyColorModel — the author's deliberate white (#15)", () => {
 		expect(out).not.toContain('white');
 	});
 
-	it('preserve: the document is left exactly as the engine emitted it', () => {
-		const doc = svgDoc(fixture);
-		const before = serialize(doc);
-		applyColorModel(doc, 'preserve');
+	/**
+	 * The colour mode is presentation: it is not in the cache key, so one stored artifact is served
+	 * to every block with the same source, whatever its `colors=`. When preserve and invert skipped
+	 * the pass, the artifact kept literal black and white, and whichever mode rendered a diagram
+	 * first decided what every other mode got: an adapt block served from an invert block's render
+	 * drew black ink on a dark theme, and an invert block served from an adapt block's render was
+	 * filtered from theme ink into dark ink. The modes now differ only in CSS (base.css).
+	 */
+	it('stores one template for every colour mode', () => {
+		const modes: ColorMode[] = ['adapt', 'preserve', 'paper', 'invert'];
+		const templates = modes.map((colors) => {
+			const result = runPipeline(svgDoc(fixture), buildStages({ colors, optimize: 'targeted' }));
+			return serialize(result.doc);
+		});
 
-		expect(serialize(doc)).toBe(before);
-	});
-
-	it('invert is a CSS filter, so the literal black and white must survive the pass', () => {
-		const doc = svgDoc(fixture);
-		const before = serialize(doc);
-		applyColorModel(doc, 'invert');
-
-		expect(serialize(doc)).toBe(before);
-	});
-
-	it('paper runs the same DOM pass as adapt — the mode lives in the CSS variables', () => {
-		const adapted = svgDoc(fixture);
-		applyColorModel(adapted, 'adapt');
-		const papered = svgDoc(fixture);
-		applyColorModel(papered, 'paper');
-
-		expect(serialize(papered)).toBe(serialize(adapted));
+		expect(new Set(templates).size).toBe(1);
+		expect(templates[0]).toContain('currentColor');
+		expect(templates[0]).toContain(PAPER_FILL_CLASS);
 	});
 
 	it('is idempotent, so a re-run over a cached artifact changes nothing', () => {
 		const doc = svgDoc(fixture);
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 		const once = serialize(doc);
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		expect(serialize(doc)).toBe(once);
 	});
@@ -267,7 +264,7 @@ describe('applyColorModel — gradients (#73)', () => {
 
 	it('leaves every stop alone — rewriting a ball-colour ramp flattens the shading', () => {
 		const doc = svgDoc(fixture);
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		const stops = doc.querySelectorAll('stop');
 		expect(stops.length).toBe(3);
@@ -280,7 +277,7 @@ describe('applyColorModel — gradients (#73)', () => {
 
 	it('still adapts the element that references the gradient', () => {
 		const doc = svgDoc(fixture);
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		expect(one(doc, 'rect').getAttribute('fill')).toBe('url(#g)');
 		expect(one(doc, 'rect').getAttribute('stroke')).toBe('currentColor');
@@ -573,7 +570,7 @@ describe('runPipeline', () => {
 		const doc = svgDoc('<rect fill="black"/>', 'width="100pt" height="50pt" viewBox="-72 -72 100 50"');
 		const result = runPipeline(doc, [
 			stage('colors', (d) => {
-				applyColorModel(d, 'adapt');
+				applyColorModel(d);
 			}),
 			stage('geometry', (d) => {
 				applyInkBounds(d, { x: -72, y: -72, width: 110, height: 60 });
@@ -589,7 +586,7 @@ describe('runPipeline', () => {
 		const doc = svgDoc('<rect fill="black"/>', 'width="100pt" height="50pt" viewBox="-72 -72 100 50"');
 		const result = runPipeline(doc, [
 			stage('colors', (d) => {
-				applyColorModel(d, 'adapt');
+				applyColorModel(d);
 			}),
 			stage('geometry', (d) => {
 				applyInkBounds(d, { x: 0, y: 0, width: 0, height: 0 });
@@ -623,7 +620,7 @@ describe('applyColorModel — <mask> contents are opacity data, not ink', () => 
 
 	it('leaves every paint inside a mask exactly as the engine wrote it', () => {
 		const doc = svgDoc(fixture);
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		expect(one(doc, 'mask rect').getAttribute('fill')).toBe('white');
 		expect(one(doc, 'mask rect').hasAttribute('class')).toBe(false);
@@ -633,7 +630,7 @@ describe('applyColorModel — <mask> contents are opacity data, not ink', () => 
 
 	it('still adapts the masked element itself', () => {
 		const doc = svgDoc(fixture);
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		const painted = doc.querySelectorAll('svg > rect')[0];
 		expect(painted?.getAttribute('fill')).toBe('currentColor');
@@ -645,7 +642,7 @@ describe('applyColorModel — <mask> contents are opacity data, not ink', () => 
 			'<defs><pattern id="p"><path d="M0 0" stroke="black"/></pattern></defs>' +
 				'<rect fill="url(#p)"/>',
 		);
-		applyColorModel(doc, 'adapt');
+		applyColorModel(doc);
 
 		expect(one(doc, 'pattern path').getAttribute('stroke')).toBe('currentColor');
 	});
