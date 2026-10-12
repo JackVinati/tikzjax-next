@@ -78,6 +78,9 @@ reason is not a surprise.
   on your machine. The community store rebuilds releases and compares bytes.
 - **The cache key is a promise.** Anything that changes the bytes a diagram renders to has to change
   its cache key, or users keep seeing the old render. `internal/DESIGN.md` §6 says what goes in it.
+  A change to a stage in `src/svg/` that can write a different template bumps `PIPELINE_REVISION`
+  in `src/cache/key.ts`, once per release; `test/pipeline-revision.test.ts` fails on any edit there
+  until you have decided, and records the stage modules' fingerprint.
 - **Two TypeScripts.** TypeScript 7 typechecks; TypeScript 5.9.3 runs the store lint and the
   `typecheck:legacy` cross-check, because the store's review reads the code through TypeScript 5.
   `internal/DECISIONS.md` D5 says why. Both packages ship a `tsc`, so scripts name theirs by path.
@@ -85,9 +88,11 @@ reason is not a surprise.
 ## Changing the engine
 
 The worker in `engine-src/` is ordinary TypeScript, bundled by the normal build: changing it needs no
-Docker. It does move ENGINE_ID, which recompiles every user's cached diagrams once (say so in the
-commit message), and the list of characters the engine typesets is recorded against that id, so run
-`npm run scan:native` and commit `src/source/native-unicode.ts` with the change.
+Docker. ENGINE_ID is the sha256 of the minified worker, so a change that reaches it — code, a TeX
+file, a dependency the worker bundles, an esbuild that minifies differently, but not a comment —
+moves the id, which recompiles every user's cached diagrams once (say so in the commit message). The
+list of characters the engine typesets is recorded against that id, so run `npm run scan:native` and
+commit `src/source/native-unicode.ts` with the change.
 
 Rebuilding the engine itself — after a change under `engine-build/` — needs Docker and about
 fifteen minutes:
