@@ -154,10 +154,12 @@ Four things can name a preamble file. Every one that applies is used, in this or
 file can use what an earlier one defines:
 
 1. **The vault-wide preamble**: Settings → Preamble → Preamble file, a path in the vault. The field
-   suggests the vault's `.tex`, `.sty`, `.ltx`, `.def` and `.txt` files as you type.
+   suggests the vault's `.tex`, `.sty`, `.ltx`, `.def` and `.txt` files as you type; the path takes
+   effect when you pick one, press Enter or leave the field.
 2. **A folder preamble**: a file named `tikz-preamble.tex` in the note's folder, or failing that the
    nearest folder above it, up to the root of the vault. Only the nearest one is used. The name is
-   Settings → Preamble → Folder preamble file name; empty turns the search off.
+   Settings → Preamble → Folder preamble file name, which takes effect the same way; empty turns
+   the search off.
 3. **`%!tikz preamble=path/to/file.tex`** in the block.
 4. **`%:input path/to/file.tex`** lines in the block, in the order they are written. A preamble file
    can `%:input` other files as well.

@@ -1,4 +1,4 @@
-import type { App, ButtonComponent, TFile } from 'obsidian';
+import type { App, ButtonComponent, TextComponent, TFile } from 'obsidian';
 import { AbstractInputSuggest, Notice, PluginSettingTab, Setting } from 'obsidian';
 import type TikzjaxNextPlugin from '../main';
 import { STRINGS } from '../ui/strings';
@@ -65,15 +65,53 @@ function markDestructive(button: ButtonComponent): ButtonComponent {
  */
 export class TikzSettingTab extends PluginSettingTab {
 	private readonly plugin: TikzjaxNextPlugin;
+	/** The fields applied when they are left, each applied once more when the tab closes. */
+	private readonly onLeave: (() => Promise<void>)[] = [];
 
 	constructor(app: App, plugin: TikzjaxNextPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
+	/**
+	 * Closing the settings is leaving whatever field was being typed in, and the browser does not
+	 * promise a `change` event for a focused field taken out of the page.
+	 */
+	override hide(): void {
+		for (const apply of this.onLeave) void apply();
+		super.hide();
+	}
+
+	/**
+	 * Apply a text field when it is left — Enter, a click elsewhere, the settings closing — rather
+	 * than at every keystroke, which is when the component's own `onChange` fires.
+	 *
+	 * For the preamble paths. Each save re-processes the open notes when it changes how their
+	 * blocks are built, and a path typed a letter at a time names a missing file at every letter
+	 * but the last: each diagram on screen turned into a "Preamble file not found" card as the
+	 * path was typed, and a folder name typed slowly queued compiles under each of its prefixes.
+	 * A value left as it was saves nothing, so leaving the field after picking a suggestion, or
+	 * closing the settings after leaving it, is not a second change.
+	 */
+	private applyOnLeave(
+		text: TextComponent,
+		setting: { get: () => string; set: (value: string) => void },
+	): (value: string) => Promise<void> {
+		const apply = async (value: string): Promise<void> => {
+			const trimmed = value.trim();
+			if (trimmed === setting.get()) return;
+			setting.set(trimmed);
+			await this.plugin.saveSettings();
+		};
+		text.inputEl.addEventListener('change', () => void apply(text.getValue()));
+		this.onLeave.push(() => apply(text.getValue()));
+		return apply;
+	}
+
 	override display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
+		this.onLeave.length = 0;
 
 		new Setting(containerEl).setName('Appearance').setHeading();
 
@@ -184,10 +222,6 @@ export class TikzSettingTab extends PluginSettingTab {
 		// exactly the diagrams that read it.
 		new Setting(containerEl).setName('Preamble').setHeading();
 
-		const savePreamblePath = async (value: string): Promise<void> => {
-			this.plugin.settings.preamblePath = value.trim();
-			await this.plugin.saveSettings();
-		};
 		new Setting(containerEl)
 			.setName('Preamble file')
 			.setDesc(
@@ -195,10 +229,14 @@ export class TikzSettingTab extends PluginSettingTab {
 					'Leave empty for none.',
 			)
 			.addText((t) => {
-				t.setPlaceholder('preambles/tikz.tex')
-					.setValue(this.plugin.settings.preamblePath)
-					.onChange(savePreamblePath);
-				new PreambleFileSuggest(this.app, t.inputEl, (path) => void savePreamblePath(path));
+				t.setPlaceholder('preambles/tikz.tex').setValue(this.plugin.settings.preamblePath);
+				const apply = this.applyOnLeave(t, {
+					get: () => this.plugin.settings.preamblePath,
+					set: (value) => {
+						this.plugin.settings.preamblePath = value;
+					},
+				});
+				new PreambleFileSuggest(this.app, t.inputEl, (path) => void apply(path));
 			});
 
 		new Setting(containerEl)
@@ -207,12 +245,15 @@ export class TikzSettingTab extends PluginSettingTab {
 				'Also use the nearest file with this name in the note’s folder or a folder above it, ' +
 					'after the preamble file. Leave empty to turn this off.',
 			)
-			.addText((t) =>
-				t.setValue(this.plugin.settings.autoPreambleName).onChange(async (value) => {
-					this.plugin.settings.autoPreambleName = value.trim();
-					await this.plugin.saveSettings();
-				}),
-			);
+			.addText((t) => {
+				t.setValue(this.plugin.settings.autoPreambleName);
+				this.applyOnLeave(t, {
+					get: () => this.plugin.settings.autoPreambleName,
+					set: (value) => {
+						this.plugin.settings.autoPreambleName = value;
+					},
+				});
+			});
 
 		new Setting(containerEl).setName('Diagnostics').setHeading();
 

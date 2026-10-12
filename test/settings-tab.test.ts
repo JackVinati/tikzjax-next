@@ -13,6 +13,13 @@ import type TikzjaxNextPlugin from '../src/main';
 vi.mock('obsidian', () => {
 	class FakeInput {
 		value = '';
+		private readonly listeners = new Map<string, Array<() => void>>();
+		addEventListener(type: string, listener: () => void): void {
+			this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+		}
+		dispatch(type: string): void {
+			for (const listener of this.listeners.get(type) ?? []) listener();
+		}
 	}
 
 	class FakeText {
@@ -27,14 +34,25 @@ vi.mock('obsidian', () => {
 			this.inputEl.value = value;
 			return this;
 		}
+		getValue(): string {
+			return this.inputEl.value;
+		}
 		onChange(callback: (value: string) => unknown): this {
 			this.changed = callback;
 			return this;
 		}
-		/** What typing does: the input changes, then the callback runs. */
+		/**
+		 * What typing does: the input changes, then the component's callback runs — on every
+		 * keystroke, since Obsidian wires it to the `input` event.
+		 */
 		type(value: string): unknown {
 			this.inputEl.value = value;
+			this.inputEl.dispatch('input');
 			return this.changed?.(value);
+		}
+		/** What Enter or leaving the field does: the browser's `change` event. */
+		leave(): void {
+			this.inputEl.dispatch('change');
 		}
 	}
 
@@ -103,8 +121,12 @@ vi.mock('obsidian', () => {
 	class PluginSettingTab {
 		readonly app: unknown;
 		readonly containerEl = { empty: (): void => undefined };
+		hidden = false;
 		constructor(app: unknown) {
 			this.app = app;
+		}
+		hide(): void {
+			this.hidden = true;
 		}
 	}
 
@@ -140,6 +162,7 @@ interface RecordedText {
 	readonly inputEl: { value: string };
 	readonly placeholder: string;
 	type(value: string): unknown;
+	leave(): void;
 }
 
 interface RecordedSetting {
@@ -177,7 +200,7 @@ const FILES = [
 let settings: TikzSettings;
 let saves: number;
 
-function display(): void {
+function display(): TikzSettingTab {
 	fakes.Setting.all.length = 0;
 	fakes.AbstractInputSuggest.all.length = 0;
 	const app = { vault: { getFiles: () => FILES } } as unknown as App;
@@ -190,7 +213,9 @@ function display(): void {
 		cache: null,
 		engineInventory: null,
 	} as unknown as TikzjaxNextPlugin;
-	new TikzSettingTab(app, plugin).display();
+	const tab = new TikzSettingTab(app, plugin);
+	tab.display();
+	return tab;
 }
 
 function setting(name: string): RecordedSetting {
@@ -219,6 +244,8 @@ describe('settings tab — preamble', () => {
 		expect(field.inputEl.value).toBe('old.tex');
 
 		await field.type('  preambles/tikz.tex ');
+		field.leave();
+		await Promise.resolve();
 		expect(settings.preamblePath).toBe('preambles/tikz.tex');
 		expect(saves).toBe(1);
 	});
@@ -229,9 +256,60 @@ describe('settings tab — preamble', () => {
 		expect(field.inputEl.value).toBe('tikz-preamble.tex');
 
 		await field.type('');
+		field.leave();
 		expect(settings.autoPreambleName).toBe('');
 		await field.type(' shared.tex ');
+		field.leave();
 		expect(settings.autoPreambleName).toBe('shared.tex');
+	});
+
+	/**
+	 * Every save re-processes the open notes, and a path typed a letter at a time names a missing
+	 * file at every letter but the last: each diagram on screen turned into a "Preamble file not
+	 * found" card while the path was being typed, and a folder name typed slowly queued compiles
+	 * under each of its prefixes.
+	 */
+	for (const name of ['Preamble file', 'Folder preamble file name']) {
+		it(`applies ${name.toLowerCase()} once the field is left, not at every keystroke`, async () => {
+			const before = { ...settings };
+			display();
+			const field = setting(name).texts[0]!;
+
+			for (const typed of ['p', 'pr', 'pre', 'preambles/tikz.tex']) await field.type(typed);
+			expect(saves).toBe(0);
+			expect(settings).toEqual(before);
+
+			field.leave();
+			await Promise.resolve();
+			expect(saves).toBe(1);
+			expect(settings).not.toEqual(before);
+		});
+	}
+
+	it('applies a path still being typed when the settings are closed', async () => {
+		const tab = display();
+		await setting('Preamble file').texts[0]!.type('preambles/tikz.tex');
+		await setting('Folder preamble file name').texts[0]!.type('shared.tex');
+		expect(saves).toBe(0);
+
+		tab.hide();
+		await Promise.resolve();
+		expect(settings.preamblePath).toBe('preambles/tikz.tex');
+		expect(settings.autoPreambleName).toBe('shared.tex');
+		expect(saves).toBe(2);
+	});
+
+	it('does not save a field that is left as it was', async () => {
+		settings.preamblePath = 'old.tex';
+		const tab = display();
+		const field = setting('Preamble file').texts[0]!;
+
+		await field.type('old.te');
+		await field.type('old.tex ');
+		field.leave();
+		tab.hide();
+		await Promise.resolve();
+		expect(saves).toBe(0);
 	});
 
 	it('suggests TeX files from the vault for the preamble file', () => {
@@ -252,7 +330,7 @@ describe('settings tab — preamble', () => {
 	});
 
 	it('saves a picked suggestion', async () => {
-		display();
+		const tab = display();
 		const suggest = fakes.AbstractInputSuggest.all[0]!;
 		suggest.selectSuggestion(file('macros/physics.sty'), {});
 		await Promise.resolve();
@@ -260,6 +338,12 @@ describe('settings tab — preamble', () => {
 		expect(settings.preamblePath).toBe('macros/physics.sty');
 		expect(suggest.inputEl.value).toBe('macros/physics.sty');
 		expect(suggest.closed).toBe(true);
+		expect(saves).toBe(1);
+
+		// Leaving the field afterwards, or closing the settings, is not a second change.
+		setting('Preamble file').texts[0]!.leave();
+		tab.hide();
+		await Promise.resolve();
 		expect(saves).toBe(1);
 	});
 });
