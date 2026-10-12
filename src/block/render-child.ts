@@ -271,7 +271,7 @@ export class TikzBlock extends MarkdownRenderChild {
 				// A new attempt: whatever failed last time is not what this one will say.
 				this.failure = null;
 				this.origin = null;
-				void this.submit(effect.priority);
+				void this.submit(effect.priority, effect.resumed === true);
 				return;
 
 			case 'release':
@@ -372,7 +372,7 @@ export class TikzBlock extends MarkdownRenderChild {
 		});
 	}
 
-	private async submit(priority: Priority): Promise<void> {
+	private async submit(priority: Priority, resumed: boolean): Promise<void> {
 		// Fast mode is a preset, and one band up is part of it (internal/DESIGN.md §7.11): a fast
 		// diagram is the cheapest work in the queue, so it goes ahead of the full renders around it.
 		// Here rather than in the machine, which decides the band from where the block is and
@@ -389,6 +389,7 @@ export class TikzBlock extends MarkdownRenderChild {
 				onStart: () => this.dispatch({ type: 'slot' }),
 				...(this.spec.isExport ? { ignorePoison: true } : {}),
 				...(this.spec.uncapped ? { uncapped: true } : {}),
+				...(resumed ? { resumed: true } : {}),
 			});
 
 			// The RAW engine output, not a finished artifact: the pipeline is a separate phase, and

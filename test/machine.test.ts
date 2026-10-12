@@ -354,6 +354,9 @@ describe('a job interrupted through no fault of its own', () => {
 	 * The engine was killed under it — the app was backgrounded, the engine restarted — so the
 	 * diagram did nothing wrong and nothing is known against it. It used to arrive as a timeout:
 	 * an error card telling the user to simplify a diagram that never got to run.
+	 *
+	 * It goes back `resumed`: the queue had let it in once, so it neither counts against the cap
+	 * nor can be turned away by it, which it was when it came back into a full queue.
 	 */
 	it('COMPILING + interrupted -> SCHEDULING again, at the band it had, with no card', () => {
 		const compiling = drive(initialState(), [
@@ -363,7 +366,7 @@ describe('a job interrupted through no fault of its own', () => {
 		]).state;
 		const [state, fx] = reduce(compiling, { type: 'interrupted' });
 		expect(state).toMatchObject({ phase: 'SCHEDULING', priority: 2 });
-		expect(fx).toEqual([{ kind: 'submit', priority: 2 }]);
+		expect(fx).toEqual([{ kind: 'submit', priority: 2, resumed: true }]);
 		expect(state.settled).toBe(false);
 	});
 
@@ -379,7 +382,7 @@ describe('a job interrupted through no fault of its own', () => {
 	it('a block still waiting for its slot is re-submitted, not stranded', () => {
 		const [state, fx] = reduce(stateFor('SCHEDULING'), { type: 'interrupted' });
 		expect(state.phase).toBe('SCHEDULING');
-		expect(fx).toEqual([{ kind: 'submit', priority: 1 }]);
+		expect(fx).toEqual([{ kind: 'submit', priority: 1, resumed: true }]);
 	});
 
 	it('is a no-op everywhere a job is not in flight', () => {

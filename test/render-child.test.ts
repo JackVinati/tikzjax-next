@@ -453,6 +453,37 @@ describe('a compile the engine was stopped under', () => {
 		expect(el.querySelector('.tikzjax-error')).toBeNull();
 	});
 
+	/**
+	 * main.ts pauses the queue and then kills the worker when the phone is backgrounded. Nothing
+	 * starts while paused, so the interrupted job went back into a list of waiting jobs that was
+	 * already at the cap — 16 on a phone — as the newest in its band, which is the one the cap
+	 * turns away: the diagram being compiled came back as a "Render diagram" button.
+	 */
+	it('goes back in line when the phone is backgrounded with the queue full, first, and is not turned away', async () => {
+		const { queue, runs } = realQueue(undefined, 2);
+		const els = [container(), container(), container()];
+		const blocks = els.map((el, i) => new TikzBlock(el, spec({ key: `K${i}` }), deps({ queue })));
+		for (const block of blocks) block.onload();
+		await vi.waitFor(() => expect(queue.size()).toBe(2));
+		expect(runs.map((run) => run.job.key)).toEqual(['K0']);
+
+		queue.pause();
+		runs[0]?.reject(new InterruptedError('the app was backgrounded'));
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		for (const el of els) expect(el.querySelector('.tikzjax-manual')).toBeNull();
+		expect(runs).toHaveLength(1);
+
+		queue.resume();
+		for (let i = 1; i <= els.length; i++) {
+			await vi.waitFor(() => expect(runs).toHaveLength(i + 1));
+			runs[i]?.resolve(RESULT);
+		}
+		// It was the diagram being compiled, so it is the one to pick up again.
+		expect(runs.map((run) => run.job.key)).toEqual(['K0', 'K0', 'K1', 'K2']);
+		for (const block of blocks) await block.settled;
+		for (const el of els) expect(el.querySelector('svg')).not.toBeNull();
+	});
+
 	it('still settles when the plugin is unloading, so nothing — a PDF export least of all — waits forever', async () => {
 		// Unloading closes the queue, then disposes the host, which interrupts the running job.
 		// The block asks again, is refused by the closed queue, and comes to rest.

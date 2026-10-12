@@ -167,7 +167,11 @@ export type Effect =
 	| { kind: 'unobserve' }
 	| { kind: 'startDebounce' }
 	| { kind: 'clearTimers' }
-	| { kind: 'submit'; priority: Priority }
+	/**
+	 * `resumed`: the same job going back in line after the engine was stopped under it. The queue
+	 * had let it in once, so it is not turned away now (queue/queue.ts SubmitOptions.resumed).
+	 */
+	| { kind: 'submit'; priority: Priority; resumed?: true }
 	| { kind: 'release' }
 	| { kind: 'startRender' }
 	| { kind: 'abort' }
@@ -421,12 +425,13 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 					]);
 				}
 				case 'interrupted':
-					// Back in line at the band it had, with the placeholder still up. An unloaded
+					// Back in line at the band it had, with the placeholder still up, and at the head
+					// of that band rather than behind everything submitted while it ran. An unloaded
 					// block has nobody left to show the diagram to, so it just ends; the next mount
 					// of this key will ask for it again.
 					if (state.unloaded) return go(state, { phase: 'DISPOSED' }, []);
 					return go(state, { phase: 'SCHEDULING', priority: state.priority }, [
-						{ kind: 'submit', priority: state.priority },
+						{ kind: 'submit', priority: state.priority, resumed: true },
 					]);
 				case 'expired':
 					// Not aborted: the compile runs on, bounded by its own timeout, and still serves

@@ -117,6 +117,19 @@ export interface SubmitOptions {
 	uncapped?: boolean | undefined;
 
 	/**
+	 * The caller's job had started and the engine was stopped under it: this is that job going back
+	 * in line, not new work.
+	 *
+	 * It was let in once, so the depth cap neither counts it nor turns it away, and it goes ahead of
+	 * its band rather than behind the jobs that were waiting while it ran. On a phone the queue is
+	 * paused before the worker is killed, so nothing starts in between, and the job used to come
+	 * back into a waiting list that was still full, as its newest entry — the one the cap evicts:
+	 * the diagram that was compiling turned into a "Render diagram" button. There is at most one
+	 * such job per slot, so the cap is never passed by more than the concurrency.
+	 */
+	resumed?: boolean | undefined;
+
+	/**
 	 * Called once when the job this caller is waiting for starts — at once, if it already has.
 	 *
 	 * Per caller, not per job, because dedup gives every caller of a key the FIRST caller's job. The
@@ -168,7 +181,7 @@ interface Entry<J, T> {
 	 * Each owner maps to its own start notification (SubmitOptions.onStart).
 	 */
 	owners: Map<unknown, (() => void) | undefined>;
-	/** Some caller submitted it `uncapped`: the depth cap neither evicts it nor counts it. */
+	/** Some caller submitted it `uncapped` or `resumed`: the depth cap neither evicts it nor counts it. */
 	uncapped: boolean;
 	started: boolean;
 	promise: Promise<T>;
@@ -194,6 +207,11 @@ export class RenderQueue<J, T> {
 
 	private inflight = 0;
 	private seq = 0;
+	/**
+	 * The `seq` of a resumed job: counting up from far below any other, so each goes ahead of its
+	 * band and the resumed keep their own order among themselves.
+	 */
+	private resumedSeq = Number.MIN_SAFE_INTEGER;
 	private paused = false;
 	private closed = false;
 
@@ -300,7 +318,7 @@ export class RenderQueue<J, T> {
 			// timeout does not, and `start` re-arms its timer to honour a raise.
 			if (priority < existing.priority) existing.priority = priority;
 			if (timeoutMs > existing.timeoutMs) existing.timeoutMs = timeoutMs;
-			if (opts?.uncapped === true) existing.uncapped = true;
+			if (opts?.uncapped === true || opts?.resumed === true) existing.uncapped = true;
 			return existing.promise;
 		}
 
@@ -311,14 +329,15 @@ export class RenderQueue<J, T> {
 			reject = rej;
 		});
 
+		const resumed = opts?.resumed === true;
 		const entry: Entry<J, T> = {
 			key,
 			job,
 			priority,
 			timeoutMs,
-			seq: this.seq++,
+			seq: resumed ? this.resumedSeq++ : this.seq++,
 			owners: new Map([[owner, opts?.onStart]]),
-			uncapped: opts?.uncapped === true,
+			uncapped: opts?.uncapped === true || resumed,
 			started: false,
 			promise,
 			resolve,
@@ -502,7 +521,8 @@ export class RenderQueue<J, T> {
 	 * the rest back as `depth-cap` for a "Render diagram" button, instead of committing to hours.
 	 */
 	private enforceDepthCap(): void {
-		// Uncapped jobs are bounded by their export's budget instead, so they take none of the cap.
+		// Uncapped jobs are bounded some other way — an export by its budget, a resumed job by the
+		// slot it already had — so they take none of the cap.
 		let capped = 0;
 		for (const entry of this.pending) if (!entry.uncapped) capped++;
 

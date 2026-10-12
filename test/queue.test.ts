@@ -1007,6 +1007,38 @@ describe('depth cap', () => {
 		expect(isQueueError(second.error, 'depth-cap')).toBe(true);
 	});
 
+	it('takes back a job the engine was stopped under, full or not: first in its band, and never turned away', async () => {
+		// The phone being backgrounded: the queue is paused, the worker killed, and the job that was
+		// in it submitted again — into a queue whose waiting list is still full.
+		const h = harness({ concurrency: 1, depthCap: 2 });
+		h.submit('a', 1);
+		await tick();
+		const b = h.submit('b', 1);
+		const c = h.submit('c', 1);
+		await tick();
+
+		h.queue.pause();
+		h.runs.fail('a', new Error('interrupted'));
+		await tick();
+		const again = track(h.queue.submit('a', { id: 'a' }, 1, 1000, { resumed: true }));
+		await tick();
+		expect([again.status, b.status, c.status]).toEqual(['pending', 'pending', 'pending']);
+		expect(h.queue.size()).toBe(3);
+
+		// It takes none of the cap: new work still meets the cap where it was.
+		const d = h.submit('d', 1);
+		await tick();
+		expect(isQueueError(d.error, 'depth-cap')).toBe(true);
+
+		h.queue.resume();
+		await tick();
+		expect(h.runs.started).toEqual(['a', 'a']);
+		h.runs.finish('a');
+		await tick();
+		expect(again.status).toBe('fulfilled');
+		expect(h.runs.started).toEqual(['a', 'a', 'b']);
+	});
+
 	it('does not evict a job that a free slot can take immediately', async () => {
 		const h = harness({ concurrency: 2, depthCap: 1 });
 		const a = h.submit('a', 1);

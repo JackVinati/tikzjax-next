@@ -272,7 +272,7 @@ test/
 | `SCHEDULING` | `ok` \| `err` \| `timeout` \| `interrupted` | as from `COMPILING` | a settlement is proof the job ran, so an unexpected one can never strand a block here |
 | `COMPILING` | `ok` | `TRANSFORMING` | attach log buffer to the result |
 | `COMPILING` | `err` \| `timeout` | `FAILED` | on timeout: `terminate()` the worker that job is in, and only it; add the key to the session poison set |
-| `COMPILING` \| `SCHEDULING` | `interrupted` | `SCHEDULING` (same band) / `DISPOSED` if unloaded | the engine was stopped under the job — backgrounding, Restart, unload — so it goes back in line. **Never a card** |
+| `COMPILING` \| `SCHEDULING` | `interrupted` | `SCHEDULING` (same band) / `DISPOSED` if unloaded | the engine was stopped under the job — backgrounding, Restart, unload — so it goes back in line, `resumed`: at the head of its band and past the depth cap. **Never a card** |
 | `LOOKUP` \| `SCHEDULING` \| `COMPILING` | `expired` | `FAILED(export-budget)` | a PDF export's total budget ran out (§5.4); a running compile is not aborted, and still serves other blocks on its key |
 | `COMPILING` | `unload` | stays `COMPILING` | **we do not cancel a running job.** We already paid; the result goes to cache. Exceptions: plugin unload, timeout, or > 2× concurrency newer jobs queued behind it |
 | `TRANSFORMING` | `ok` | `MOUNTING` | write L1 + L2 |
@@ -447,7 +447,7 @@ A new engine is a new `TexHost` with a new `id`. Because `id` is a cache-key inp
 - **Dedup**: `inflight: Map<key, {promise, refs, controller}>`. Two panes showing the same block, or the same block twice in one note, produce **one** compile and two mounts with **different** instance nonces.
 - **Release**: `refs--`. At zero, an unstarted job is dropped from `pending`; a started job is left to complete and cache.
 - **Every job settles in a `finally`** that releases the slot. The failure mode of §2.2 defect 1 is structurally excluded.
-- **Depth cap**: overflow demotes the farthest-from-viewport jobs to `IDLE_MANUAL`, so a 200-diagram note never commits to hours of work. A block of a PDF export (inside `.print`) or of "Render all diagrams in this note" is submitted `uncapped`: never evicted and not counted, because each is bounded otherwise — the export by its total budget, the run by its Stop button — and a button is what the PDF would print.
+- **Depth cap**: overflow demotes the farthest-from-viewport jobs to `IDLE_MANUAL`, so a 200-diagram note never commits to hours of work. A block of a PDF export (inside `.print`) or of "Render all diagrams in this note" is submitted `uncapped`: never evicted and not counted, because each is bounded otherwise — the export by its total budget, the run by its Stop button — and a button is what the PDF would print. A job the engine was stopped under goes back `resumed`: ahead of its band, and neither counted nor evicted, since it was let in once. On a phone the queue is paused before the kill, so it came back into a waiting list that was still full, as the newest entry the cap turns away, and the diagram that was compiling became a "Render diagram" button.
 - **Poison set**: a key that timed out is refused for the rest of the session (never persisted). Cleared by Retry (for its key), by any settings change, by Restart the TeX engine, and by reload. Only a `timeout` poisons; a job that never reached a booted worker (`stalled`) or was interrupted does not.
 
 ### 5.2 The RPC layer
