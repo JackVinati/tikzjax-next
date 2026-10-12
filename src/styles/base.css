@@ -44,11 +44,15 @@
 /* The root <svg> can carry the paint itself — SVGO's moveElemsAttrsToGroup hoists a fill shared by
    every child, and optimize runs before colors — so the descendant selector alone would silently
    leave the author's white as theme ink. Found in review. */
-.tikzjax-figure svg.tz-paper-fill {
+.tikzjax-figure svg.tz-paper-fill,
+.tikzjax-zoom-surface svg .tz-paper-fill,
+.tikzjax-zoom-surface svg.tz-paper-fill {
 	fill: var(--tikz-paper);
 }
 .tikzjax-figure svg .tz-paper-stroke,
-.tikzjax-figure svg.tz-paper-stroke {
+.tikzjax-figure svg.tz-paper-stroke,
+.tikzjax-zoom-surface svg .tz-paper-stroke,
+.tikzjax-zoom-surface svg.tz-paper-stroke {
 	stroke: var(--tikz-paper);
 }
 
@@ -242,7 +246,15 @@
 	height: min(85vh, 800px);
 }
 
+/* The zoom view mounts the same stored artifact, outside any .tikzjax-figure, so it needs the colour
+   tokens and the paper rules as well. Without them a paper-class shape inherits the ink of the group
+   around it, and a white label plate turns into a block of ink over its own label. Drawn as adapt:
+   the surface is the theme's background. */
 .tikzjax-zoom-surface {
+	--tikz-ink: var(--text-normal);
+	--tikz-paper: var(--background-primary);
+
+	color: var(--tikz-ink);
 	flex: 1;
 	overflow: hidden;
 	display: flex;
@@ -261,6 +273,7 @@
 }
 
 .tikzjax-zoom-surface svg {
+	fill: currentColor;
 	max-width: none;
 	max-height: none;
 	transform-origin: center center;

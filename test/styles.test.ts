@@ -64,6 +64,22 @@ describe('colour modes in base.css', () => {
 		});
 	}
 
+	it('draws the zoom view, which mounts the same artifact outside any figure, as adapt', () => {
+		// Without these a paper-class shape inherits the ink of the group around it, so a white
+		// label plate turns into a block of ink over its own label.
+		const surface = declarationsOf('.tikzjax-zoom-surface');
+		expect(surface.get('--tikz-ink')).toBe('var(--text-normal)');
+		expect(surface.get('--tikz-paper')).toBe('var(--background-primary)');
+		expect(surface.get('color')).toBe('var(--tikz-ink)');
+		expect(declarationsOf('.tikzjax-zoom-surface svg').get('fill')).toBe('currentColor');
+		expect(declarationsOf('.tikzjax-zoom-surface svg .tz-paper-fill').get('fill')).toBe(
+			'var(--tikz-paper)',
+		);
+		expect(declarationsOf('.tikzjax-zoom-surface svg .tz-paper-stroke').get('stroke')).toBe(
+			'var(--tikz-paper)',
+		);
+	});
+
 	it('inverts only in a dark theme, over that black on white', () => {
 		const filter = declarationsOf('.theme-dark .tikzjax-figure.is-invert svg').get('filter');
 		expect(filter).toBe('invert(1) hue-rotate(180deg)');
