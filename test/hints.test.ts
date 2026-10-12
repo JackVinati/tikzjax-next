@@ -339,6 +339,17 @@ describe('the remaining kinds', () => {
 		expect(d.hint).not.toMatch(/Reload Obsidian/);
 	});
 
+	it('says output that failed the sanitizer is not shown, and why', () => {
+		const d = explain(
+			failure({ kind: 'pipeline', message: 'SVG parse failed (parsererror): unclosed tag' }),
+			caps(),
+		);
+
+		expect(d.message).toBe('The diagram could not be made safe to show, so it is not shown.');
+		expect(d.hint).toMatch(/^SVG parse failed \(parsererror\): unclosed tag\. /);
+		expect(d.hint).toMatch(/never put on the page or cached/);
+	});
+
 	it('does not say TeX ran for a block with nothing in it to run', () => {
 		const d = explain(failure({ kind: 'empty-source', message: '' }), caps());
 

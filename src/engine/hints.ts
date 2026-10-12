@@ -17,13 +17,14 @@ import type { Diagnostic, EngineCapabilities, TexErrorKind } from '../types';
 /**
  * The failure as the worker reports it; matches `ErrorMessage` minus the transport fields.
  *
- * Plus the two the plugin finds without running TeX, which need copy of their own because the
- * engine's would be false: `poisoned` (refused because the same diagram timed out earlier this
- * session) and `empty-source` (nothing between the fences). Both used to fall through to
- * `empty-output` — "TeX ran successfully but produced no diagram" — when TeX had not run at all.
+ * Plus the ones the plugin finds itself, which need copy of their own because the engine's would
+ * be false: `poisoned` (refused because the same diagram timed out earlier this session) and
+ * `empty-source` (nothing between the fences) — both used to fall through to `empty-output`, "TeX
+ * ran successfully but produced no diagram", when TeX had not run at all — and `pipeline` (TeX's
+ * output could not be put through sanitize and ids, so it is not shown).
  */
 export interface TexFailure {
-	kind: TexErrorKind | 'poisoned' | 'empty-source';
+	kind: TexErrorKind | 'poisoned' | 'empty-source' | 'pipeline';
 	message: string;
 	/** The first `! …` line, when there was one. */
 	firstError?: string | undefined;
@@ -430,6 +431,15 @@ export function explain(error: TexFailure, caps: EngineCapabilities): Diagnostic
 				message: 'This block is empty.',
 				hint: 'There is no TeX in it to compile, only blank lines or %!tikz options. Write the diagram between the fences, e.g. a \\begin{tikzpicture} … \\end{tikzpicture}.',
 			};
+
+		case 'pipeline': {
+			const detail = withoutTrailingStop(error.message.trim());
+			return {
+				kind: 'empty-output',
+				message: 'The diagram could not be made safe to show, so it is not shown.',
+				hint: `${detail ? `${detail}. ` : ''}TeX produced output, but it did not get through the sanitizer, and markup that has not is never put on the page or cached. If the diagram writes raw SVG with \\special{dvisvgm:raw …}, check that it is well-formed; if it does not, please report this.`,
+			};
+		}
 
 		// The budget counts only the time TeX itself ran: the engine's boot is not charged to the
 		// diagram, so "it took too long" is a statement about the diagram. Raising the timeout

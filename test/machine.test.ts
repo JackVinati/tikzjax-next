@@ -54,7 +54,7 @@ const REACHABLE: ReadonlyArray<readonly [Phase, Event[]]> = [
 	['TRANSFORMING', TO_TRANSFORMING],
 	['MOUNTING', TO_MOUNTING],
 	['MOUNTED', [...TO_MOUNTING, { type: 'mounted' }]],
-	['MOUNTED_DEGRADED', [...TO_TRANSFORMING, { type: 'stageThrew' }, { type: 'mounted' }]],
+	['MOUNTED_DEGRADED', [...TO_TRANSFORMING, { type: 'degraded' }, { type: 'mounted' }]],
 	['IDLE_MANUAL', [...TO_LOOKUP, { type: 'miss', lazy: 'manual' }]],
 	['FAILED', [...LOAD, { type: 'emptySource' }]],
 	['DISPOSED', [...LOAD, { type: 'unload' }]],
@@ -204,22 +204,43 @@ describe('transition table', () => {
 		expect(kinds(fx)).toEqual(['persist', 'mount']);
 	});
 
-	it('TRANSFORMING + stageThrew -> MOUNTING(degraded) and does NOT persist', () => {
-		const [state, fx] = reduce(stateFor('TRANSFORMING'), { type: 'stageThrew' });
+	it('TRANSFORMING + degraded -> MOUNTING(degraded) and does NOT persist', () => {
+		// An optional stage was skipped. What is left has passed sanitize and ids, so it may be
+		// shown — with its warning — but it must never become the cached answer for this key.
+		const [state, fx] = reduce(stateFor('TRANSFORMING'), { type: 'degraded' });
 		expect(state).toMatchObject({ phase: 'MOUNTING', degraded: true });
 		expect(fx).toEqual([{ kind: 'mount', degraded: true }]);
-		// A degraded artifact must never become the cached answer for this key.
+		expect(kinds(fx)).not.toContain('persist');
+	});
+
+	it('TRANSFORMING + stageThrew -> FAILED: no document passed sanitize and ids, so nothing mounts', () => {
+		// It used to mount the RAW engine output "degraded", past the sanitizer, and measure()
+		// then persisted it. The engine passes \special{dvisvgm:raw} through verbatim.
+		const [state, fx] = reduce(stateFor('TRANSFORMING'), { type: 'stageThrew' });
+		expect(state).toMatchObject({ phase: 'FAILED', reason: 'pipeline' });
+		expect(fx).toEqual([{ kind: 'mountErrorCard', reason: 'pipeline' }, { kind: 'settle' }]);
+		expect(kinds(fx)).not.toContain('mount');
 		expect(kinds(fx)).not.toContain('persist');
 	});
 
 	it('MOUNTING + mounted -> MOUNTED or MOUNTED_DEGRADED, per the degraded flag it carried', () => {
-		const [ok] = reduce(stateFor('MOUNTING'), { type: 'mounted' });
+		const [ok, okFx] = reduce(stateFor('MOUNTING'), { type: 'mounted' });
 		expect(ok.phase).toBe('MOUNTED');
+		expect(okFx).toContainEqual({ kind: 'measure', persist: true });
 
-		const degraded = drive(initialState(), [...TO_TRANSFORMING, { type: 'stageThrew' }]).state;
+		const degraded = drive(initialState(), [...TO_TRANSFORMING, { type: 'degraded' }]).state;
 		const [mounted, fx] = reduce(degraded, { type: 'mounted' });
 		expect(mounted.phase).toBe('MOUNTED_DEGRADED');
 		expect(kinds(fx)).toEqual(['measure', 'settle']);
+		// The measurement may correct what is on screen, but a degraded artifact is never stored.
+		expect(fx).toContainEqual({ kind: 'measure', persist: false });
+	});
+
+	it('MOUNTING + err -> FAILED, rather than a block that never settles', () => {
+		// A mount that finds no <svg> in the artifact reports `err`; MOUNTING used to ignore it.
+		const [state, fx] = reduce(stateFor('MOUNTING'), { type: 'err', reason: 'empty-output' });
+		expect(state).toMatchObject({ phase: 'FAILED', reason: 'empty-output' });
+		expect(kinds(fx)).toEqual(['mountErrorCard', 'settle']);
 	});
 
 	it('MOUNTED + css-change is a no-op: colour is CSS', () => {
@@ -300,10 +321,12 @@ describe('COMPILING + unload does not cancel a started job', () => {
 	});
 
 	it('a late stage failure after unload disposes without persisting a degraded artifact', () => {
-		const start = stateFor('COMPILING');
-		const { state, effects } = drive(start, [{ type: 'unload' }, { type: 'ok' }, { type: 'stageThrew' }]);
-		expect(state.phase).toBe('DISPOSED');
-		expect(kinds(effects)).toEqual(['release', 'transform', 'settle']);
+		for (const late of ['stageThrew', 'degraded'] as const) {
+			const start = stateFor('COMPILING');
+			const { state, effects } = drive(start, [{ type: 'unload' }, { type: 'ok' }, { type: late }]);
+			expect(state.phase).toBe('DISPOSED');
+			expect(kinds(effects)).toEqual(['release', 'transform', 'settle']);
+		}
 	});
 
 	it('a late error after unload disposes quietly — no card into a dead DOM', () => {
@@ -390,6 +413,7 @@ describe('unknown events', () => {
 		{ type: 'timeout' },
 		{ type: 'interrupted' },
 		{ type: 'stageThrew' },
+		{ type: 'degraded' },
 		{ type: 'mounted' },
 		{ type: 'cssChange' },
 		{ type: 'retry' },
@@ -516,7 +540,7 @@ const LAZY = ['on', 'off', 'manual'] as const;
 /** Every event, including the ones that make no sense where they land. That is the point. */
 function randomEvent(rnd: () => number): Event {
 	const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)] as T;
-	const n = Math.floor(rnd() * 22);
+	const n = Math.floor(rnd() * 23);
 	switch (n) {
 		case 0:
 			return { type: 'load' };
@@ -557,6 +581,8 @@ function randomEvent(rnd: () => number): Event {
 			return { type: 'interrupted' };
 		case 15:
 			return { type: 'stageThrew' };
+		case 21:
+			return { type: 'degraded' };
 		case 16:
 			return { type: 'mounted' };
 		case 17:

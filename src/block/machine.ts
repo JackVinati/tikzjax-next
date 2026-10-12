@@ -33,8 +33,11 @@ export type ManualReason = 'manual' | 'depthCap';
  * `poisoned` is deliberately distinct from `timeout`: the first says "a previous run of this exact
  * key timed out, so this one was not run; Retry runs it", the second is this render's own failure.
  * Same kind of card, different copy and different truth.
+ *
+ * `pipeline`: TeX produced output, but no document came out of the SVG pipeline having passed
+ * sanitize and ids, so there is nothing that may be shown.
  */
-export type FailureReason = TexErrorKind | 'empty-source' | 'preflight' | 'poisoned';
+export type FailureReason = TexErrorKind | 'empty-source' | 'preflight' | 'poisoned' | 'pipeline';
 
 export type Phase =
 	| 'INIT'
@@ -127,7 +130,10 @@ export type Event =
 	 * the diagram did nothing wrong, and nothing is known against it.
 	 */
 	| { type: 'interrupted' }
+	/** The pipeline produced nothing safe: the output did not parse, or `sanitize` or `ids` threw. */
 	| { type: 'stageThrew' }
+	/** The pipeline skipped an optional stage. What is left passed sanitize and ids. */
+	| { type: 'degraded' }
 	| { type: 'mounted' }
 	| { type: 'cssChange' }
 	| { type: 'retry' }
@@ -158,8 +164,12 @@ export type Effect =
 	| { kind: 'poison' }
 	| { kind: 'unpoison' }
 	| { kind: 'mount'; degraded: boolean }
-	/** `fonts.ready` + `getBBox()`, and only on the first mount of a key — the child decides. */
-	| { kind: 'measure' }
+	/**
+	 * `fonts.ready` + `getBBox()`, and only on the first mount of a key — the child decides.
+	 * `persist` is false for a degraded mount: the measurement may correct what is on screen, but
+	 * it must not be how a degraded artifact reaches the cache after all.
+	 */
+	| { kind: 'measure'; persist: boolean }
 	| { kind: 'mountErrorCard'; reason: FailureReason }
 	| { kind: 'mountManualButton'; reason: ManualReason }
 	| { kind: 'settle' };
@@ -276,7 +286,7 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 					// replace, so the child mounts synchronously and the section is never flagged async.
 					return go(state, { phase: 'MOUNTED' }, [
 						{ kind: 'mount', degraded: false },
-						{ kind: 'measure' },
+						{ kind: 'measure', persist: true },
 					]);
 				case 'l1Miss':
 					return go(state, { phase: 'LOOKUP' }, [{ kind: 'lookup' }]);
@@ -414,14 +424,24 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 						{ kind: 'persist' },
 						{ kind: 'mount', degraded: false },
 					]);
-				case 'stageThrew':
-					// Fall back to the previous stage's output and mount it with a warning chip —
-					// never a silent raw-SVG fallthrough (#15, #48). Not persisted: a degraded
-					// artifact must not become the cached answer for this key. The `ids` stage is
-					// exempt from degradation upstream of here, so this can never reintroduce #12.
+				case 'degraded':
+					// The pipeline skipped an optional stage and kept the last good document, which
+					// has still passed sanitize and ids — those two are never skipped — so it may be
+					// shown, with a warning chip, never as a silent raw-SVG fallthrough (#15, #48).
+					// Not persisted: a degraded artifact must not become the cached answer for this
+					// key.
 					if (state.unloaded) return go(state, { phase: 'DISPOSED' }, []);
 					return go(state, { phase: 'MOUNTING', degraded: true }, [
 						{ kind: 'mount', degraded: true },
+					]);
+				case 'stageThrew':
+					// There is no document that passed sanitize and ids: the output did not parse, or
+					// one of those two threw. This used to mount "degraded" too — which meant the RAW
+					// engine output, past the sanitizer, and measure() then persisted it. An error
+					// card is the only safe thing left to show.
+					if (state.unloaded) return go(state, { phase: 'DISPOSED' }, []);
+					return go(state, { phase: 'FAILED', reason: 'pipeline' }, [
+						{ kind: 'mountErrorCard', reason: 'pipeline' },
 					]);
 				default:
 					return noop(state);
@@ -429,10 +449,17 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 
 		case 'MOUNTING':
 			if (event.type === 'mounted') {
-				const measure: Effect[] = [{ kind: 'measure' }];
+				const measure: Effect[] = [{ kind: 'measure', persist: !state.degraded }];
 				return state.degraded
 					? go(state, { phase: 'MOUNTED_DEGRADED' }, measure)
 					: go(state, { phase: 'MOUNTED' }, measure);
+			}
+			if (event.type === 'err') {
+				// The artifact held no <svg> to mount. Ignoring this left the block in MOUNTING,
+				// never settled.
+				return go(state, { phase: 'FAILED', reason: event.reason }, [
+					{ kind: 'mountErrorCard', reason: event.reason },
+				]);
 			}
 			return noop(state);
 

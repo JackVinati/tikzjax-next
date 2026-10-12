@@ -233,11 +233,13 @@ export class TikzBlock extends MarkdownRenderChild {
 				return;
 
 			case 'mount':
-				this.mount(effect.degraded);
+				// Degraded or not, the artifact has passed sanitize and ids, and its warning — the
+				// only difference on screen — travels with it.
+				this.mount();
 				return;
 
 			case 'measure':
-				void this.measure();
+				void this.measure(effect.persist);
 				return;
 
 			case 'mountErrorCard':
@@ -396,6 +398,13 @@ export class TikzBlock extends MarkdownRenderChild {
 	private transform(origin: 'l3' | 'render'): void {
 		const raw = this.artifact?.template;
 		if (raw === undefined) {
+			this.failure = new TexError(
+				'empty-output',
+				[],
+				undefined,
+				undefined,
+				'there was no output to prepare',
+			);
 			this.dispatch({ type: 'stageThrew' });
 			return;
 		}
@@ -428,6 +437,10 @@ export class TikzBlock extends MarkdownRenderChild {
 
 			const template = serializeSvg(result.doc);
 			const previous = this.artifact;
+			// What TeX said when it recovered from an error, then what the pipeline skipped. The
+			// first used to be dropped right here, so a diagram with a piece quietly missing showed
+			// nothing at all about it.
+			const warnings = [...(previous?.warn ? [previous.warn] : []), ...result.warnings];
 			this.artifact = {
 				v: 1,
 				template,
@@ -440,18 +453,24 @@ export class TikzBlock extends MarkdownRenderChild {
 				origin: origin === 'l3' ? 'legacy-import' : 'render',
 				createdAt: previous?.createdAt ?? this.deps.now(),
 				lastUsed: this.deps.now(),
-				...(result.warnings.length ? { warn: result.warnings.join('; ') } : {}),
+				...(warnings.length ? { warn: warnings.join('; ') } : {}),
 			};
 
-			this.dispatch({ type: 'ok' });
+			this.dispatch({ type: result.degraded ? 'degraded' : 'ok' });
 		} catch (error) {
+			// Nothing came out that passed sanitize and ids. The raw engine output is dropped here
+			// rather than left lying in `artifact`, where a mount or a measurement could reach it:
+			// that is how it used to be shown, and cached, past the sanitizer.
+			this.artifact = null;
 			this.failure =
-				error instanceof TexError ? error : new TexError('empty-output', [], String(error));
+				error instanceof TexError
+					? error
+					: new TexError('empty-output', [], undefined, undefined, String(error));
 			this.dispatch({ type: 'stageThrew' });
 		}
 	}
 
-	private mount(degraded: boolean): void {
+	private mount(): void {
 		if (this.state.unloaded || !this.artifact) return;
 
 		this.deps.ensureFonts(this.body.doc);
@@ -465,7 +484,9 @@ export class TikzBlock extends MarkdownRenderChild {
 			return;
 		}
 
-		if (degraded && this.artifact.warn) renderWarningChip(this.body, this.artifact.warn);
+		// Whenever there is one, and not only for a degraded mount: what TeX reported while it
+		// recovered is stored with the artifact, and is just as true on a cache hit.
+		if (this.artifact.warn) renderWarningChip(this.body, this.artifact.warn);
 		for (const warning of this.spec.preflight) {
 			if (warning.kind === 'warning') renderWarningChip(this.body, warning.message);
 		}
@@ -473,7 +494,8 @@ export class TikzBlock extends MarkdownRenderChild {
 		this.dispatch({ type: 'mounted' });
 	}
 
-	private async measure(): Promise<void> {
+	/** `persist` is the machine's call: false for a degraded mount, which must never be cached. */
+	private async measure(persist: boolean): Promise<void> {
 		const svg = this.body.querySelector('svg');
 		if (!svg || !this.artifact || this.artifact.viewBox !== null) return;
 
@@ -482,7 +504,7 @@ export class TikzBlock extends MarkdownRenderChild {
 
 		this.artifact = withMeasuredBounds(this.artifact, bounds);
 		svg.setAttribute('viewBox', this.artifact.viewBox ?? '');
-		if (!this.spec.options.nocache) this.deps.cache.put(this.spec.key, this.artifact);
+		if (persist && !this.spec.options.nocache) this.deps.cache.put(this.spec.key, this.artifact);
 	}
 
 	private mountError(reason: FailureReason): void {
@@ -493,9 +515,12 @@ export class TikzBlock extends MarkdownRenderChild {
 		renderErrorCard(this.body, {
 			diagnostic: explain(
 				{
-					// The two failures found without running TeX have no TexError to describe them,
-					// and falling back to `empty-output` told the user TeX had run.
-					kind: reason === 'poisoned' || reason === 'empty-source' ? reason : failure.kind,
+					// The failures the plugin finds itself have no TexError kind of their own, and
+					// falling back to `empty-output` told the user TeX had run and drawn nothing.
+					kind:
+						reason === 'poisoned' || reason === 'empty-source' || reason === 'pipeline'
+							? reason
+							: failure.kind,
 					message: failure.message,
 					firstError: failure.firstError,
 					line: failure.line,

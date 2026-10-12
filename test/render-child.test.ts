@@ -10,6 +10,29 @@ beforeAll(() => {
 	installObsidianDom(window as unknown as Window & typeof globalThis);
 });
 
+// One optional stage that throws, switched on per test: the only way to reach a pipeline that
+// degrades without being handed output so broken that it cannot be parsed at all.
+const pipeline = vi.hoisted(() => ({ breakAStage: false }));
+vi.mock('../src/svg/stages', async (importOriginal) => {
+	const real = await importOriginal<typeof import('../src/svg/stages')>();
+	return {
+		...real,
+		buildStages: (options: Parameters<typeof real.buildStages>[0]) => {
+			const stages = real.buildStages(options);
+			if (!pipeline.breakAStage) return stages;
+			return [
+				...stages,
+				{
+					name: 'broken',
+					run: () => {
+						throw new Error('this stage is broken');
+					},
+				},
+			];
+		},
+	};
+});
+
 // -------------------------------------------------------------------------------------------
 
 const CAPS: EngineCapabilities = { expl3: true, twoPass: false, packages: {}, files: new Set() };
@@ -531,5 +554,130 @@ describe('the card for a diagram that timed out earlier', () => {
 
 		expect(cardText(el)).toBe('This diagram timed out earlier in this session, so it was not run again.');
 		expect(el.querySelector('.tikzjax-error-hint')?.textContent).toMatch(/Retry/);
+	});
+});
+
+// -------------------------------------------------------------------------------------------
+// What may be mounted and cached
+
+/**
+ * Make the mount-time measurement succeed, as it does in a real window: happy-dom has no
+ * `document.fonts`, and its getBBox measures nothing. Without this, measure() never reaches the
+ * cache, and a test could not see what it would have stored.
+ */
+function measurable(): () => void {
+	const doc = document as unknown as { fonts?: unknown };
+	const proto = window.SVGElement.prototype as unknown as { getBBox?: unknown };
+	const realBBox = proto.getBBox;
+	Object.defineProperty(doc, 'fonts', { value: { ready: Promise.resolve() }, configurable: true });
+	proto.getBBox = () => ({ x: 0, y: 0, width: 40, height: 20 });
+	return () => {
+		delete doc.fonts;
+		proto.getBBox = realBBox;
+	};
+}
+
+/** A queue that starts the job and hands back exactly this engine result. */
+function answering(result: TexResult): BlockDeps['queue'] {
+	return {
+		submit: (_k: string, _j: TexJobSpec, _p: number, _t: number, opts?: { onStart?: () => void }) => {
+			opts?.onStart?.();
+			return Promise.resolve(result);
+		},
+		release: () => undefined,
+	} as unknown as BlockDeps['queue'];
+}
+
+describe('engine output the SVG pipeline cannot make safe', () => {
+	/**
+	 * When the engine's SVG does not parse, or a mandatory stage throws, no document has passed
+	 * sanitize and ids. The block used to mount the RAW engine string anyway — "degraded" — and
+	 * measure() then wrote it to L1 and L2, so every later open replayed it. The engine passes
+	 * `\special{dvisvgm:raw …}` through verbatim, so that string is author-controlled markup.
+	 */
+	it('is never mounted and never cached, and the card says why', async () => {
+		const restore = measurable();
+		try {
+			const cache = fakeCache();
+			const put = vi.spyOn(cache, 'put');
+			const malformed =
+				'<svg xmlns="http://www.w3.org/2000/svg"><g><rect onclick="alert(1)" width="10" height="10"/></svg>';
+			const el = container();
+			const child = new TikzBlock(
+				el,
+				spec(),
+				deps({ cache, queue: answering({ svg: malformed, log: [], durationMs: 1 }) }),
+			);
+
+			child.onload();
+			await child.settled;
+			// Long enough for a measure() to have run and stored something, had one been started.
+			await new Promise((resolve) => setTimeout(resolve, 10));
+
+			expect(el.querySelector('[onclick]')).toBeNull();
+			expect(el.querySelector('svg')).toBeNull();
+			expect(put).not.toHaveBeenCalled();
+			expect(cardText(el)).toBe('The diagram could not be made safe to show, so it is not shown.');
+		} finally {
+			restore();
+		}
+	});
+});
+
+describe('a pipeline that skipped an optional stage', () => {
+	it('mounts what passed sanitize and ids, says what was skipped, and caches none of it', async () => {
+		const restore = measurable();
+		pipeline.breakAStage = true;
+		try {
+			const cache = fakeCache();
+			const put = vi.spyOn(cache, 'put');
+			const el = container();
+			const child = new TikzBlock(
+				el,
+				spec(),
+				deps({ cache, queue: answering({ svg: SVG, log: [], durationMs: 1 }) }),
+			);
+
+			child.onload();
+			await child.settled;
+			await new Promise((resolve) => setTimeout(resolve, 10));
+
+			expect(el.querySelector('svg')).not.toBeNull();
+			expect(el.querySelector('.tikzjax-warning-chip')?.textContent).toMatch(/broken stage failed/);
+			// Not by `persist`, and not by the measurement that follows the mount either.
+			expect(put).not.toHaveBeenCalled();
+		} finally {
+			pipeline.breakAStage = false;
+			restore();
+		}
+	});
+});
+
+describe('a diagram TeX recovered from an error in', () => {
+	it('mounts with what TeX reported beside it', async () => {
+		// Only possible because the worker injects \nonstopmode: a diagram that renders with a
+		// piece quietly missing. The warning was set on the raw result and dropped by the
+		// pipeline, and the chip was only ever drawn for a degraded mount.
+		const el = container();
+		const child = new TikzBlock(
+			el,
+			spec(),
+			deps({
+				queue: answering({
+					svg: SVG,
+					log: [],
+					durationMs: 1,
+					firstError: 'Undefined control sequence.',
+				}),
+			}),
+		);
+
+		child.onload();
+		await child.settled;
+
+		expect(el.querySelector('svg')).not.toBeNull();
+		expect(el.querySelector('.tikzjax-warning-chip')?.textContent).toBe(
+			'TeX reported: Undefined control sequence.',
+		);
 	});
 });
