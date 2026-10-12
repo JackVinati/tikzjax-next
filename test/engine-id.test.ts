@@ -1,5 +1,4 @@
-/// <reference types="vite/client" />
-import type { Plugin } from 'esbuild';
+import { buildSync, type Plugin } from 'esbuild';
 import { describe, expect, it } from 'vitest';
 import { buildWorker, ENGINE_ID_PLACEHOLDER } from '../scripts/engine-assets.mjs';
 
@@ -18,12 +17,24 @@ import { buildWorker, ENGINE_ID_PLACEHOLDER } from '../scripts/engine-assets.mjs
 /** Relative to the project root, which is where vitest runs (vitest.config.ts lives there). */
 const ROOT = '.';
 
-/** engine-src/*.ts exactly as this checkout has them, keyed `../engine-src/<name>.ts`. */
-const SOURCES = import.meta.glob<string>('../engine-src/*.ts', {
-	query: '?raw',
-	import: 'default',
-	eager: true,
-});
+/**
+ * A file's text exactly as this checkout has it.
+ *
+ * Through esbuild's text loader, as test/twopass.test.ts reads the worker, because tsconfig keeps
+ * Node's types out of this project. Not `import.meta.glob`: vitest caches the expanded glob with
+ * the test file, so a file added to engine-src/ would be missing from it until the cache went.
+ */
+function readText(path: string): string {
+	const [out] = buildSync({
+		entryPoints: [path],
+		loader: { '.ts': 'text' },
+		write: false,
+		format: 'iife',
+		globalName: 'TEXT',
+	}).outputFiles;
+	if (!out) throw new Error(`esbuild produced no output for ${path}`);
+	return new Function(`${out.text}\nreturn TEXT;`)() as string;
+}
 
 /** `virtual:engine-assets` with one bundled TeX file whose base64 contents are `texFile`. */
 const stubAssets = (texFile = 'AAAA'): Plugin => ({
@@ -52,9 +63,7 @@ const checkout = (
 	setup(build) {
 		build.onLoad({ filter: /[\\/]engine-src[\\/][\w-]+\.ts$/ }, (args) => {
 			const name = /([\w-]+\.ts)$/.exec(args.path)?.[1] ?? '';
-			const text = SOURCES[`../engine-src/${name}`];
-			if (text === undefined) throw new Error(`no engine-src/${name} in this checkout`);
-			return { contents: edit(name, text).split(/\r?\n/).join(eol), loader: 'ts' };
+			return { contents: edit(name, readText(args.path)).split(/\r?\n/).join(eol), loader: 'ts' };
 		});
 	},
 });

@@ -25,13 +25,12 @@
  * to grow (a bridge that swaps non-native characters for something drawable would make every
  * probe look native), and this has to see what the bare engine does.
  */
-import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import esbuild from 'esbuild';
-import { dvi2html } from '@drgrice1/dvi2html';
+import { fileURLToPath } from 'node:url';
+import { importEngineForNode } from './dvi2html-patch.mjs';
 import { buildWorker, engineIsBuilt } from './engine-assets.mjs';
 import { readEngineFile } from './engine-files.mjs';
 
@@ -64,9 +63,9 @@ if (!engineIsBuilt(root)) {
  * These are the blocks LaTeX's UTF-8 support declares characters in, plus the scripts users most
  * often type and that fail here (Greek, Cyrillic). Probing their undeclared codepoints too is what
  * checks the declaration census below: if one of them ever came out native, the census would be
- * missing characters, and the scan stops rather than trust it. Latin-1 is included although the
- * lint leaves it alone: it is not all native either (° needs a TS1 font dvi2html cannot draw, ä
- * an accent glyph it has no metrics for), and a consumer deciding what to substitute needs that.
+ * missing characters, and the scan stops rather than trust it. Latin-1 is probed like the rest,
+ * because it is not all native either (° compiles into a TS1 font dvi2html cannot draw), and the
+ * lint and a consumer deciding what to substitute both need to know which of it is.
  */
 const RANGES = [
 	[0x00a0, 0x00ff, 'Latin-1 Supplement'],
@@ -88,21 +87,11 @@ const hex = (cp) => cp.toString(16).toUpperCase().padStart(4, '0');
 
 // --- the engine -----------------------------------------------------------------------------------
 
-// Transpiled into node_modules/.cache, as smoke.mjs does, so `@drgrice1/dvi2html` still resolves. Its
-// own directory, so a smoke run at the same time cannot overwrite the module under this one.
-const cacheDir = join(root, 'node_modules', '.cache', 'tikz-scan-native');
-mkdirSync(cacheDir, { recursive: true });
-const forkPath = join(cacheDir, 'library.mjs');
-await esbuild.build({
-	entryPoints: [join(root, 'engine-src', 'library.ts')],
-	outfile: forkPath,
-	bundle: true,
-	format: 'esm',
-	platform: 'node',
-	external: ['@drgrice1/dvi2html'],
-	logLevel: 'warning',
-});
-const library = await import(pathToFileURL(forkPath).href);
+// The fork and the patched dvi2html, bundled as smoke.mjs bundles them: the converter that decides
+// whether a character is drawable has to be the one the plugin ships. Its own cache directory, so a
+// smoke run at the same time cannot overwrite the module under this one.
+const library = await importEngineForNode(root, 'tikz-scan-native');
+const { dvi2html } = library;
 
 const code = new WebAssembly.Module(readEngineFile(OUT, 'tex.wasm'));
 const coredump = new Uint8Array(readEngineFile(OUT, 'core.dump'));

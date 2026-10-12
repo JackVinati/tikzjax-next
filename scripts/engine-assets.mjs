@@ -9,6 +9,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import esbuild from 'esbuild';
+import { dvi2htmlPatch } from './dvi2html-patch.mjs';
 
 export const engineOutDir = (root) => join(root, 'engine-build', 'out');
 
@@ -199,9 +200,11 @@ async function bundleWorker(root, minify, plugins) {
  */
 export async function buildWorker(root, { minify = true, plugins = [] } = {}) {
 	const assets = buildEngineAssets(root);
-	const all = [...plugins, engineAssetsPlugin(assets)];
+	const all = [...plugins, dvi2htmlPatch(), engineAssetsPlugin(assets)];
 
 	const canonical = await bundleWorker(root, true, all);
+	// Hashed with the dvi2html patch already in it, so applying, changing or retiring the patch
+	// moves the id like any other change to what the worker runs.
 	const engineId = engineIdOf(canonical);
 	const shipped = minify ? canonical : await bundleWorker(root, false, all);
 

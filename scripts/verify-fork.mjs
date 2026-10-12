@@ -15,10 +15,10 @@ import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync } from 
 import { gunzipSync } from 'node:zlib';
 import { join, basename } from 'node:path';
 import { readEngineFile, engineFilesPresent } from './engine-files.mjs';
+import { importEngineForNode } from './dvi2html-patch.mjs';
 import { Writable } from 'node:stream';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import esbuild from 'esbuild';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const OUT = join(root, 'engine-build', 'out');
@@ -32,24 +32,15 @@ if (!engineFilesPresent(OUT)) {
 
 // --- load the fork -----------------------------------------------------------------------------
 // Transpiled with esbuild rather than Node's type stripping so this works regardless of the
-// runtime's --experimental-strip-types support.
-// Inside node_modules so that `@drgrice1/dvi2html`, left external, still resolves from here.
+// runtime's --experimental-strip-types support, and bundled with the patched dvi2html the plugin
+// ships. Both engines draw through that one converter: what is compared here is the TeX side, and
+// a converter that threw on a fixture would make the two agree on nothing at all.
 const tmp = join(root, 'node_modules', '.cache', 'tikz-verify');
 mkdirSync(tmp, { recursive: true });
-const forkPath = join(tmp, 'library.mjs');
-await esbuild.build({
-	entryPoints: [join(root, 'engine-src', 'library.ts')],
-	outfile: forkPath,
-	bundle: true,
-	format: 'esm',
-	platform: 'node',
-	external: ['@drgrice1/dvi2html'],
-	logLevel: 'warning',
-});
 
 const upstream = await import(pathToFileURL(join(root, 'engine-src', 'upstream', 'library.js')).href);
-const fork = await import(pathToFileURL(forkPath).href);
-const { dvi2html } = await import('@drgrice1/dvi2html');
+const fork = await importEngineForNode(root, 'tikz-verify');
+const { dvi2html } = fork;
 
 const code = new WebAssembly.Module(readEngineFile(OUT, 'tex.wasm'));
 const coredump = new Uint8Array(readEngineFile(OUT, 'core.dump'));

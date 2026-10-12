@@ -20,10 +20,10 @@ import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync } from 
 import { gunzipSync } from 'node:zlib';
 import { join, basename } from 'node:path';
 import { readEngineFile, engineFilesPresent } from './engine-files.mjs';
+import { importEngineForNode } from './dvi2html-patch.mjs';
 import { Writable } from 'node:stream';
 import process from 'node:process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import esbuild from 'esbuild';
+import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const OUT = join(root, 'engine-build', 'out');
@@ -39,21 +39,11 @@ if (!engineFilesPresent(OUT) || !existsSync(join(DIST, 'tex_files'))) {
 // The fork takes its log sink by injection rather than reaching for postMessage.
 let transcript = [];
 
-// Transpiled into node_modules/.cache so that `@drgrice1/dvi2html`, left external, still resolves.
-const cacheDir = join(root, 'node_modules', '.cache', 'tikz-smoke');
-mkdirSync(cacheDir, { recursive: true });
-const forkPath = join(cacheDir, 'library.mjs');
-await esbuild.build({
-	entryPoints: [join(root, 'engine-src', 'library.ts')],
-	outfile: forkPath,
-	bundle: true,
-	format: 'esm',
-	platform: 'node',
-	external: ['@drgrice1/dvi2html'],
-	logLevel: 'warning',
-});
-const library = await import(pathToFileURL(forkPath).href);
-const { dvi2html } = await import('@drgrice1/dvi2html');
+// The fork and dvi2html bundled together, dvi2html with the patch the shipped worker carries — so
+// these references draw what the plugin draws, and verify-worker can compare against them byte
+// for byte.
+const library = await importEngineForNode(root, 'tikz-smoke');
+const { dvi2html } = library;
 
 const code = new WebAssembly.Module(readEngineFile(OUT, 'tex.wasm'));
 const coredump = new Uint8Array(readEngineFile(OUT, 'core.dump'));
