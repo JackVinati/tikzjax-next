@@ -184,7 +184,8 @@ what held 5.9.3. What does is the community store. Its review lints this code th
 2026-10-12 it flagged a declaration that TypeScript 7 accepted and TypeScript 5 turned into an error
 type, silently untyping the worker's inventory (`types/virtual-engine-assets.d.ts`). `lint:store`
 and `typecheck:legacy` exist to see the code the way that review does, so they stay on a
-TypeScript 5. The trigger to move is the store's toolchain moving, not a release on npm.
+TypeScript 5. The trigger to move is the store's toolchain moving, not a release on npm, and
+`.github/dependabot.yml` ignores TypeScript majors for that reason.
 
 The `overrides` block is not needed to install, contrary to `DESIGN.md` §9.7's warning: with it
 removed, npm resolves the tree without a peer conflict by nesting `obsidian@1.12.3` and `@eslint/js`
