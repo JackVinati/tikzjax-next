@@ -4,6 +4,5 @@
       "siunitx": ""
     }
   },
-  "note": "upstream #30. expl3 v3 package; needs texlive-science in the build image. KNOWN LIMIT: TeX loads the metric (it is bundled) and the WOFF2 face exists, but dvi2html calls tfmData() itself when parsing the DVI and its built-in table covers only Computer Modern. Fixing this means extending or vendoring @drgrice1/dvi2html.",
-  "expect": "unsupported"
+  "note": "upstream #30. expl3 v3 package. \\micro and \\ohm print \\textmu and \\textohm, which LaTeX sets in TS1 (tcrm1000): TeX has the metric, but dvi2html cannot draw the font and no WOFF2 face for it ships. The worker's TS1 shim (engine-src/ts1-shim.ts) draws them from the math fonts instead."
 }

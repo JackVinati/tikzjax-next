@@ -79,9 +79,10 @@ export function dvi2htmlPatch() {
 
 /**
  * engine-src/library.ts and the patched dvi2html, bundled together for Node and imported: the
- * fork's exports plus `dvi2html`. For the scripts that run the engine outside a worker, so they draw
- * with exactly the converter the plugin ships. `name` keeps concurrent scripts out of each other's
- * way under node_modules/.cache.
+ * fork's exports plus `dvi2html`, and the worker's own `buildInput` (engine-src/document.ts). For
+ * the scripts that run the engine outside a worker, so they assemble TeX's input and draw the
+ * result exactly as the plugin does. `name` keeps concurrent scripts out of each other's way under
+ * node_modules/.cache.
  */
 export async function importEngineForNode(root, name) {
 	const dir = join(root, 'node_modules', '.cache', name);
@@ -89,8 +90,11 @@ export async function importEngineForNode(root, name) {
 	const outfile = join(dir, 'engine.mjs');
 	await esbuild.build({
 		stdin: {
-			contents:
-				"export * from './engine-src/library.ts';\nexport { dvi2html } from '@drgrice1/dvi2html';\n",
+			contents: [
+				"export * from './engine-src/library.ts';",
+				"export { buildInput } from './engine-src/document.ts';",
+				"export { dvi2html } from '@drgrice1/dvi2html';",
+			].join('\n'),
 			resolveDir: root,
 			sourcefile: 'engine-for-node.ts',
 			loader: 'ts',

@@ -9,7 +9,8 @@
  *  - the WebAssembly.Module is compiled ONCE, not on every render;
  *  - no `coredump.slice(0)` — at pages=2500 that copy is 156.25 MiB per render — and the dump is
  *    inflated into one buffer rather than glued together from chunks into a second (./inflate);
- *  - \begin{document} wrapping is conditional (upstream nests it into every existing vault);
+ *  - \begin{document} wrapping is conditional (upstream nests it into every existing vault), and the
+ *    input is assembled in ./document, with a TS1 shim for a block that can use one (./ts1-shim);
  *  - \nonstopmode, so a TeX error is logged instead of blocking on the interactive `? ` prompt;
  *  - errors are classified and returned, not swallowed into a broken-image marker;
  *  - threads.js is replaced by the tagged protocol in ./protocol.ts;

@@ -5,6 +5,7 @@
  * engine — worker.ts is an entry point that inflates a 156 MiB dump the moment it is imported.
  */
 import type { RenderOptions } from './protocol';
+import { needsTs1Shim, TS1_SHIM } from './ts1-shim';
 
 const DOCUMENT_START = /\\begin\s*\{document\}/;
 
@@ -26,12 +27,17 @@ export const buildInput = (source: string, options: RenderOptions): TexInput => 
 		.join('');
 
 	const libraries = options.tikzLibraries ? `\\usetikzlibrary{${options.tikzLibraries}}` : '';
+	const given = `${packages}${libraries}${options.addToPreamble ?? ''}`;
+
+	// Only for an input that can use one of its symbols (./ts1-shim), and ahead of everything the
+	// user gave, so that a preamble file redefining one of the same commands still has the last word.
+	const shim = needsTs1Shim(`${given}\n${source}`) ? TS1_SHIM : '';
 
 	// \nonstopmode is why a bad diagram now produces a transcript instead of hanging. Without it
 	// TeX reaches the interactive `? ` prompt and suspends the asyncify'd wasm, and a suspended
 	// asyncify continuation cannot be resumed — only terminated. Upstream #18 #23 #27 #39 #51
 	// #82 #85 #89, roughly 22 reporters, are all downstream of this one token.
-	const preamble = `\\nonstopmode${packages}${libraries}${options.addToPreamble ?? ''}`;
+	const preamble = `\\nonstopmode${shim}${given}`;
 
 	const wrap = options.wrap ?? 'auto';
 	const needsWrap = wrap === 'always' || (wrap === 'auto' && !DOCUMENT_START.test(source));

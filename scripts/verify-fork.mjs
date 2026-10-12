@@ -69,13 +69,8 @@ const dviToSvg = async (dvi) => {
 	return html;
 };
 
-const buildInput = (source, dataset) => {
-	const pkgs = Object.entries(dataset.texPackages ?? {})
-		.map(([n, o]) => `\\usepackage${o ? `[${o}]` : ''}{${n}}`)
-		.join('');
-	const libs = dataset.tikzLibraries ? `\\usetikzlibrary{${dataset.tikzLibraries}}` : '';
-	return `${pkgs}${libs}${dataset.addToPreamble ?? ''}\\begin{document}\n${source}\n\\end{document}\n`;
-};
+// The worker's own input assembly, the TS1 shim included, handed identically to both engines.
+const buildInput = (source, dataset) => fork.buildInput(source, dataset).text;
 
 /** Upstream path: async fileLoader, unwind per file, coredump.slice(0). */
 async function runUpstream(source, dataset) {

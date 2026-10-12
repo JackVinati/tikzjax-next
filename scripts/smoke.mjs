@@ -71,20 +71,16 @@ library.setBundledFiles(bundled, (gz) => new Uint8Array(gunzipSync(gz)));
 library.setLogSink((line) => transcript.push(line));
 library.setMissingFileSink((name) => missed.push(name));
 
-/** The body of run-tex.js's texify(), with the network removed. */
+/**
+ * The body of run-tex.js's texify(), with the network removed, and with TeX's input assembled by
+ * the worker's own buildInput: \nonstopmode, the preamble, and the TS1 shim for a fixture that
+ * needs it. A reference built from any other input would not be one verify-worker could match.
+ */
 async function texify(source, dataset = {}) {
 	transcript = [];
 	missed = [];
 
-	const texPackages = dataset.texPackages ?? {};
-	const preamble =
-		Object.entries(texPackages)
-			.map(([name, opts]) => `\\usepackage${opts ? `[${opts}]` : ''}{${name}}`)
-			.join('') +
-		(dataset.tikzLibraries ? `\\usetikzlibrary{${dataset.tikzLibraries}}` : '') +
-		(dataset.addToPreamble ?? '');
-
-	const input = `${preamble}\\begin{document}\n${source}\n\\end{document}\n`;
+	const input = library.buildInput(source, dataset).text;
 
 	library.setShowConsole();
 	library.writeFileSync('input.tex', Buffer.from(input));

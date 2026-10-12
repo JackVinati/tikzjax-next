@@ -299,18 +299,27 @@ describe('preflight', () => {
 
 	describe('characters the engine cannot typeset (#19 #36 #53)', () => {
 		it('reports the offending characters and where they start', () => {
-			const found = preflight('\\begin{document}\n\\node {Ω and →};', baked(), caps());
+			const found = preflight('\\begin{document}\n\\node {Ω and €};', baked(), caps());
 			expect(found).toHaveLength(1);
 			expect(found[0]?.line).toBe(2);
 			expect(found[0]?.message).toContain('U+03A9');
-			expect(found[0]?.message).toContain('U+2192');
+			expect(found[0]?.message).toContain('U+20AC');
 		});
 
-		// Latin-1 is measured like everything else: é renders, ° does not — it needs a TS1 font the SVG
-		// converter cannot draw.
+		// Latin-1 is measured like everything else: é renders natively.
 		it('accepts the Latin-1 letters the engine draws', () => {
 			expect(preflight('\\node {café à ça, résumé};', baked(), caps())).toEqual([]);
 		});
+
+		// ° and its kind are not native — the bare engine sets them in TS1, which the SVG converter
+		// cannot draw — but the worker redefines them to math-font glyphs (engine-src/ts1-shim.ts)
+		// for any block that uses one, so they render, and a warning would be false.
+		it.each(['45° and 2×3', 'a → b ← c', '±0.5', '5 µm', '§ 3, ¶ 2', '• item', '℃', '™', '†'])(
+			'says nothing about %s, which the worker draws from the math fonts',
+			(label) => {
+				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
+			},
+		);
 
 		// A dieresis used to lose the whole diagram: dvi2html's TFM reader stopped one character
 		// short of the end of every font, and in cmr10 that character is the accent. The build
@@ -322,13 +331,15 @@ describe('preflight', () => {
 			},
 		);
 
-		it('names ° and × with the math spelling that does render', () => {
-			const found = preflight('\\node {45° and 2×3};', baked(), caps());
+		it('names a symbol it cannot draw with the math spelling that does render', () => {
+			const found = preflight('\\node {x ∈ ℝ, n → ∞};', baked(), caps());
 			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain('U+00B0');
-			expect(found[0]?.message).toContain('U+00D7');
-			expect(found[0]?.hint).toContain('$^\\circ$');
-			expect(found[0]?.hint).toContain('$\\times$');
+			expect(found[0]?.message).toContain('U+2208');
+			expect(found[0]?.message).toContain('U+211D');
+			expect(found[0]?.message).toContain('U+221E');
+			expect(found[0]?.message).not.toContain('U+2192');
+			expect(found[0]?.hint).toContain('$\\in$');
+			expect(found[0]?.hint).toContain('$\\infty$');
 			expect(found[0]?.hint).not.toContain('dieresis');
 		});
 
@@ -363,12 +374,14 @@ describe('preflight', () => {
 			expect(found[0]?.message).toContain(first);
 		});
 
-		it('names only the characters that fail, not the native ones beside them', () => {
-			const found = preflight('\\node {Dvořák → Erdős};', baked(), caps());
+		it('names only the characters that fail, not the native or drawable ones beside them', () => {
+			const found = preflight('\\node {Dvořák € Erdős → 90°};', baked(), caps());
 			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain('U+2192');
+			expect(found[0]?.message).toContain('U+20AC');
 			expect(found[0]?.message).not.toContain('U+0159');
 			expect(found[0]?.message).not.toContain('U+0151');
+			expect(found[0]?.message).not.toContain('U+2192');
+			expect(found[0]?.message).not.toContain('U+00B0');
 		});
 
 		// The old hint offered `\usepackage[utf8]{inputenc}` to "reassemble" the bytes, but the format
