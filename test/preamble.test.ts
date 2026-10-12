@@ -7,6 +7,7 @@ import {
 } from '../src/preamble/resolve';
 import type { App } from 'obsidian';
 import { PreambleService } from '../src/preamble/vault';
+import { fakeApp } from './stubs/vault';
 
 // ------------------------------------------------------------------------------------------
 // Harness
@@ -556,5 +557,50 @@ describe('PreambleService: who depends on a file', () => {
 		preamble.untrack('k1', ['a.tex', 'b.tex']);
 
 		expect(preamble.trackedFiles()).toEqual([]);
+	});
+});
+
+describe('PreambleService: resolving against the vault', () => {
+	const entry = (notePath: string, over: Partial<Parameters<PreambleService['resolve']>[0]> = {}) => ({
+		globalPath: null,
+		walkUpName: 'tikz-preamble.tex',
+		blockPath: null,
+		inputs: [],
+		notePath,
+		...over,
+	});
+
+	it('finds the nearest walk-up preamble, from the note’s folder up', () => {
+		const app = fakeApp({ 'a/tikz-preamble.tex': 'A', 'tikz-preamble.tex': 'ROOT' });
+		const preamble = new PreambleService(app, fakeHash);
+
+		expect(preamble.findWalkUp('a/b/note.md', 'tikz-preamble.tex')).toBe('a/tikz-preamble.tex');
+		expect(preamble.findWalkUp('c/note.md', 'tikz-preamble.tex')).toBe('tikz-preamble.tex');
+		expect(preamble.findWalkUp('c/note.md', '')).toBeNull();
+	});
+
+	it('reads a shared preamble once for every block in a note', async () => {
+		const app = fakeApp({ 'tikz-preamble.tex': '\\usetikzlibrary{arrows}' });
+		const preamble = new PreambleService(app, fakeHash);
+
+		const first = await preamble.resolve(entry('note.md'));
+		await preamble.resolve(entry('note.md'));
+
+		expect(first.text).toContain('\\usetikzlibrary{arrows}');
+		expect(app.reads).toEqual(['tikz-preamble.tex']);
+	});
+
+	it('reads the file again once it has changed, so the next block is built from the new text', async () => {
+		// What the editor relies on when a preamble is edited: invalidate, then process again.
+		const app = fakeApp({ 'tikz-preamble.tex': 'OLD' });
+		const preamble = new PreambleService(app, fakeHash);
+		await preamble.resolve(entry('note.md'));
+
+		app.files.set('tikz-preamble.tex', 'NEW');
+		preamble.invalidate('tikz-preamble.tex');
+		const after = await preamble.resolve(entry('note.md'));
+
+		expect(after.text).toContain('NEW');
+		expect(after.depHashes).toEqual([`tikz-preamble.tex:${fakeHash('NEW')}`]);
 	});
 });
