@@ -404,8 +404,8 @@ describe('two blocks showing the same diagram', () => {
 
 describe('a compile the engine was stopped under', () => {
 	/**
-	 * Backgrounding iOS kills the worker, and so do "Restart the TeX engine" and a neighbour's
-	 * timeout. The diagram did nothing wrong, and used to get a card saying it took too long.
+	 * Backgrounding iOS kills the worker, and so does "Restart the TeX engine" — and a neighbour's
+	 * timeout used to. The diagram did nothing wrong, and used to get a card saying it took too long.
 	 */
 	it('runs again and mounts, with no error card in between', async () => {
 		const { queue, runs } = realQueue();
@@ -425,6 +425,23 @@ describe('a compile the engine was stopped under', () => {
 		await vi.waitFor(() => expect(done.done).toBe(true));
 		expect(el.querySelector('svg')).not.toBeNull();
 		expect(el.querySelector('.tikzjax-error')).toBeNull();
+	});
+
+	it('still settles when the plugin is unloading, so nothing — a PDF export least of all — waits forever', async () => {
+		// Unloading closes the queue, then disposes the host, which interrupts the running job.
+		// The block asks again, is refused by the closed queue, and comes to rest.
+		const { queue, runs } = realQueue();
+		const el = container();
+		const child = new TikzBlock(el, spec(), deps({ queue }));
+		child.onload();
+		await vi.waitFor(() => expect(runs).toHaveLength(1));
+
+		queue.close();
+		runs[0]?.reject(new InterruptedError('the plugin was unloaded'));
+
+		await expect(child.settled).resolves.toBeUndefined();
+		expect(runs).toHaveLength(1);
+		expect(el.querySelector('.tikzjax-placeholder')).toBeNull();
 	});
 
 	it('says the engine did not start when it never came up — not that the diagram took too long', async () => {
