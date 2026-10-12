@@ -92,7 +92,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 			appId: (this.app as unknown as { appId?: string }).appId ?? 'default',
 			l1: { entries: this.budgets.l1Entries, bytes: this.budgets.l1Bytes },
 			l2Bytes: this.budgets.l2Bytes,
-			importLegacy: this.settings.importLegacyCache,
+			importLegacy: () => this.settings.importLegacyCache,
 			now: () => Date.now(),
 		});
 

@@ -46,7 +46,7 @@ async function seedLegacy(): Promise<void> {
 
 let cache: DiagramCache;
 
-function open(importLegacy = true): DiagramCache {
+function open(importLegacy: () => boolean = () => true): DiagramCache {
 	cache = new DiagramCache({
 		appId: 'vault',
 		l1: { entries: 16, bytes: 1_000_000 },
@@ -145,9 +145,27 @@ describe('DiagramCache', () => {
 	it("leaves the previous plugin's store unopened when the import is off", async () => {
 		await seedLegacy();
 		const opens = fake.opens.get(LEGACY_DB);
-		open(false);
+		open(() => false);
 
 		expect(await cache.lookup('k', SOURCE)).toBeUndefined();
 		expect(fake.opens.get(LEGACY_DB)).toBe(opens);
+	});
+
+	/**
+	 * Settings apply without a restart now (main.ts reads them per block), and this one did not: the
+	 * cache took the setting once, when the plugin loaded, so switching the import on found nothing
+	 * in the previous plugin's store until Obsidian restarted.
+	 */
+	it('follows the import setting as it is at each lookup, not as it was at load', async () => {
+		await seedLegacy();
+		const setting = { importLegacyCache: false };
+		open(() => setting.importLegacyCache);
+		expect(await cache.lookup('k', SOURCE)).toBeUndefined();
+
+		setting.importLegacyCache = true;
+		expect((await cache.lookup('k', SOURCE))?.tier).toBe('l3');
+
+		setting.importLegacyCache = false;
+		expect(await cache.lookup('k', SOURCE)).toBeUndefined();
 	});
 });

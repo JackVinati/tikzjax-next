@@ -25,8 +25,11 @@ export interface CacheOptions {
 	appId: string;
 	l1: { entries: number; bytes: number };
 	l2Bytes: number;
-	/** Read the previous plugin's store on a miss. */
-	importLegacy: boolean;
+	/**
+	 * Read the previous plugin's store on a miss. Asked at each lookup, because settings apply
+	 * without a restart: taken once at load, switching it on found nothing until Obsidian restarted.
+	 */
+	importLegacy: () => boolean;
 	now: () => number;
 }
 
@@ -77,7 +80,7 @@ export class DiagramCache {
 			return { artifact: stored, tier: 'l2' };
 		}
 
-		if (this.options.importLegacy && legacySource !== null) {
+		if (legacySource !== null && this.options.importLegacy()) {
 			const raw = await this.readLegacy(legacySource);
 			if (raw !== undefined) {
 				// Deliberately NOT an Artifact: an L3 record is the raw, pre-post-process,
