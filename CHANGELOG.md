@@ -5,6 +5,54 @@ top of its notes on GitHub, and will not publish a version that has none.
 
 ## 0.1.5 — unreleased
 
+- After updating, every cached diagram is compiled once more, the next time it is shown: both the
+  engine's id and the SVG pipeline's revision are part of the cache key, and both changed. Diagrams
+  that rendered before come out the same. The original TikZJax plugin's cache is still read where
+  there is one.
+- Letters with a dieresis (ä, ö, ü, also written as `\"u`) and symbols such as `\spadesuit` no
+  longer make the whole diagram fail. Nor do `°` `×` `±` `µ`, arrows, `™`, `§`, daggers, bulleted
+  lists and siunitx's units such as `\degree`, `\micro` and `\ohm`; they are drawn from the math
+  fonts, so `µ` comes out as the italic math `μ`.
+- Exporting a note to PDF finishes within about a minute however many diagrams are uncached, with
+  a short note in place of any that was not ready, and never a "Render diagram" button in the PDF.
+  The same diagram shown twice, in two panes, a hover preview or an export while it compiles, no
+  longer leaves one copy spinning forever.
+- On iPhone and iPad, switching away while a diagram compiles no longer turns it into a "took
+  longer than its time budget" error: it finishes when you come back. Diagrams no longer all
+  recompile after the app returns, the engine needs about half the memory while starting, and the
+  time limit setting gives one diagram at most 20 seconds.
+- Timeouts are fairer: starting the engine no longer counts against the first diagram, a slow
+  diagram can no longer make the one next to it time out or fail, Retry on a timed-out diagram
+  really runs it again, and any settings change gives timed-out diagrams another chance.
+- Error cards say what happened — timed out earlier, an empty block, the undefined macro by name —
+  and point at the right line when a preamble file has several lines, or at the preamble file and
+  its line when that is where TeX stopped. After Retry or "Render diagram", the old card or button
+  no longer stays under the diagram.
+- Settings take effect at once, also when another device changes them through Sync. A new Preamble
+  section sets the vault-wide preamble file, with file suggestions, and the folder preamble's name.
+  Editing a preamble file updates Live Preview as well as Reading view.
+- `scale=` and `width=` enlarge a diagram as well as shrink it, `scale=` applies the first time a
+  diagram renders, and a reopened note keeps every diagram correctly framed.
+- Colour modes: `colors=invert` or `preserve` on one diagram, or a change of the setting, no longer
+  gives other copies of that diagram the wrong colours; invert no longer turns ink dark in a dark
+  theme; and the zoom view shows a diagram in its own mode, without white shapes turning solid.
+- Copy SVG, Save SVG, Finalize and the zoom view find the diagram at the cursor, even after a
+  restart, and Finalize puts each picture above its own diagram. "Render all diagrams in this note"
+  finishes, can be stopped, and says truthfully how many rendered; the diagnostics view shows each
+  diagram's real outcome.
+- Fast mode renders ahead of other diagrams; `%!tikz svgo=off` and the svgo setting really turn
+  SVG optimisation off.
+- Safer: diagrams can no longer carry stylesheets, external images or other active markup into a
+  note, output that cannot be made safe is never shown or cached, and a diagram the sanitizer took
+  something out of says what. Ordinary TikZ output is unchanged.
+- The diagram cache keeps an exact count of its size instead of filling with phantom bytes and
+  then emptying itself, and a cache hit does less storage work. "Reuse the previous plugin's
+  cache" applies as soon as it is switched on.
+- Pop-out windows no longer render every diagram at once as though they were a PDF export. Long
+  sessions no longer hold on to closed tabs, hover previews and finished export windows, and
+  disabling or updating the plugin no longer leaves the engine running.
+- `main.js` and `styles.css` carry the licences of the libraries and fonts they embed, and say
+  where the source is.
 - The licence notices are corrected. The fonts are Basil K. Malyshev's BaKoMa Type 1 conversions of
   the Computer Modern, AMS, Euler and LaTeX designs, and `NOTICE` now says so, with the BaKoMa
   licence in `vendor/LICENSES/` and the CTAN location it requires. `NOTICE` also lists every TeX
