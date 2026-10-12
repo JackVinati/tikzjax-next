@@ -1,0 +1,69 @@
+# Weekly update pull requests for the actions, the npm tree and the engine image.
+#
+# A pull request is a proposal, not a release: every store version is re-reviewed, so merged updates
+# ride along with the next planned release instead of each becoming one. Nothing here tags anything,
+# so the tag-before-main release order is unaffected.
+#
+# The cooldown holds back a version for a few days after it is published. Same-day releases are the
+# ones most likely to be followed by a quick fix or a yank, and a few days is cheap here.
+
+version: 2
+
+updates:
+  # Actions are pinned by commit with the release in a comment (ci.yml). Dependabot moves both.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 5
+    groups:
+      actions:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 5
+    groups:
+      # The toolchain: none of it reaches main.js, and CI's lint, typecheck, test and build say
+      # whether a bump is safe. One pull request for the lot.
+      dev-tooling:
+        dependency-type: development
+        patterns: ['*']
+        update-types: [minor, patch]
+    # Runtime dependencies are deliberately NOT grouped. All four are bundled into main.js, and
+    # dvi2html, pako and buffer run inside the TeX worker, so a bump there is an engine change: what
+    # a diagram renders to, and whether users' cached diagrams still match it. Each one is a pull
+    # request of its own, to be read as that. CI's smoke and verify:worker steps render every fixture
+    # through the bundled worker either way.
+    ignore:
+      # The linter's TypeScript is held at 5 to read the code the way the community store's review
+      # does. Majors move when the store does. See internal/DECISIONS.md D5.
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      # `tsgo` is an npm alias for typescript@7, and aliases are where Dependabot's npm support is
+      # weakest: it may look up a package literally named `tsgo`, which today does not exist on the
+      # registry and which anyone could publish tomorrow. Bumped by hand, with the `typescript` 7
+      # version it points at checked on the registry.
+      - dependency-name: tsgo
+
+  # The engine image. Its base is part of the engine: a different Ubuntu is a different TeX Live and
+  # a different core.dump, adopted deliberately with a rebuilt engine-build/out (D12). Interim
+  # releases look like minor versions to Dependabot (24.04 -> 24.10), so both are ignored and the base
+  # moves by hand. The entry stays so anything else this Dockerfile comes to pull from is watched.
+  - package-ecosystem: docker
+    directory: /engine-build
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 5
+    ignore:
+      - dependency-name: ubuntu
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']

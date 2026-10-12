@@ -11,31 +11,54 @@ name: Release
 #   git tag -a 0.1.3 -F -
 #   git push origin 0.1.3          # release starts building
 #   git push origin main           # after it finishes
+#
+# The bump commit also dates the version's section in CHANGELOG.md (`## 0.1.3 — 2026-09-02`): that
+# section is the top of the release notes, and a release without one is not published.
+#
+# Three jobs, each with only the permissions it uses:
+#
+#   check    CI's whole gate, on the tagged commit             read
+#   build    the version checks, the notes and the three assets  read
+#   publish  attest the assets and create the release          write, id-token, attestations
+#
+# Nothing that runs npm, an install script or the dev tooling ever holds a token that can write.
 
 on:
   push:
     tags:
       - '*'
 
-permissions:
-  contents: write
-  # For actions/attest: `id-token` mints the OIDC token that proves the build ran
-  # in this workflow, `attestations` records the result. Without them a user downloading main.js
-  # has only a filename and 11 MB of minified code to go on.
-  id-token: write
-  attestations: write
+# Nothing by default. Each job below asks for what it uses.
+permissions: {}
 
 jobs:
-  release:
+  check:
+    # The same file CI runs on main, so the two gates cannot drift apart: lint, the store rules,
+    # formatting, both typechecks, the tests with their coverage floors, every fixture through the
+    # engine, the fork and worker comparisons, the build, the no-network grep and the
+    # native-character scan. The tag is pushed before main, so this is the only run of them that
+    # happens on the released commit before it ships. Until it existed, a release ran a subset —
+    # without the formatting check, the TypeScript 5 typecheck or the no-network grep.
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  build:
+    needs: check
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-          # No dependency cache in the one job that can publish a release and mint an OIDC token —
-          # setup-node's own advice for privileged workflows. It costs one uncached npm ci.
+          # No dependency cache in the job whose output is published and attested — setup-node's own
+          # advice for privileged workflows, and this job's bytes are what the privileged one signs.
+          # It costs one uncached npm ci.
           package-manager-cache: false
 
       - run: npm ci
@@ -46,7 +69,6 @@ jobs:
         # ::set-output silently produced an empty string. Both are the same failure: nothing
         # checked. This is the check.
         run: |
-          TAG="${GITHUB_REF_NAME}"
           node -e '
             const fs = require("fs");
             const tag = process.env.TAG;
@@ -64,36 +86,50 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
 
-      - run: npm run lint && npm run lint:store && npm run typecheck && npm test
+      - name: CHANGELOG.md says what is new in this version
+        # The same kind of check as the one above. The notes of 0.1.4 were written by hand after it
+        # was published, because nothing here produced them; now they come from CHANGELOG.md, and
+        # a version it has no dated section for is not released. test/changelog.test.ts makes the
+        # same demand of the manifest's version on every commit, so this should never be the place
+        # it is found.
+        run: |
+          node -e '
+            const fs = require("fs");
+            const tag = process.env.TAG;
+            const lines = fs.readFileSync("CHANGELOG.md", "utf8").split(/\r?\n/);
+            const heading = (line) => /^## (\S+)(.*)$/.exec(line);
+            const start = lines.findIndex((line) => heading(line)?.[1] === tag);
+            if (start === -1) {
+              console.error(`CHANGELOG.md has no "## ${tag}" section`);
+              process.exit(1);
+            }
+            if (/unreleased/i.test(lines[start])) {
+              console.error(`CHANGELOG.md still calls ${tag} unreleased: date it in the version bump`);
+              process.exit(1);
+            }
+            let end = lines.findIndex((line, i) => i > start && heading(line) !== null);
+            if (end === -1) end = lines.length;
+            const body = lines.slice(start + 1, end).join("\n").trim();
+            if (body === "") {
+              console.error(`the "## ${tag}" section of CHANGELOG.md is empty`);
+              process.exit(1);
+            }
+            fs.writeFileSync("changes.md", body + "\n");
+          '
+        env:
+          TAG: ${{ github.ref_name }}
 
-      # No engine build here any more. The compressed engine is committed (D12), so this checkout
-      # already has exactly the bytes the plugin is built from — and the Engine workflow rebuilds it
-      # from source on main and diffs it, which is where that check belongs. Rebuilding it again
+      # No engine build here. The compressed engine is committed (D12), so this checkout already has
+      # exactly the bytes the plugin is built from, `check` has rendered every fixture through it,
+      # and the Engine workflow rebuilds it from source on main and diffs it. Rebuilding it again
       # here bought nothing and cost fifteen minutes, during which the store sees a manifest whose
       # release does not exist yet and reports the plugin as unpublishable.
-      - name: Verify the engine
-        run: npm run smoke && npm run verify:fork && npm run verify:worker
-
-      - name: The native-character list describes the engine being shipped
-        # CI checks this too, but not for the commit being released: the tag is pushed before main,
-        # so CI on main runs after this workflow has published. Here is the only place the check runs
-        # on the released commit before it ships — and a stale list is not a cosmetic fault, it is
-        # the pre-flight lint warning under characters that render, or keeping quiet about ones that
-        # do not.
-        run: npm run scan:native -- --check
-
       - name: Build the plugin
-        run: npm run build
-
-      - name: Attest that these assets came from this repository
-        # actions/attest itself: since v4, attest-build-provenance is only a wrapper around it, with the
-        # same SLSA build-provenance default.
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-path: |
-            main.js
-            styles.css
-            manifest.json
+        # The sha256 is printed so the published assets can be compared with a build of the same
+        # commit anywhere else — which is what the community store does.
+        run: |
+          npm run build
+          sha256sum main.js styles.css manifest.json
 
       - name: Record what this release contains
         # The engine is the part of a release nobody can inspect from the outside: a WebAssembly
@@ -103,6 +139,12 @@ jobs:
         run: |
           MIN=$(node -p 'require("./manifest.json").minAppVersion')
           {
+            echo "### What's new in ${GITHUB_REF_NAME}"
+            echo
+            cat changes.md
+            echo
+            echo '### About'
+            echo
             echo "Renders TikZ and LaTeX diagrams inside notes. No LaTeX installation, no network"
             echo "access: the whole TeX engine is compiled to WebAssembly and runs locally, on"
             echo "desktop and on mobile. Requires Obsidian ${MIN}."
@@ -120,7 +162,57 @@ jobs:
             echo
             cat engine-build/out/tex-versions.txt
             echo '```'
+            echo
+            echo '### SHA-256'
+            echo
+            echo '```'
+            sha256sum main.js styles.css manifest.json
+            echo '```'
           } > release-notes.md
+          cat release-notes.md
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: |
+            main.js
+            manifest.json
+            styles.css
+            release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # `gh release create`.
+      contents: write
+      # For actions/attest: `id-token` mints the OIDC token that proves the build ran in this
+      # workflow, `attestations` records the result. Without them a user downloading main.js has only
+      # a filename and 11 MB of minified code to go on.
+      id-token: write
+      attestations: write
+    # No checkout and no npm: this job runs two pinned actions and the gh CLI over the files the
+    # build job produced, and nothing else.
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+
+      - name: The assets being published
+        run: sha256sum main.js styles.css manifest.json
+
+      - name: Attest that these assets came from this repository
+        # actions/attest itself: since v4, attest-build-provenance is only a wrapper around it, with the
+        # same SLSA build-provenance default.
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            main.js
+            styles.css
+            manifest.json
 
       # Published, not a draft. The community store installs from the latest RELEASE and its automated
       # review scans it, and neither can see a draft. Add --draft back if
@@ -128,8 +220,12 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        # --verify-tag: the tag must already exist on GitHub. Without it, gh creates a missing tag
+        # from the default branch, and a release would point at a commit nobody tagged.
         run: |
           gh release create "${GITHUB_REF_NAME}" \
+            --verify-tag \
             --title "${GITHUB_REF_NAME}" \
             --notes-file release-notes.md \
             main.js manifest.json styles.css

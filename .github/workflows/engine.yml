@@ -6,8 +6,8 @@ name: Engine
 # found before a release needs it, and on demand.
 on:
   push:
-    # Branches only. A tag push runs the release workflow, which builds and verifies the engine
-    # itself — without this filter both run, and the same fifteen minutes are spent twice.
+    # Branches only. A tag push runs the release workflow, which checks the committed engine through
+    # CI's fixtures itself — without this filter both run, and fifteen minutes are spent for nothing.
     branches:
       - '**'
     paths:
@@ -31,12 +31,55 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The diff below is local; nothing here pushes, so nothing keeps the token.
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
 
       - run: npm ci
+
+      - name: The pins against what upstream has now
+        # Dependabot cannot see these: two upstream commits in pins.env and a Node release in the
+        # Dockerfile. Only ever a warning — moving a pin is an engine change, made on purpose with a
+        # rebuilt engine-build/out (D12) — but this is where a moved upstream, a newer Node patch or a
+        # Node line nearing end of life is noticed on a Monday rather than when a release needs it.
+        continue-on-error: true
+        run: |
+          . engine-build/pins.env
+          for upstream in "web2js $WEB2JS_REPO $WEB2JS_REF" "tikzjax $TIKZJAX_REPO $TIKZJAX_REF"; do
+            set -- $upstream
+            head=$(git ls-remote "$2" HEAD | cut -f1)
+            if [ -z "$head" ]; then
+              echo "::warning::could not reach $2"
+            elif [ "$head" = "$3" ]; then
+              echo "$1: the pinned commit is still upstream's HEAD"
+            else
+              echo "::warning::$1 has moved: pinned ${3:0:12}, upstream HEAD ${head:0:12}"
+            fi
+          done
+
+          pinned=$(sed -n 's/^ARG NODE_VERSION=//p' engine-build/Dockerfile)
+          curl -fsSL https://nodejs.org/dist/index.json -o /tmp/node-index.json
+          curl -fsSL https://raw.githubusercontent.com/nodejs/Release/main/schedule.json -o /tmp/node-schedule.json
+          PINNED="$pinned" node -e '
+            const fs = require("fs");
+            const pinned = process.env.PINNED;
+            const line = `v${pinned.split(".")[0]}`;
+            const latest = JSON.parse(fs.readFileSync("/tmp/node-index.json", "utf8"))
+              .find((release) => release.version.startsWith(`${line}.`));
+            const end = JSON.parse(fs.readFileSync("/tmp/node-schedule.json", "utf8"))[line]?.end;
+            if (latest && latest.version !== `v${pinned}`) {
+              console.log(`::warning::Node ${pinned} is pinned; the newest ${line} is ${latest.version}`);
+            } else {
+              console.log(`Node ${pinned} is the newest ${line}`);
+            }
+            const days = end ? (Date.parse(end) - Date.now()) / 86400000 : NaN;
+            if (days < 180) console.log(`::warning::Node ${line} reaches end of life on ${end}; see the Dockerfile`);
+            else if (end) console.log(`Node ${line} is supported until ${end}`);
+          '
 
       - name: Build the engine image
         run: npm run engine:image

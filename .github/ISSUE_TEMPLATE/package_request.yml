@@ -1,0 +1,39 @@
+name: Package or library request
+description: A LaTeX package or TikZ library you need that the engine does not bundle.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Everything the engine bundles is listed in the README, under "What is bundled". Each addition makes main.js larger for everyone and has to be measured on a phone, so the most useful request shows the diagram you are trying to draw.
+
+  - type: input
+    id: name
+    attributes:
+      label: Package or library
+      placeholder: tikz-dependency, or \usetikzlibrary{shapes.gates.ee}
+    validations:
+      required: true
+
+  - type: input
+    id: ctan
+    attributes:
+      label: Link
+      description: Its CTAN page, if it has one.
+      placeholder: https://ctan.org/pkg/…
+
+  - type: textarea
+    id: source
+    attributes:
+      label: A block that uses it
+      description: A small diagram that needs it, as you would write it in a note.
+      render: tex
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happens
+    attributes:
+      label: What happens today
+      description: The note under the diagram, or the error card, word for word.
+      render: text

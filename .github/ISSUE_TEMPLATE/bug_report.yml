@@ -1,0 +1,94 @@
+name: Bug report
+description: A diagram that renders wrong, fails, or takes Obsidian down with it.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. What makes a TeX bug fixable is the smallest block that still shows it, and the exact text of the error. Everything below asks for one of those two things, or for where it happened.
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: Settings → Community plugins → TikZJax Next.
+      placeholder: 0.1.4
+    validations:
+      required: true
+
+  - type: input
+    id: obsidian-version
+    attributes:
+      label: Obsidian version
+      description: Settings → General shows it. If it also shows an installer version, give both.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - iPhone
+        - iPad
+        - Android
+    validations:
+      required: true
+
+  - type: input
+    id: platform-version
+    attributes:
+      label: Platform version
+      placeholder: iOS 18.5, Windows 11 24H2, …
+
+  - type: textarea
+    id: source
+    attributes:
+      label: The smallest tikz block that shows it
+      description: The contents of the ```tikz block, including any %!tikz lines, cut down until removing anything more makes the problem go away. If it uses a shared preamble, paste that too.
+      render: tex
+      placeholder: |
+        \begin{tikzpicture}
+          \draw (0,0) -- (1,1);
+        \end{tikzpicture}
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what you expected
+      description: A screenshot helps when the problem is how it looks.
+    validations:
+      required: true
+
+  - type: textarea
+    id: error
+    attributes:
+      label: The error card, word for word
+      description: The text under the diagram, if there is one. The command "Open TikZ diagnostics" shows the TeX log for recent renders; paste the part around the first line starting with `!`.
+      render: text
+
+  - type: markdown
+    attributes:
+      value: |
+        **On an iPhone or iPad** there are no devtools, but the console is reachable: on the device, Settings → Apps → Safari → Advanced → Web Inspector; connect it to a Mac by cable; then in Safari on the Mac, Develop → the device → the Obsidian window. Anything in red there is worth pasting below.
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: Optional. From the developer console (Ctrl+Shift+I or Cmd+Option+I on desktop), or Web Inspector as above.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before sending
+      options:
+        - label: The original TikZJax plugin is disabled. Both render `tikz` blocks.
+          required: true
+        - label: The block above still shows the problem in a new, otherwise empty note.
