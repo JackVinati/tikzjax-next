@@ -1,7 +1,45 @@
-import type { App, ButtonComponent } from 'obsidian';
-import { Notice, PluginSettingTab, Setting } from 'obsidian';
+import type { App, ButtonComponent, TFile } from 'obsidian';
+import { AbstractInputSuggest, Notice, PluginSettingTab, Setting } from 'obsidian';
 import type TikzjaxNextPlugin from '../main';
 import { STRINGS } from '../ui/strings';
+
+/** What a preamble file can be: TeX source, by any of its usual extensions, or plain text. */
+const PREAMBLE_EXTENSIONS: ReadonlySet<string> = new Set(['tex', 'sty', 'ltx', 'def', 'txt']);
+
+/**
+ * Type-ahead for the preamble path, over the vault's TeX files.
+ *
+ * AbstractInputSuggest rather than a modal picker: it is the documented way to attach suggestions
+ * to a text field, and every part of it this uses is in Obsidian 1.7.2, the plugin's floor
+ * (internal/DECISIONS.md D6). A note or an image is never offered; a path typed by hand is still
+ * accepted, since the resolver reads any text file.
+ */
+class PreambleFileSuggest extends AbstractInputSuggest<TFile> {
+	private readonly picked: (path: string) => void;
+
+	constructor(app: App, inputEl: HTMLInputElement, picked: (path: string) => void) {
+		super(app, inputEl);
+		this.picked = picked;
+	}
+
+	protected getSuggestions(query: string): TFile[] {
+		const needle = query.trim().toLowerCase();
+		return this.app.vault
+			.getFiles()
+			.filter((f) => PREAMBLE_EXTENSIONS.has(f.extension) && f.path.toLowerCase().includes(needle))
+			.sort((a, b) => a.path.localeCompare(b.path));
+	}
+
+	renderSuggestion(file: TFile, el: HTMLElement): void {
+		el.setText(file.path);
+	}
+
+	override selectSuggestion(file: TFile): void {
+		this.setValue(file.path);
+		this.picked(file.path);
+		this.close();
+	}
+}
 
 /**
  * Paint a button as destructive.
@@ -137,6 +175,42 @@ export class TikzSettingTab extends PluginSettingTab {
 			.addToggle((t) =>
 				t.setValue(this.plugin.settings.preflight).onChange(async (value) => {
 					this.plugin.settings.preflight = value;
+					await this.plugin.saveSettings();
+				}),
+			);
+
+		// Both settings existed, and were read by every render, with no way to set them but editing
+		// data.json. They resolve in this order, before a block's own `preamble=` and `%:input` lines
+		// (preamble/resolve.ts), and each file is part of the cache key, so editing one recompiles
+		// exactly the diagrams that read it.
+		new Setting(containerEl).setName('Preamble').setHeading();
+
+		const savePreamblePath = async (value: string): Promise<void> => {
+			this.plugin.settings.preamblePath = value.trim();
+			await this.plugin.saveSettings();
+		};
+		new Setting(containerEl)
+			.setName('Preamble file')
+			.setDesc(
+				'A file in the vault whose contents go before every diagram: packages, macros, styles. ' +
+					'Leave empty for none.',
+			)
+			.addText((t) => {
+				t.setPlaceholder('preambles/tikz.tex')
+					.setValue(this.plugin.settings.preamblePath)
+					.onChange(savePreamblePath);
+				new PreambleFileSuggest(this.app, t.inputEl, (path) => void savePreamblePath(path));
+			});
+
+		new Setting(containerEl)
+			.setName('Folder preamble file name')
+			.setDesc(
+				'Also use the nearest file with this name in the note’s folder or a folder above it, ' +
+					'after the preamble file. Leave empty to turn this off.',
+			)
+			.addText((t) =>
+				t.setValue(this.plugin.settings.autoPreambleName).onChange(async (value) => {
+					this.plugin.settings.autoPreambleName = value.trim();
 					await this.plugin.saveSettings();
 				}),
 			);
