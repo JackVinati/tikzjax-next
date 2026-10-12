@@ -1,7 +1,7 @@
 import type { Artifact, Presentation } from '../types';
 import { stampIds } from '../svg/ids';
 import { parseSvg, serializeSvg } from '../svg/serialize';
-import { parseViewBox, formatViewBox, formatNumber, parseLength, type InkBounds } from '../svg/geometry';
+import { applyInkBoundsTo, parseViewBox, formatViewBox, formatNumber, type InkBounds } from '../svg/geometry';
 
 /**
  * Putting a finished artifact into the document. See internal/DESIGN.md §7.2 steps 7-9.
@@ -82,30 +82,19 @@ export function standaloneMarkup(artifact: Artifact): string {
  * written onto the svg that had just been measured. Nothing applied it on a mount, so a diagram
  * was framed right the first time and clipped again on every cache hit after (#66 #71 #29).
  *
- * `width`/`height` are rescaled with it, as svg/geometry.ts's applyInkBounds does for a document:
- * one user unit stays one point, so only the frame moves, not the size of the drawing. A
- * percentage extent is resolved against the container, not in user units, and is left alone.
+ * `width`/`height` are rescaled with it, by svg/geometry.ts's own rule for a measured box: one
+ * user unit stays one point, so only the frame moves, not the size of the drawing. A percentage
+ * extent is resolved against the container, not in user units, and is left alone.
  */
 export function applyBounds(svg: Element, viewBox: string | null): void {
 	const box = parseViewBox(viewBox);
-	if (box === null || box.width <= 0 || box.height <= 0) return;
-
-	const current = parseViewBox(svg.getAttribute('viewBox'));
-	rescaleExtent(svg, 'width', box.width, current?.width);
-	rescaleExtent(svg, 'height', box.height, current?.height);
-	svg.setAttribute('viewBox', formatViewBox(box));
-}
-
-function rescaleExtent(
-	svg: Element,
-	attribute: 'width' | 'height',
-	extent: number,
-	previous: number | undefined,
-): void {
-	const length = parseLength(svg.getAttribute(attribute));
-	if (length === null || length.unit === '%') return;
-	const ratio = previous !== undefined && previous > 0 ? length.value / previous : 1;
-	svg.setAttribute(attribute, formatNumber(extent * ratio) + length.unit);
+	if (box === null) return;
+	try {
+		applyInkBoundsTo(svg, box);
+	} catch {
+		// A degenerate box was never stored by a measurement; should one be read back, the
+		// engine's frame is still a diagram.
+	}
 }
 
 /**

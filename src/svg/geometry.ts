@@ -87,6 +87,14 @@ export function applyInkBounds(doc: Document, bbox: InkBounds): void {
 	if (root === undefined || root.localName !== 'svg') {
 		throw new Error('applyInkBounds: the document root is not <svg>');
 	}
+	applyInkBoundsTo(root, bbox);
+}
+
+/**
+ * The same, on one `<svg>` element — a mounted one, which block/mount.ts frames with the box a
+ * measurement stored, by this rule rather than a copy of it.
+ */
+export function applyInkBoundsTo(root: Element, bbox: InkBounds): void {
 	if (!isUsableBounds(bbox)) {
 		throw new RangeError(
 			`applyInkBounds: refusing a degenerate bounding box ` +

@@ -125,6 +125,13 @@ describe('mountArtifact: the measured frame', () => {
 		expect(svg.getAttribute('width')).toBe('85.75pt');
 	});
 
+	it('keeps the engine frame rather than a degenerate stored box', () => {
+		const { svg } = mountStored(stored({ viewBox: '0 0 0 5', w: 0, h: 5 }));
+
+		expect(svg.getAttribute('viewBox')).toBe('-72 -72 85.75 92.36');
+		expect(svg.getAttribute('width')).toBe('85.75pt');
+	});
+
 	it('does not rescale a percentage extent, which is not in user units', () => {
 		const template = ENGINE_SVG.split('width="85.75pt"').join('width="100%"');
 		const { svg } = mountStored(stored({ template, viewBox: '0 0 10 5', w: 10, h: 5 }));
