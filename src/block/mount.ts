@@ -1,5 +1,6 @@
 import type { Artifact, Presentation } from '../types';
 import { stampIds } from '../svg/ids';
+import { parseSvg, serializeSvg } from '../svg/serialize';
 import { parseViewBox, formatViewBox, formatNumber, parseLength, type InkBounds } from '../svg/geometry';
 
 /**
@@ -51,6 +52,29 @@ export function mountArtifact(
 }
 
 /**
+ * What one more mount of this artifact would show, as a standalone string: its own id nonce and
+ * the measured frame.
+ *
+ * For the commands that take a diagram out of the note — Copy and Save SVG, Finalize, the zoom
+ * view. They used to be handed the stored template itself, which still carries the `__TZ__`
+ * placeholders where its ids belong (svg/freeze.ts calls freezing one the caller's bug) and the
+ * engine's frame, an inch short of the drawing.
+ */
+export function standaloneMarkup(artifact: Artifact): string {
+	const markup = stampIds(artifact.template, String(++instanceCounter));
+	if (artifact.viewBox === null) return markup;
+	try {
+		const doc = parseSvg(markup);
+		applyBounds(doc.documentElement, artifact.viewBox);
+		return serializeSvg(doc);
+	} catch {
+		// The template parsed once already, on its way through the pipeline. Should it not now, the
+		// engine's frame is still a diagram, and a better answer than none.
+		return markup;
+	}
+}
+
+/**
  * Put the measured ink box on a mounted <svg>.
  *
  * The template keeps the engine's frame, and the corrected box is stored beside it
@@ -62,7 +86,7 @@ export function mountArtifact(
  * one user unit stays one point, so only the frame moves, not the size of the drawing. A
  * percentage extent is resolved against the container, not in user units, and is left alone.
  */
-export function applyBounds(svg: SVGSVGElement, viewBox: string | null): void {
+export function applyBounds(svg: Element, viewBox: string | null): void {
 	const box = parseViewBox(viewBox);
 	if (box === null || box.width <= 0 || box.height <= 0) return;
 
@@ -73,7 +97,7 @@ export function applyBounds(svg: SVGSVGElement, viewBox: string | null): void {
 }
 
 function rescaleExtent(
-	svg: SVGSVGElement,
+	svg: Element,
 	attribute: 'width' | 'height',
 	extent: number,
 	previous: number | undefined,

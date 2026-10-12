@@ -9,7 +9,7 @@ import { ensureFonts } from './platform/context';
 import { DiagramCache } from './cache';
 import { RenderQueue } from './queue/queue';
 import { ViewportGate } from './block/viewport';
-import { createProcessor } from './block/processor';
+import { createProcessor, renderedMarkup } from './block/processor';
 import type { TexJobSpec } from './block/render-child';
 import { DEFAULT_SETTINGS, migrateSettings, type TikzSettings } from './settings/schema';
 import { PreambleService } from './preamble/vault';
@@ -41,8 +41,6 @@ export default class TikzjaxNextPlugin extends Plugin {
 	private readonly touchedDocuments = new Set<Document>();
 	private preamble: PreambleService | null = null;
 
-	/** raw block source -> cache key, filled as blocks are processed. See TexJobSpec.rawSource. */
-	private readonly keysBySource = new Map<string, string>();
 	/** A bounded ring for the diagnostics view. Never persisted. */
 	private readonly records: RenderRecord[] = [];
 
@@ -126,7 +124,6 @@ export default class TikzjaxNextPlugin extends Plugin {
 				now: () => Date.now(),
 				preamble: this.preamble,
 				onBlock: (spec) => {
-					this.keysBySource.set(spec.rawSource, spec.key);
 					this.preamble?.track(
 						spec.key,
 						spec.options.baked.depHashes.map((d) => d.split(':')[0] ?? ''),
@@ -153,13 +150,19 @@ export default class TikzjaxNextPlugin extends Plugin {
 				}),
 		);
 
+		const preamble = this.preamble;
+		const cache = this.cache;
+		const host = this.host;
 		registerCommands(this, {
 			app: this.app,
-			markupFor: (source, _notePath) => {
-				const key = this.keysBySource.get(source);
-				const artifact = key === undefined ? undefined : this.cache?.peek(key);
-				return Promise.resolve(artifact?.template ?? null);
-			},
+			markupFor: (source, notePath) =>
+				renderedMarkup(source, notePath, {
+					settings: this.settings,
+					budgets: this.budgets,
+					host,
+					preamble,
+					cache,
+				}),
 			warmNote: (file) => this.warmNote(file),
 			fontCss: () => COLD_FONT_CSS,
 			openDebugView: () => this.openDebugView(),
@@ -247,7 +250,6 @@ export default class TikzjaxNextPlugin extends Plugin {
 
 	override onunload(): void {
 		this.preamble?.clear();
-		this.keysBySource.clear();
 		this.viewport?.disconnect();
 		// The queue is closed BEFORE the host goes. Disposing interrupts the running job, its slot
 		// is freed in a `finally` that starts the next one, and a host still reachable from

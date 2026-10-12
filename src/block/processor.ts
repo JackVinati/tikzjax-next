@@ -8,6 +8,8 @@ import { deriveKey } from '../cache/key';
 import { isExportContext } from '../platform/context';
 import { artifactRevision, type TikzSettings } from '../settings/schema';
 import { TikzBlock, type BlockDeps, type TexJobSpec } from './render-child';
+import { standaloneMarkup } from './mount';
+import { asProcessorSource } from '../note/finalize';
 import type { RenderQueue } from '../queue/queue';
 import type { DiagramCache } from '../cache';
 import type { Budgets } from '../types';
@@ -44,7 +46,7 @@ export interface ProcessorDeps {
 
 export function createProcessor(deps: ProcessorDeps) {
 	return (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext): Promise<void> => {
-		const prepared = prepare(source, el, deps, ctx.sourcePath);
+		const prepared = prepare(source, deps, ctx.sourcePath, isExportContext(deps.app, el));
 
 		// The common case — no preamble configured anywhere — stays SYNCHRONOUS, and that is not an
 		// optimisation. A cached diagram is only painted in the same frame as the text around it if
@@ -85,12 +87,56 @@ function attach(
 	}
 }
 
+/** What deriving a block's key needs — everything but the block's place on the page. */
+export type KeyDeps = Pick<ProcessorDeps, 'settings' | 'budgets' | 'host' | 'preamble'>;
+
+/**
+ * The cache key a block with this source has in this note: the processor's own derivation, run
+ * without a block.
+ *
+ * For the commands, which find a diagram by scanning the note's markdown. They used to look the
+ * key up in a map the processor filled, keyed on the source text — which only knew blocks a view
+ * had already processed this session (never one in Source mode, nor one the cursor was resting in
+ * when the note opened), grew with every edit, and was keyed on a form of the text the scanner does
+ * not produce. Deriving it here, from `asProcessorSource` of the scanned text, cannot drift from the
+ * processor, because it is the processor.
+ */
+export function keyFor(source: string, notePath: string, deps: KeyDeps): string | Promise<string> {
+	const prepared = prepare(source, deps, notePath, false);
+	return prepared instanceof Promise ? prepared.then((spec) => spec.key) : prepared.key;
+}
+
+/**
+ * The finished markup of a block found by scanning a note, or null when it has not been rendered on
+ * this device.
+ *
+ * L1 first, then L2: memory is empty after a restart, after the phone was backgrounded, and for any
+ * diagram it evicted, and the commands used to say such a diagram had never been rendered. Never
+ * L3 — a legacy record has not been through the pipeline, so it is not something to hand out.
+ */
+export async function renderedMarkup(
+	scanned: string,
+	notePath: string,
+	deps: KeyDeps & { cache: DiagramCache },
+): Promise<string | null> {
+	const key = await keyFor(asProcessorSource(scanned), notePath, deps);
+	let artifact = deps.cache.peek(key);
+	if (!artifact) {
+		try {
+			artifact = (await deps.cache.lookup(key, null))?.artifact;
+		} catch {
+			artifact = undefined;
+		}
+	}
+	return artifact ? standaloneMarkup(artifact) : null;
+}
+
 /** Returns the spec directly when nothing has to be read from the vault, a promise when it does. */
 function prepare(
 	source: string,
-	el: HTMLElement,
-	deps: ProcessorDeps,
+	deps: KeyDeps,
 	notePath: string,
+	isExport: boolean,
 ): TexJobSpec | Promise<TexJobSpec> {
 	const parsed = parseDirectives(source, defaultOptions(deps.settings));
 
@@ -100,7 +146,7 @@ function prepare(
 		deps.settings.preamblePath !== '' ||
 		deps.settings.autoPreambleName !== '';
 
-	if (!needsPreamble) return buildSpec(parsed, source, el, deps, notePath, null);
+	if (!needsPreamble) return buildSpec(parsed, deps, isExport, null);
 
 	return deps.preamble
 		.resolve({
@@ -110,15 +156,13 @@ function prepare(
 			inputs: parsed.inputs,
 			notePath,
 		})
-		.then((resolved) => buildSpec(parsed, source, el, deps, notePath, resolved));
+		.then((resolved) => buildSpec(parsed, deps, isExport, resolved));
 }
 
 function buildSpec(
 	parsed: ReturnType<typeof parseDirectives>,
-	rawSource: string,
-	el: HTMLElement,
-	deps: ProcessorDeps,
-	notePath: string,
+	deps: KeyDeps,
+	isExport: boolean,
 	resolved: Awaited<ReturnType<PreambleService['resolve']>> | null,
 ): TexJobSpec {
 	const { settings, budgets } = deps;
@@ -133,9 +177,6 @@ function buildSpec(
 		settings.sourceHandling === 'legacy'
 			? legacyTidyTikzSource(parsed.body)
 			: normalizeSource(parsed.body);
-
-	const isExport = isExportContext(deps.app, el);
-	void notePath;
 
 	const key = deriveKey({
 		normalizedSource: normalized,
@@ -156,7 +197,6 @@ function buildSpec(
 	return {
 		key,
 		source: normalized,
-		rawSource,
 		options,
 		texOptions: {
 			...(Object.keys(options.baked.packages).length ? { texPackages: options.baked.packages } : {}),

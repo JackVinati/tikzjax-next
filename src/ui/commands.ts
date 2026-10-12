@@ -179,10 +179,13 @@ async function finalizeNote(app: App, file: TFile, deps: CommandDeps): Promise<v
 	}
 
 	const notice = new Notice(`Finalizing ${spans.length} diagram(s)…`, 0);
-	const written: { span: TikzBlockSpan; name: string }[] = [];
+	/** `index` is the block's place among `spans`: which block the attachment was rendered from. */
+	const written: { index: number; source: string; name: string }[] = [];
 
 	try {
-		for (const span of spans) {
+		for (let index = 0; index < spans.length; index++) {
+			const span = spans[index];
+			if (!span) continue;
 			const markup = await deps.markupFor(span.source, file.path);
 			if (markup === null) continue;
 
@@ -198,19 +201,29 @@ async function finalizeNote(app: App, file: TFile, deps: CommandDeps): Promise<v
 				file.path,
 			);
 			await app.vault.create(path, svg);
-			written.push({ span, name: path.split('/').pop() ?? path });
+			written.push({ index, source: span.source, name: path.split('/').pop() ?? path });
 		}
 
+		let finalized = 0;
 		if (written.length > 0) {
 			await app.vault.process(file, (current) => {
 				// Re-scan against the CURRENT text rather than trusting offsets taken before the
 				// attachments were written, then rewrite back to front.
+				//
+				// Each attachment goes back to the block it was rendered from: the same place among
+				// the blocks, with the same source. They used to be paired by position among the
+				// RENDERED ones, so with the first diagram in a note unrendered, the second one's
+				// picture was embedded above the first. An edit made in the meantime can now cost an
+				// embed, never put one on the wrong diagram.
 				const fresh = findTikzBlocks(current).filter((b) => !b.finalized);
 				let out = current;
-				for (let i = Math.min(fresh.length, written.length) - 1; i >= 0; i--) {
-					const span = fresh[i];
+				finalized = 0;
+				for (let i = written.length - 1; i >= 0; i--) {
 					const entry = written[i];
-					if (span && entry) out = finalizeBlock(out, span, entry.name);
+					const span = entry ? fresh[entry.index] : undefined;
+					if (!entry || !span || span.source !== entry.source) continue;
+					out = finalizeBlock(out, span, entry.name);
+					finalized++;
 				}
 				return out;
 			});
@@ -218,9 +231,9 @@ async function finalizeNote(app: App, file: TFile, deps: CommandDeps): Promise<v
 
 		notice.hide();
 		new Notice(
-			written.length === spans.length
-				? `Finalized ${written.length} diagram(s).`
-				: `Finalized ${written.length} of ${spans.length}; the rest have not been rendered yet.`,
+			finalized === spans.length
+				? `Finalized ${finalized} diagram(s).`
+				: `Finalized ${finalized} of ${spans.length}; the rest have not been rendered yet.`,
 		);
 	} catch (error) {
 		notice.hide();

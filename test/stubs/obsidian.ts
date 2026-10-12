@@ -21,14 +21,51 @@ export class MarkdownRenderChild extends Component {
 	}
 }
 
+/** Every notice shown, in order, so a test can read what the user was told. */
+export const shownNotices: Notice[] = [];
+
 export class Notice {
 	message: string | DocumentFragment;
 	duration: number | undefined;
+	hidden = false;
 	constructor(message: string | DocumentFragment, duration?: number) {
 		this.message = message;
 		this.duration = duration;
+		shownNotices.push(this);
 	}
-	hide(): void {}
+	hide(): void {
+		this.hidden = true;
+	}
 }
 
+/** Only so that modules defining a modal or naming a view type load; nothing here opens one. */
+export class Modal {
+	app: unknown;
+	constructor(app: unknown) {
+		this.app = app;
+	}
+	open(): void {}
+	close(): void {}
+}
+
+export class MarkdownView {}
+
 export const Platform = { isMobile: false, isDesktop: true, isIosApp: false, isAndroidApp: false };
+
+/**
+ * Just enough of a vault file for the `instanceof TFile` checks the preamble service makes. The
+ * real class is never constructed by a plugin, so the constructor here is the stub's own.
+ */
+export class TFile {
+	path: string;
+	name: string;
+	basename: string;
+	extension: string;
+	constructor(path: string) {
+		this.path = path;
+		this.name = path.slice(path.lastIndexOf('/') + 1);
+		const dot = this.name.lastIndexOf('.');
+		this.basename = dot > 0 ? this.name.slice(0, dot) : this.name;
+		this.extension = dot > 0 ? this.name.slice(dot + 1) : '';
+	}
+}

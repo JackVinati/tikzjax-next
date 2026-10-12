@@ -129,7 +129,6 @@ function spec(over: Partial<TexJobSpec> = {}): TexJobSpec {
 	return {
 		key: 'K',
 		source: '\\draw (0,0) circle (1);',
-		rawSource: '\\draw (0,0) circle (1);',
 		options: options(),
 		texOptions: {},
 		legacySource: null,
