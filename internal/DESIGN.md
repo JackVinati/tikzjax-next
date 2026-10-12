@@ -261,22 +261,26 @@ test/
 | `KEYING` | `l1Miss` | `LOOKUP` | one IndexedDB read (+ one legacy read while the L3 window is open) |
 | `LOOKUP` | `hit` | `TRANSFORMING` (L3) / `MOUNTING` (L2) | promote to L1 |
 | `LOOKUP` | `miss` ∧ `isExport` | `SCHEDULING` (priority 0) | bypass gate **and** debounce |
-| `LOOKUP` | `miss` ∧ `poisoned` | `FAILED(Timeout)` | "this diagram timed out; reload Obsidian to retry" — one wedging block no longer starves the vault |
+| `LOOKUP` | `miss` ∧ `poisoned` | `FAILED(Timeout)` | "this diagram timed out earlier in this session, so it was not run again", with Retry — one wedging block no longer starves the vault |
 | `LOOKUP` | `miss` ∧ `manual` \| `depthCap` | `IDLE_MANUAL` | render a "Render diagram" button |
 | `LOOKUP` | `miss` | `GATING` | observe with the shared IntersectionObserver, `rootMargin` per budget |
 | `GATING` | `intersect` | `DEBOUNCING` | — |
-| `GATING` | **`noRecordsAfter2s`** | `SCHEDULING` (priority 3) | **escape hatch**: collapsed callout, hidden tab, `display:none` ancestor, or a detached reading-view section would otherwise sit here forever with a permanent placeholder |
+| `GATING` | **`noRecordsAfter2s`** | `SCHEDULING` (priority 3) | **escape hatch**: a detached reading-view section would otherwise sit here forever with a permanent placeholder. As built, the gate flags the escape and the block goes to band 3 without the debounce. A collapsed callout, a hidden tab or a `display:none` ancestor does get a record — "not visible", measured in Chromium — and renders when shown |
 | `DEBOUNCING` | `timer` | `SCHEDULING` | priority from visibility |
 | `DEBOUNCING` | `unload` | `DISPOSED` | **nothing was ever submitted** — this alone is the fix for #24 |
-| `SCHEDULING` | `slot` | `COMPILING` | `Promise.race([host.render, timer])` |
+| `SCHEDULING` | `slot` | `COMPILING` | the queue says when, per owner (`onStart`), and a block joining a job already running hears at once. The job's own clock starts when the worker takes it (§5.3) |
+| `SCHEDULING` | `ok` \| `err` \| `timeout` \| `interrupted` | as from `COMPILING` | a settlement is proof the job ran, so an unexpected one can never strand a block here |
 | `COMPILING` | `ok` | `TRANSFORMING` | attach log buffer to the result |
-| `COMPILING` | `err` \| `timeout` | `FAILED` | on timeout: `terminate()` + respawn + add key to the session poison set |
+| `COMPILING` | `err` \| `timeout` | `FAILED` | on timeout: `terminate()` the worker that job is in, and only it; add the key to the session poison set |
+| `COMPILING` \| `SCHEDULING` | `interrupted` | `SCHEDULING` (same band) / `DISPOSED` if unloaded | the engine was stopped under the job — backgrounding, Restart, unload — so it goes back in line. **Never a card** |
+| `LOOKUP` \| `SCHEDULING` \| `COMPILING` | `expired` | `FAILED(export-budget)` | a PDF export's total budget ran out (§5.4); a running compile is not aborted, and still serves other blocks on its key |
 | `COMPILING` | `unload` | stays `COMPILING` | **we do not cancel a running job.** We already paid; the result goes to cache. Exceptions: plugin unload, timeout, or > 2× concurrency newer jobs queued behind it |
 | `TRANSFORMING` | `ok` | `MOUNTING` | write L1 + L2 |
-| `TRANSFORMING` | `stageThrew` | `MOUNTING(degraded)` | fall back to the previous stage's output, mount it, show a non-blocking warning chip — **never a silent raw-SVG fallthrough** (that is #15 and #48). The `ids` stage is exempt: it always runs, so a degraded mount can never reintroduce #12 |
+| `TRANSFORMING` | `degraded` | `MOUNTING(degraded)` | an optional stage threw and was skipped; mount the last good document with a warning chip, and **never persist it** — the `measure` effect carries `persist: false` |
+| `TRANSFORMING` | `stageThrew` | `FAILED(pipeline)` | nothing passed `sanitize` and `ids` (the SVG did not parse, or a mandatory stage threw). **An error card; the raw output is dropped.** This row used to mount the raw engine output "degraded", which put unsanitised markup in the note and in L2 |
 | `MOUNTING` | `mounted` | `MOUNTED` / `MOUNTED_DEGRADED` | stamp nonce; on first mount of a key, `await document.fonts.ready` then `getBBox()` then persist |
 | `MOUNTED` | `css-change` | `MOUNTED` | **no-op.** Colour is CSS. |
-| `FAILED` | `retry` | `SCHEDULING` | clear the poison entry for this key |
+| `FAILED` | `retry` | `SCHEDULING` | clear the poison entry for this key; paint the placeholder over the card first |
 | any | `unload` | `DISPOSED` | `abort()`, unobserve, `queue.release(key)`, clear timers |
 
 Two consequences worth naming. **Debounce falls out for free**: in Live Preview a keystroke destroys the widget and builds a new one (reuse is keyed on exact `(lang, code)` equality), so the old child unloads before its `DEBOUNCING` timer fires and nothing is ever submitted. And **the whole "post-processing didn't run" family (#15, #87, #93, #102) becomes structurally impossible**, because there is no bubbling event and no detached-node race: the artifact is transformed *before* it enters the document.
@@ -438,13 +442,13 @@ A new engine is a new `TexHost` with a new `id`. Because `id` is a cache-key inp
 
 ### 5.1 Semantics
 
-- One `RenderQueue` per plugin instance (not per window). Slots = concurrency.
+- One `RenderQueue` per plugin instance (not per window). Slots = concurrency, which is **1** on every platform as built (§5.4): one worker, one job in it. `WorkerHost` holds the jobs it has accepted and posts the next only when the previous one replies — a second job posted beside the first waited inside the worker with its clock running, and a timeout's terminate took it down too.
 - Priority `0` export/print · `1` visible · `2` within `rootMargin` · `3` prefetch / manual / zero-record fallback. Stable FIFO within a band.
 - **Dedup**: `inflight: Map<key, {promise, refs, controller}>`. Two panes showing the same block, or the same block twice in one note, produce **one** compile and two mounts with **different** instance nonces.
 - **Release**: `refs--`. At zero, an unstarted job is dropped from `pending`; a started job is left to complete and cache.
 - **Every job settles in a `finally`** that releases the slot. The failure mode of §2.2 defect 1 is structurally excluded.
-- **Depth cap**: overflow demotes the farthest-from-viewport jobs to `IDLE_MANUAL`, so a 200-diagram note never commits to hours of work.
-- **Poison set**: a key that timed out is refused for the rest of the session (never persisted). Cleared by Retry, by any settings change, and by reload.
+- **Depth cap**: overflow demotes the farthest-from-viewport jobs to `IDLE_MANUAL`, so a 200-diagram note never commits to hours of work. A block of a PDF export (inside `.print`) or of "Render all diagrams in this note" is submitted `uncapped`: never evicted and not counted, because each is bounded otherwise — the export by its total budget, the run by its Stop button — and a button is what the PDF would print.
+- **Poison set**: a key that timed out is refused for the rest of the session (never persisted). Cleared by Retry (for its key), by any settings change, by Restart the TeX engine, and by reload. Only a `timeout` poisons; a job that never reached a booted worker (`stalled`) or was interrupted does not.
 
 ### 5.2 The RPC layer
 
@@ -473,15 +477,17 @@ A bare `setTimeout(() => pool.kill(...))` around an `await host.run(...)` is **n
 
 `kill()` calls `Worker.terminate()`, revokes the blob URL, marks the host dead, and the pool respawns lazily. **This is mandatory, not defensive:** the engine feeds TeX a fixed terminal string with no `\nonstopmode`, so an error can reach the interactive `? ` prompt and suspend the asyncify'd wasm, and a suspended asyncify continuation cannot be resumed. `\nonstopmode` injection (Phase 4, via `addToPreamble`) is an optimisation; terminate-and-respawn is the guarantee.
 
+**As built (0.1.5).** A job's `timeoutMs` starts when the host posts it to a booted worker (`onRunning`), not when the queue starts it, so booting the engine no longer eats into the first diagram's budget. Until then the job is in its startup, bounded by `firstJobGraceMs`; a startup that runs out fails as `stalled` — "the TeX engine could not start", not poisoned. A timeout aborts the job's signal, and the host terminates the worker that job is in, and only it: the jobs waiting behind it get a fresh one. `kill()` — Restart the TeX engine, backgrounding on mobile, unload — rejects the job in the worker and every job waiting with `InterruptedError`, which is not a `TexError`: the block goes back to `SCHEDULING` at its band, and no card is shown. On mobile the queue is paused before the background kill and resumed on return, so nothing boots a worker while the app is hidden. A disposed host refuses with `engine-unavailable`, so an unloading plugin is not asked again and again. An idle worker is terminated after `idleTeardownMs`.
+
 ### 5.4 Budgets
 
 | | Desktop | Mobile (`Platform.isMobile`) |
 |---|---|---|
-| Concurrency | `min(2, hardwareConcurrency − 1)`, setting 1–4 | **1**, hard-clamped, not a preference |
-| Per-diagram timeout | 10 s | 20 s |
-| First-job grace (engine boot) | +20 s | +30 s |
+| Concurrency | **1** as built: one worker runs one TeX job at a time, so a second slot gave no parallelism (a second worker would double a ~156 MiB core dump and a boot). The setting is retired | **1**, hard-clamped, not a preference |
+| Per-diagram timeout | 10 s | 20 s; the time-limit **setting** is capped at 20 s, a block's own `%!tikz timeout=` is not |
+| First-job grace (engine boot) | 20 s, before the job's own clock starts (§5.3) | 30 s |
 | **Per-block export timeout** | 30 s | 30 s |
-| **Total export budget** | **60 s** | 60 s |
+| **Total export budget** | **60 s**, per `.print` container | 60 s |
 | Queue depth cap | 64 | 16 |
 | Lazy `rootMargin` | 200 px | 400 px |
 | Zero-record escape hatch | 2 s | 2 s |
@@ -492,7 +498,7 @@ A bare `setTimeout(() => pool.kill(...))` around an `await host.run(...)` is **n
 
 Mobile concurrency 1 is not conservatism: even after P1/P2b each worker retains ~68.75 MiB, and two workers is ~137 MiB resident inside one WKWebView content process whose measured ceiling ranges from ~100 MB (iPhone SE3, iOS 26.2) to ~450 MB.
 
-The **total export budget is not optional**. `Promise.all(ctx.promises)` has no timeout of its own, so 40 uncached blocks × 30 s would be a 20-minute uncancellable "Preparing PDF" modal. On expiry we mount error cards for whatever did not finish and resolve.
+The **total export budget is not optional**. `Promise.all(ctx.promises)` has no timeout of its own, so 40 uncached blocks × 30 s would be a 20-minute uncancellable "Preparing PDF" modal. On expiry we mount error cards for whatever did not finish and resolve. As built (0.1.5; it was ticked done in 0.1.0 and read nowhere): the processor gives each `.print` container one deadline, set at its first block, and each of its blocks a timer that sends the machine `expired` — a card, "not ready in time for the export", whose hint points at "Render all diagrams in this note". Keyed by the container, not the document, so a pop-out window is never put under it.
 
 ---
 
@@ -503,7 +509,8 @@ The **total export budget is not optional**. `Promise.all(ctx.promises)` has no 
 ```ts
 key = sha256Hex(
   field(`s${SCHEMA_VERSION}`) +   // bumped only when the STORED ARTIFACT FORMAT changes
-  field(engineId) +               // sha256 over the engine assets and engine-src/
+  field(`p${PIPELINE_REVISION}`) + // bumped when a src/svg stage can write a different template
+  field(engineId) +               // sha256 of the minified worker bundle, id replaced by a placeholder
   field(normalizedSource) +
   field(stableStringify(baked)) + // preamble, packages, libraries, border, two-pass
   field(artifactRevision) +
@@ -516,6 +523,14 @@ instead of joined by a separator. A separator has to be a byte no input can cont
 exists here — the preamble is arbitrary TeX and the source is arbitrary user text — so with any
 separator there is another pair of fields that concatenates to the same string. Length prefixes make
 the encoding injective for free. See `src/cache/key.ts`.
+
+Two fields were added in 0.1.5. **`PIPELINE_REVISION`**: the key is a function of the pipeline's
+inputs and the artifact is its output, so a stage that changes what it writes moved no key, and the
+next release served every artifact the previous one had stored. 2 is the release whose colour pass
+runs for every mode and whose sanitizer is an allowlist; `test/pipeline-revision.test.ts`
+fingerprints the stage modules and fails until the revision is reconsidered. **`engineId`** is now
+the sha256 of the worker as it ships (`scripts/engine-assets.mjs`): it used to hash a list of the
+worker's inputs, which left out the npm packages bundled into it and the contents of the TeX files.
 
 `artifactRevision()` is **deliberately narrow and enumerated**:
 
@@ -533,13 +548,13 @@ Two unit tests make this a *tested property* rather than a hope: key sensitivity
 
 `sha256Hex` is a **bundled synchronous implementation (~2 KB)**, not `crypto.subtle`. `crypto.subtle.digest` is async and would break the synchronous L1 probe that delivers G1; it also carries an unnecessary secure-context question on `capacitor://localhost`. This is a cache key, not a security boundary.
 
-`Plugin.onExternalSettingsChange()` (≥1.5.7) recomputes `artifactRevision` and drops L1 if it moved, so a Sync-driven `data.json` change re-derives the revision instead of serving stale artifacts.
+`Plugin.onExternalSettingsChange()` (≥1.5.7) recomputes `artifactRevision` and drops L1 if it moved, so a Sync-driven `data.json` change re-derives the revision instead of serving stale artifacts. As built (0.1.5): the processor reads the settings per block, so a Sync-driven change applies to the next block, and L1 is kept — every setting that changes stored bytes is in the key, so an artifact built under the old settings cannot be served for the new ones. A change that would build the open blocks differently re-processes them through `post-processor-change`, which Reading view and Live Preview both rebuild on.
 
 ### 6.2 Storage
 
 **L1** — `Map<key, Artifact>`, LRU on entry count *and* bytes. Cleared on `visibilitychange → hidden` on mobile. This is the tier the synchronous processor probe reads, and it is what makes Live Preview ↔ Reading switching and scroll-back instant.
 
-**L2** — our own IndexedDB database, named **`obsidian-tikzjax-<app.appId>`**. The name must carry `appId`: every vault on a desktop install shares one origin, so an unqualified name would share one store, one byte cap and one "Clear all" across every vault on the machine. Obsidian namespaces its own stores exactly this way (`appId+"-cache"`, `appId+"-sync"`, verified in the 1.13.7 bundle). Every open and every write is wrapped: WebKit evicts IndexedDB under storage pressure and after prolonged non-use, and a `QuotaExceededError` on write must degrade to "L1 only for this session" plus one Notice — never a failed render, and never an unhandled rejection inside the settle path. It stores `renders` (keyPath `key`, index on `lastUsed`) and `meta` (`{schema, totalBytes}` so eviction never needs a full scan). **Not localForage**: it is unmaintained (last published 2021-08-18), it is already fought with a try/catch at settings.ts:25-29 *because it breaks plugin load on mobile*, and it is the vendored bundle's store, not ours.
+**L2** — our own IndexedDB database, named **`obsidian-tikzjax-<app.appId>`**. The name must carry `appId`: every vault on a desktop install shares one origin, so an unqualified name would share one store, one byte cap and one "Clear all" across every vault on the machine. Obsidian namespaces its own stores exactly this way (`appId+"-cache"`, `appId+"-sync"`, verified in the 1.13.7 bundle). Every open and every write is wrapped: WebKit evicts IndexedDB under storage pressure and after prolonged non-use, and a `QuotaExceededError` on write must degrade to "L1 only for this session" plus one Notice — never a failed render, and never an unhandled rejection inside the settle path. It stores `renders` (keyPath `key`, index on `lastUsed`) and `meta` (`{schema, totalBytes}` so eviction never needs a full scan). As built since 0.1.5 (schema 3): `renders` holds the artifacts, a `usage` store holds `{key, lastUsed, bytes}` indexed by `lastUsed`, and `meta` the total — so a cache hit's touch writes a small record instead of rewriting the SVG, eviction walks the usage index without loading one, and every put, delete and eviction moves the total in the same transaction as the records it covers. The 0.1.4 total drifted upward until the store emptied itself on every write; the upgrade clears the schema-2 records, which no key could reach any more. A connection the browser closed (WebKit does, behind a suspended app) is reopened once per operation instead of switching L2 off for the session. **Not localForage**: it is unmaintained (last published 2021-08-18), it is already fought with a try/catch at settings.ts:25-29 *because it breaks plugin load on mobile*, and it is the vendored bundle's store, not ours.
 
 The stored artifact is the **final** post-processed SVG with `__TZ__n` id placeholders, plus `{w, h, viewBox}`. A hit is a `Map.get`, one `replaceAll`, one `appendChild`.
 
@@ -567,6 +582,8 @@ One `IntersectionObserver` per scroll root, pooled, never a document scanner. `r
 
 The **zero-record escape hatch is mandatory**: if a placeholder has been attached for > 2 s with zero `IntersectionObserverEntry` records, submit at priority 3. Without it, a block inside a collapsed callout, a hidden tab, a `display:none` ancestor, or a reading-view section Obsidian has detached would sit in `GATING` forever with a permanent placeholder — a *new* class of blank-diagram bug introduced by lazy rendering itself.
 
+Measured since (Chromium): a collapsed callout, a hidden tab and a `display:none` ancestor all get a record, saying not visible, and render when they are shown. Only a detached block gets none. The gate reports an escape as such, and the block goes to band 3 without the debounce; it used to report the block plainly visible, so it went in with what the reader was looking at. Blocks inside the off-screen holder of "Render all diagrams in this note" are rendered whatever their lazy mode: no viewport ever sees them. The gate counts the blocks per scroll root and lets an observer go when its count reaches zero.
+
 ### 7.2 SVG pipeline
 
 Ordered pure stages over a `DOMParser(…, 'image/svg+xml')` document. **No `outerHTML` anywhere.**
@@ -574,7 +591,7 @@ Ordered pure stages over a `DOMParser(…, 'image/svg+xml')` document. **No `out
 | # | Stage | Notes |
 |---|---|---|
 | 1 | `parse` | Root must be `<svg>`; anything else → typed `empty-output` error. |
-| 2 | **`sanitize`** | **Mandatory, non-skippable; runs first and is not disabled by `raw`, `fast` or a degraded mount.** Remove `<script>` and `<foreignObject>` elements, every `on*` attribute, and any `href`/`xlink:href` whose value is not a same-document `#fragment`. Reason: `dvisvgm:raw` specials pass author markup through the engine verbatim (§2.2 defect 17), the artifact is then *persisted* to L2 and replayed on every later open, and the host is an Electron renderer. Removal is not silent: it downgrades to `MOUNTED(degraded)` with a "removed active content from this diagram" chip, so a legitimate raw-special user learns why. |
+| 2 | **`sanitize`** | **Mandatory, non-skippable; runs first and is not disabled by `raw`, `fast` or a degraded mount.** Remove `<script>` and `<foreignObject>` elements, every `on*` attribute, and any `href`/`xlink:href` whose value is not a same-document `#fragment`. Reason: `dvisvgm:raw` specials pass author markup through the engine verbatim (§2.2 defect 17), the artifact is then *persisted* to L2 and replayed on every later open, and the host is an Electron renderer. **As built since 0.1.5, an allowlist** of what dvi2html's templates and pgf's SVG driver emit: SVG-namespace elements from a fixed list, attributes from a fixed list, only presentation properties in `style`; CSS values may call only colour and transform functions; a `url()` must point into the document; comments and processing instructions go (the HTML parser that mounts the template ends a comment at `<!-->`, so `<!--><img onerror=…>-->` was one inert comment to the XML parser and a live `<img>` to the mount). Removal is not silent: what was taken out becomes a "Removed active content from this diagram: …" chip, so a legitimate raw-special user learns why. Not a degradation — what is left is safe, and is stored with the chip. |
 | 2b | `entities` | `&#173;` → `&#172;`, carried over **explicitly and commented**. It exists because of the fontforge glyph remap from #2; dropping it silently regresses `\Omega` and `\otimes`. Guarded by a golden fixture. |
 | 3 | `ids` | Every `id` → `__TZ__n`; sweep every reference — `url(#…)` in attributes **and in `style` declarations**, `xlink:href`, `href`, `clip-path`, `mask`, `filter`, `marker-{start,mid,end}`, `fill`, `stroke`. Assert the token does not already occur; if it does, fall back to a random token stored in the record. **This stage always runs, including on the `raw` escape hatch and on a degraded mount.** |
 | 4 | `optimize` | SVGO with corrected overrides, or the targeted transform (§7.3), or off. |
@@ -585,9 +602,11 @@ Then, at **mount** time only:
 
 7. `stamp` — one string pass, `template.replaceAll('__TZ__', 't' + (++counter) + '_')`. The replacement string is computed **once, before the call**. A function replacer would run per match and produce a different nonce for the definition than for the reference, breaking every clip-path, mask, marker and gradient in the diagram — the exact bug this stage exists to fix.
 8. `measure` + `geometry` (§7.4).
-9. `layout` — `width` / `align` / `scale` applied to the **wrapper div**, never to the `<svg>` (#14, #26, #42).
+9. `layout` — `width` / `align` / `scale` applied to the **wrapper div**, never to the `<svg>` (#14, #26, #42). As built: `scale` sizes the wrapper in points, the unit of the svg's width, and a wrapper sized by `width=` or `scale=` carries `is-sized`, for which the svg fills it. Left to its own `width` attribute the svg could shrink into a narrower wrapper but never grow into a wider one, so `scale=2` drew a diagram at its natural size (measured in Chromium).
 
-Every stage runs in try/catch; a throwing stage is skipped, the previous output is mounted, and a warning chip appears — `MOUNTED(degraded)`. Never a silent raw-SVG fallthrough. Hardening: **no `String.prototype` methods on the hot path** — Pretty BibTeX 2.0.0 monkey-patched `String.prototype.replaceAll` to stringify a RegExp argument, silently killing both inversion and SVGO with no error anywhere (#48). Local helper functions only.
+Every stage runs in try/catch; a throwing stage is skipped, the previous output is mounted, and a warning chip appears — `MOUNTED(degraded)`. Never a silent raw-SVG fallthrough. A degraded artifact is never persisted. If a MANDATORY stage throws, or the engine's SVG does not parse, nothing has passed `sanitize` and `ids`, and the block shows an error card (§3.3, `stageThrew`).
+
+The colour pass is the same for every colour mode. The mode is presentation and not in the key, so a stage that read it stored one block's mode and served it to every other block with the same source; the modes now differ only in the CSS tokens of their class (§7.5). Hardening: **no `String.prototype` methods on the hot path** — Pretty BibTeX 2.0.0 monkey-patched `String.prototype.replaceAll` to stringify a RegExp argument, silently killing both inversion and SVGO with no error anywhere (#48). Local helper functions only.
 
 ### 7.3 SVGO policy
 
@@ -638,7 +657,8 @@ pgf paint arrives as `#rrggbb`, shortened to `#rgb`. dvi2html's colour-special m
 .tikzjax-figure svg .tz-paper-fill   { fill:   var(--tikz-paper); }
 .tikzjax-figure svg .tz-paper-stroke { stroke: var(--tikz-paper); }
 
-.tikzjax-figure.is-preserve { --tikz-ink:#000; --tikz-paper:#fff; }
+.tikzjax-figure.is-preserve,
+.tikzjax-figure.is-invert   { --tikz-ink:#000; --tikz-paper:#fff; }
 .tikzjax-figure.is-paper    { --tikz-ink:#000; --tikz-paper:#fff;
                               background:#fff; padding:.5em; border-radius:4px; }
 .theme-dark .tikzjax-figure.is-invert svg { filter: invert(1) hue-rotate(180deg); }
@@ -657,6 +677,8 @@ The DOM pass does exactly two things and **never writes `var()` into a presentat
 - **gradient stops are left alone by default.** Rewriting the endpoints of a `ball color` ramp pushes them toward each other and flattens the shading (#73). Setting: `Adapt gradients: never (default) | ink-only`.
 
 Modes, global + per-block: `adapt` (default) · `preserve` · `paper` (#103) · `invert`.
+
+As built since 0.1.5, **the pass runs the same for every mode** and a mode is nothing but its class's two tokens. The mode is not in the key, and preserve and invert used to skip the pass: the stored artifact kept literal black and white, and whichever mode rendered a diagram first decided what every other mode was served. `is-invert` pins the tokens like `is-preserve` before it is filtered — without that, the dark-theme filter inverted the theme's light ink into dark ink. The zoom view, which mounts the artifact outside any figure, carries the block's `is-<mode>` and the same rules.
 
 *Optional refinement, Phase 6, behind a flag — sentinel ink.* Inject `\usepackage{xcolor}\definecolor{tikzjaxink}{RGB}{1,1,1}\AtBeginDocument{\color{tikzjaxink}}` via `addToPreamble`. If default ink then emits as `#010101` while an author's `\draw[black]` still emits `#000`, the adapt pass becomes *exact* rather than heuristic. Ship the heuristic first; promote the sentinel only if the fixture corpus proves it — `\pgfsys@beginpicture` pushes `\special{color push gray 0}` unconditionally, so `<rect>` and `<text>` may not honour it. This is a 20-minute experiment, not a design commitment.
 
@@ -680,6 +702,8 @@ Once L3 is retired, `showConsole` becomes a real per-job flag driven by the debu
 `Overfull \hbox` — extremely common with `\node` text — must **never** produce an error card. PR #100's state machine treats any unrecognised line as the start of an error and would show a red box on a perfectly good render; that would be worse than the current broken image. TeX wraps stdout at ~79 columns, so the parser reassembles continuations before matching.
 
 **Present.** A `.tikzjax-error` card replacing the block: the one-line message, the offending source line with a caret, a capability-driven hint from `hints.ts` + `inventory.ts`, a collapsible full log, and **Copy log / Retry / Docs** buttons. Failures go to the **session-only** poison set. Never persisted.
+
+**The offending line, as built (0.1.5).** TeX's `l.NN` counts the lines of the whole input, preamble files first, so a fixed offset was right only for a preamble of one line. The worker reports the line its input puts the block's first line on (`bodyLine`, `engine-src/document.ts`), and the host turns `l.NN` into a line of the block, numbered as pre-flight numbers them. Lines above the block count on upwards — 0 is the preamble's last line — because the worker writes the preamble files straight before the block and everything of its own ahead of them on their first line. The resolver records which file and which line of it every line of the expanded preamble came from, so the card names the preamble file and its own line for an error there. An interruption is never a card; an empty block says so; a diagram that timed out earlier says that, with Retry; an undefined macro is named from the log.
 
 **Pre-flight warnings** (`source/preflight.ts`), shown as a dismissible strip above the diagram, not an error — these prevent the error instead of explaining it ten seconds later:
 
@@ -760,6 +784,10 @@ const isExportContext = (app: App, el: HTMLElement) =>
 
 **Fails open**: unknown → treat as export, render eagerly. Note this is deliberately *not* `el.doc !== activeDocument` — `activeDocument` follows focus, so a background pop-out would be misclassified. Failing open costs a little extra compilation; failing closed costs blank PDFs.
 
+As built (0.1.5), the document test above still misclassified every pop-out, which is a document other than the main one: its blocks rendered at the export band, under the export time limit and past the poison set, for as long as it was open. A document one of the workspace's leaves lives in (`iterateAllLeaves`, `getContainer().doc`) is no longer an export; `.print` still is, and any other document still fails open. The total export budget and the depth-cap exemption key off `.print` alone.
+
+The commands that take a diagram out of the note (Copy SVG, Save SVG, Finalize, the zoom view) find it by scanning the note's markdown, and derive its key with the processor's own code from `asProcessorSource` of the scanned text — Obsidian's convention, one trailing terminator dropped and CRLF made LF. They read L1 then L2, never L3, and hand out the markup with ids of its own and the measured frame (`standaloneMarkup`). They used to look the key up in a map the processor filled, which knew only blocks a view had processed this session and grew with every edit.
+
 **Getting SVGs out** (#21, #33, #95, #97) — `freezeSvg(template, {ink, paper, opaque})`: clone; stamp `style="color:#000"` on the root (resolving every `currentColor`, including inside `<pattern>`/`<marker>` content); replace `.tz-paper-*` classes with literal fills; **inline only the `@font-face` rules the SVG actually references** (a typical diagram uses ~12 of the 140 faces) — mandatory, because dvi2html emits real `<text font-family="cmr10">` and an SVG loaded as a file or an image gets none of Obsidian's stylesheet; re-add `xmlns`/`xmlns:xlink`; optionally prepend an opaque paper `<rect>`; serialise with `XMLSerializer`.
 
 Commands: **Copy SVG**, **Save SVG to vault** (`fileManager.getAvailablePathForAttachment` + `vault.createBinary`), **Finalize diagrams in this note** (write attachments, rewrite the block to `![[name.svg]]` followed by the original fence wrapped in `%% … %%`, via `vault.process` + `getSectionInfo`), and its inverse **Un-finalize**.
@@ -780,6 +808,8 @@ Beyond §5.4:
 ### 7.11 Fast mode, accessibility, i18n, privacy
 
 **Fast mode — defined, because "a fast mode" was a stated goal and elsewhere in this document it exists only as a table row.** `fast` is a *preset*, not a fourth SVGO value: it sets `svgo: off`, skips the mount-time `fonts.ready` + `getBBox()` measurement (mounting with the engine's viewBox, so geometry is uncorrected and `viewBox` is left `null` in the record rather than persisted wrong), skips the pre-flight lint, and raises the block's queue priority by one band. It never skips `sanitize` and never skips `ids`. Because `svgo` participates in `artifactRevision`, a block toggled to fast mode is a different key — that is intended: fast artifacts and full artifacts coexist rather than overwrite. Global setting plus `%!tikz fast`. Measured value: it removes the 8.2 / 43.0 / 267.7 ms SVGO pass and one forced style/layout flush per new diagram.
+
+As built (0.1.5), fast mode **keeps** the mount-time measurement. The engine's frame is an inch short of the drawing (§7.4), so a fast diagram mounted without it lost its right and bottom edges, to save one layout per new diagram. The band is raised by the block when it submits, never above band 0. `svgo=off`, `targeted` and `preset` now reach the pipeline (they used to reach only the key); `preset` is the targeted transform while SVGO is not bundled.
 
 **Accessibility.** Currently zero: an `<svg>` with no accessible name, and failures that are an image of a broken image.
 - `alt="…"` (§7.7) emits `<title id=…>` as the SVG's first child plus `role="img"` and `aria-labelledby`; with no `alt`, the SVG gets `role="img"` and `aria-label` derived from the first `
