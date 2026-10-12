@@ -19,7 +19,8 @@ top of its notes on GitHub, and will not publish a version that has none.
 - Releases run CI's whole gate on the tagged commit before publishing, and publish from a separate
   job that is the only one allowed to write. Their notes start with the section from this file.
 - CI renders every test fixture through the engine and reports test coverage. Dependabot proposes
-  dependency updates weekly.
+  dependency updates weekly, and the Engine workflow warns when an engine pin falls behind upstream
+  or its Node line nears end of life.
 - Development: typescript-eslint 8.71.2; `svgo`, which nothing used, is removed; `buffer` is pinned
   exactly; Node `^22.13.0 || ^24.0.0 || >=26.0.0`, which is what ESLint 10 and Vitest 5 accept.
 
