@@ -22,9 +22,16 @@ import { targetedTransform, type OptimizeMode } from './optimize';
  * `colors` runs AFTER `optimize`, not before. SVGO's `convertColors` collapses the value space to
  * `#000`/`#fff`, so running the colour pass first means the two cancel — which is one of the six
  * reasons the shipped plugin's dark mode misbehaves.
+ *
+ * Nothing here depends on the block's colour mode. The mode is not in the cache key, so a stage
+ * that read it would store one block's mode and serve it to every other (see colors.ts).
  */
 export interface StageOptions {
-	colors: ColorMode;
+	/**
+	 * Accepted and ignored: the stored artifact is the same for every mode. Still in the type only
+	 * because render-child.ts passes it; drop the field when that call stops.
+	 */
+	colors?: ColorMode | undefined;
 	optimize: OptimizeMode;
 }
 
@@ -61,7 +68,7 @@ export function buildStages(options: StageOptions): Stage[] {
 	stages.push({
 		name: 'colors',
 		run: (doc) => {
-			applyColorModel(doc, options.colors);
+			applyColorModel(doc);
 		},
 	});
 

@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
+/// <reference types="vite/client" />
 import { describe, expect, it } from 'vitest';
 import { NOT_SIGN, SOFT_HYPHEN, remapSoftHyphens } from '../src/svg/entities';
 import { ID_TOKEN, IdTokenCollisionError, placeholderIds, stampIds } from '../src/svg/ids';
 import { sanitizeSvg, type SanitizerRemoval } from '../src/svg/sanitize';
 import { SvgParseError, parseSvg, serializeSvg } from '../src/svg/serialize';
 import { TexError } from '../src/types';
+import { readText } from './support/read-text';
 
 const SVG_OPEN = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">';
 
@@ -251,6 +253,203 @@ describe('sanitizeSvg', () => {
 		expect(kinds(sanitizeSvg(doc))).toEqual(['script', 'script', 'script']);
 		expect(doc.documentElement.childNodes).toHaveLength(0);
 	});
+});
+
+describe('sanitizeSvg — only what the engine emits', () => {
+	it('drops a <style>, and the XHTML elements the HTML parser would bring to life', () => {
+		// The markup a raw special can carry that the denylist let through. The template is mounted
+		// with createContextualFragment in an HTML document, where an SVG <style> applies to the whole
+		// page and <img> and <embed> break out of the <svg> as live HTML elements.
+		const doc = parseSvg(
+			svg(
+				'<g>' +
+					'<style>.workspace{display:none} body{background:url(https://example.invalid/beacon.png)}</style>' +
+					'<img xmlns="http://www.w3.org/1999/xhtml" src="https://example.invalid/pixel.png"/>' +
+					'<embed xmlns="http://www.w3.org/1999/xhtml" type="text/html" src="https://example.invalid/page.html"/>' +
+					'<rect width="1" height="1" fill="url(https://example.invalid/paint.svg#p)"/>' +
+					'</g>',
+			),
+		);
+
+		const removed = sanitizeSvg(doc);
+		const out = serializeSvg(doc);
+
+		expect(out).not.toContain('example.invalid');
+		expect(out).not.toContain('style');
+		expect(out).not.toContain('img');
+		expect(out).not.toContain('embed');
+		expect(doc.getElementsByTagName('rect')).toHaveLength(1);
+		expect(kinds(removed).sort()).toEqual(['element', 'element', 'element', 'external-reference']);
+	});
+
+	it('drops an element outside the SVG namespace even when its name is an SVG one', () => {
+		const doc = parseSvg(
+			svg(
+				'<g xmlns="http://www.w3.org/1999/xhtml"><path d="M0 0"/></g>' +
+					'<math xmlns="http://www.w3.org/1998/Math/MathML"><mi>x</mi></math>' +
+					'<path d="M0 0"/>',
+			),
+		);
+		expect(kinds(sanitizeSvg(doc))).toEqual(['element', 'element']);
+		expect(doc.documentElement.childNodes).toHaveLength(1);
+	});
+
+	it('drops an SVG element the engine never emits', () => {
+		const doc = parseSvg(
+			svg(
+				'<filter id="f"><feImage href="#x"/></filter><cursor href="#c"/><view id="v"/>' +
+					'<switch><path d="M0 0"/></switch><g/>',
+			),
+		);
+		expect(kinds(sanitizeSvg(doc))).toEqual(['element', 'element', 'element', 'element']);
+		expect(serializeSvg(doc)).toBe(serializeSvg(parseSvg(svg('<g/>'))));
+	});
+
+	it('keeps <title> and <desc> to text, since the HTML parser reads their children as HTML', () => {
+		// Both are HTML integration points: a child element inside them is parsed as an HTML
+		// element, not an SVG one, which is a second way out of the <svg>.
+		const doc = parseSvg(svg('<title>A <g>diagram</g></title><desc><text>d</text>escribed</desc>'));
+		expect(kinds(sanitizeSvg(doc))).toEqual(['element', 'element']);
+		expect(serializeSvg(doc)).toBe(serializeSvg(parseSvg(svg('<title>A </title><desc>escribed</desc>'))));
+	});
+
+	it('removes comments and processing instructions, which the HTML parser ends early', () => {
+		// XML ends a comment only at `-->`; HTML also ends one at `<!-->`. So this is one inert
+		// comment to the XML parser that reads the engine's output, and an empty comment followed
+		// by a live <img onerror> to the HTML parser that mounts the stored template. A processing
+		// instruction is the same trick: HTML reads `<?…` as a comment that ends at the first `>`.
+		const doc = parseSvg(svg('<g><!--><img src=x onerror=alert(1)>--><path d="M0 0"/></g>'));
+		// happy-dom's XML parser rejects processing instructions in the body, so this one is built
+		// through the DOM; a browser's parser accepts it.
+		doc.documentElement.appendChild(
+			doc.createProcessingInstruction('pi', 'a><img src=y onerror=alert(2)>'),
+		);
+
+		const removed = sanitizeSvg(doc);
+		const out = serializeSvg(doc);
+
+		expect(out).not.toContain('onerror');
+		expect(out).not.toContain('<!--');
+		expect(out).not.toContain('<?');
+		expect(out).toContain('<path d="M0 0"/>');
+		expect(kinds(removed)).toEqual(['markup', 'markup']);
+	});
+
+	it('keeps a url() that points into the document and drops one that leaves it', () => {
+		const doc = parseSvg(
+			svg(
+				'<rect id="keep1" fill="url(#ok)" clip-path="url( \'#c\' )" mask=\'url("#m")\'/>' +
+					'<rect id="drop1" stroke="url( \'https://example.invalid/s.svg#p\' )"/>' +
+					'<rect id="drop2" filter="url(data:image/svg+xml;base64,PHN2Zy8+#f)"/>' +
+					'<rect id="drop3" marker-start="url(//example.invalid/m.svg#a)"/>' +
+					'<rect id="drop4" fill="url(#ok) url(https://example.invalid/x)"/>' +
+					'<set id="drop5" attributeName="fill" to="url(https://example.invalid/p.svg#p)"/>',
+			),
+		);
+
+		const removed = sanitizeSvg(doc);
+		expect(kinds(removed)).toEqual(Array(5).fill('external-reference'));
+
+		const keep = doc.getElementById('keep1')!;
+		expect(keep.getAttribute('fill')).toBe('url(#ok)');
+		expect(keep.getAttribute('clip-path')).toBe("url( '#c' )");
+		expect(keep.getAttribute('mask')).toBe('url("#m")');
+		expect(serializeSvg(doc)).not.toContain('example.invalid');
+		expect(serializeSvg(doc)).not.toContain('data:');
+	});
+
+	it('drops a CSS value that could fetch without saying url(', () => {
+		// image-set() and friends load images too, and a CSS escape spells url( without the letters
+		// ever appearing in the attribute.
+		const doc = parseSvg(
+			svg(
+				`<rect mask="image-set('https://example.invalid/a.png' 1x)"/>` +
+					`<rect fill="\\75 rl(https://example.invalid/b.svg#p)"/>` +
+					`<rect fill="ur/**/l(https://example.invalid/c.svg#p)"/>` +
+					`<rect transform="translate(1,2) scale(-1,1) rotate(90) matrix(1,0,0,1,0,0)" fill="rgb(0,0,0)"/>`,
+			),
+		);
+
+		const removed = sanitizeSvg(doc);
+		expect(removed).toHaveLength(3);
+		expect(serializeSvg(doc)).not.toContain('example.invalid');
+		// Transforms and colour functions are what the engine and the later stages actually write.
+		expect(serializeSvg(doc)).toContain('matrix(1,0,0,1,0,0)');
+		expect(serializeSvg(doc)).toContain('rgb(0,0,0)');
+	});
+
+	it('keeps only presentation properties in a style attribute, and leaves a clean one untouched', () => {
+		const doc = parseSvg(
+			svg(
+				'<circle id="pgf" r="1" style="fill:url(#pgfsh2); stroke:none"/>' +
+					'<g id="hostile" style="position: fixed; inset: 0; fill: url(#a); z-index: 9; ' +
+					'background-image: url(https://example.invalid/b.png)"/>' +
+					'<g id="gone" style="--x: url(https://example.invalid/c.png)"/>',
+			),
+		);
+
+		const removed = sanitizeSvg(doc);
+		expect(doc.getElementById('pgf')!.getAttribute('style')).toBe('fill:url(#pgfsh2); stroke:none');
+		expect(doc.getElementById('hostile')!.getAttribute('style')).toBe('fill: url(#a)');
+		expect(doc.getElementById('gone')!.hasAttribute('style')).toBe(false);
+		expect(kinds(removed)).toEqual(['attribute', 'attribute']);
+	});
+
+	it('drops an attribute the engine never emits', () => {
+		const doc = parseSvg(
+			svg(
+				'<g id="g" src="https://example.invalid/x" xml:base="https://example.invalid/" ' +
+					'about="x" xml:space="preserve" transform="scale(2)"/>' +
+					'<a id="a" href="#g" target="_blank" xlink:title="t"><text x="1" y="2">t</text></a>',
+			),
+		);
+
+		const removed = sanitizeSvg(doc);
+		expect(kinds(removed)).toEqual(Array(5).fill('attribute'));
+		const out = serializeSvg(doc);
+		expect(out).not.toContain('example.invalid');
+		expect(out).not.toContain('target');
+		expect(out).not.toContain('about');
+		expect(out).toContain('xml:space="preserve"');
+		expect(out).toContain('transform="scale(2)"');
+		expect(out).toContain('href="#g"');
+	});
+});
+
+describe('sanitizeSvg — real engine output', () => {
+	/**
+	 * What the committed engine actually emits, from `npm run smoke`: four outputs that between
+	 * them carry every element and attribute name in all 21 fixtures' SVGs (gradients, clip paths,
+	 * patterns, `style="fill:url(#…)"`, text, opacity). An allowlist that dropped any of it would
+	 * blank part of a real diagram. Every smoke output on this machine is checked as well, when the
+	 * smoke run has written them.
+	 */
+	const corpus: Record<string, string> = {
+		...Object.fromEntries(
+			['shading', 'tikz-cd', 'patterns', 'pgfplots-fillbetween'].map((name) => [
+				name,
+				readText(`test/fixtures/svg/${name}.svg`),
+			]),
+		),
+		...import.meta.glob<string>('../engine-build/out/smoke/*.svg', {
+			query: '?raw',
+			import: 'default',
+			eager: true,
+		}),
+	};
+
+	it('has the committed fixtures to check', () => {
+		expect(Object.keys(corpus).length).toBeGreaterThanOrEqual(4);
+	});
+
+	for (const [name, markup] of Object.entries(corpus)) {
+		it(`removes nothing from ${name}`, () => {
+			const doc = parseSvg(markup);
+			const before = serializeSvg(doc);
+			expect(sanitizeSvg(doc)).toEqual([]);
+			expect(serializeSvg(doc)).toBe(before);
+		});
+	}
 });
 
 describe('placeholderIds', () => {

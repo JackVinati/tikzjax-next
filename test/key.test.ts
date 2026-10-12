@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { deriveKey } from '../src/cache/key';
+import { deriveKey, PIPELINE_REVISION } from '../src/cache/key';
 import { legacyKey, md5Hex } from '../src/cache/legacy-key';
 import { sha256Hex } from '../src/cache/sha256';
 import type { BakedOptions, BlockOptions, KeyInputs, Presentation } from '../src/types';
@@ -210,13 +210,26 @@ describe('deriveKey', () => {
 	 * truncated to 32 hex characters, and was computed independently of the implementation.
 	 */
 	it('is pinned', () => {
-		// Moved twice, both deliberate:
+		// Moved three times, all deliberate:
 		//   1. `pipeline` (raw/fast/svgo) joined KeyInputs, after review showed a block toggled to
 		//      fast mode collided with its own full-quality artifact;
-		//   2. `twoPass` joined BakedOptions, because a second pass changes the stored bytes.
+		//   2. `twoPass` joined BakedOptions, because a second pass changes the stored bytes;
+		//   3. PIPELINE_REVISION joined the payload, right after the schema field, at 2: the colour
+		//      pass and the sanitizer changed what a stored template holds.
 		// This line changing is the intended signal. Every previously cached key becomes a miss,
 		// which is correct, and misses are swept on idle rather than wiped at startup.
-		expect(deriveKey(INPUTS)).toBe('41df0c0cae9cd60eb86fc55307200129');
+		expect(deriveKey(INPUTS)).toBe('4a995edd1208c2d8d3f9c9b76ce752a2');
+	});
+
+	/**
+	 * What 0.1.4 derived for these inputs — the same payload without the revision field, computed the
+	 * same independent way as the pin above. Its artifacts were stored by the old colour pass, which
+	 * baked a block's colour mode in, and by the old sanitizer, so serving one now would replay both
+	 * bugs; a key that can no longer come out of `deriveKey` is how they stop being served.
+	 */
+	it('never derives a key that 0.1.4 stored under', () => {
+		expect(PIPELINE_REVISION).toBe(2);
+		expect(deriveKey(INPUTS)).not.toBe('41df0c0cae9cd60eb86fc55307200129');
 	});
 
 	it('changes when any single input changes', () => {
