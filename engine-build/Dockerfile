@@ -9,7 +9,8 @@
 #
 # TEXLIVE selects where the TeX *packages* come from, and is therefore the package-version pin:
 #   apt  Ubuntu 24.04's texlive  -> TeX Live 2023. What upstream builds and tests against.
-#   net  TUG net installer       -> current TeX Live: pgf 3.1.12, pgfplots 1.18.3, circuitikz 1.8.6.
+#   net  TUG net installer       -> whatever TeX Live is current on the day of the build. Not pinned,
+#                                   so no versions are written here; TODO.md E1 keeps a dated list.
 # Build apt first. It is the known-good path, and it tells you whether a later failure on `net`
 # is the version bump or the pipeline.
 
@@ -26,8 +27,17 @@ ARG TEXLIVE=apt
 # change to the committed engine.
 #
 # 22, not 24 or 26: web2js's lockfile pins nan 2.22.0 for node-kpathsea, and nan 2.22.0's
-# ScriptOrigin shim does not compile against the V8 in Node 24 and later (nodejs/nan#978). Revisit
-# when web2js moves to nan >= 2.23. Node 20, used until 2026-10, has been end-of-life since April.
+# ScriptOrigin shim does not compile against the V8 in Node 24 and later (nodejs/nan#978). Node 20,
+# used until 2026-10, has been end-of-life since April.
+#
+# MOVE OFF 22 BEFORE 2027-04-30, when it reaches end of life. Waiting for web2js to bump nan is not a
+# plan: it has had no commit since 2025-01 and its one pull request was closed unmerged. The fix is
+# local. node-kpathsea asks for nan ^2.19.0, and nan 2.27 supports Node 26, so in the web2js step
+# below: `npm ci --ignore-scripts`, then `npm install --no-save --no-package-lock nan@<current>`, then
+# `npm rebuild node-kpathsea` — in that order, because a plain `npm ci` compiles node-kpathsea against
+# 2.22.0 and fails before anything can replace it, and an `overrides` entry makes `npm ci` refuse the
+# lockfile. BUILD-MANIFEST.txt records `node --version`, so the bump must ship in one commit with a
+# rebuilt engine-build/out, or the Engine check reports an engine that changed while its inputs did not.
 ARG NODE_VERSION=22.23.3
 ARG NODE_SHA256=df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de
 
