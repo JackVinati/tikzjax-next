@@ -11,12 +11,15 @@ export interface TikzSettings {
 
 	// --- rendering ----------------------------------------------------------------------------
 	lazy: LazyMode;
+	/** `preset` is SVGO and then the targeted transform; SVGO is not bundled, so today it is `targeted`. */
 	svgo: SvgoMode;
-	/** Preset: no SVGO, no mount-time measurement, no pre-flight lint, one priority band up. */
+	/**
+	 * Preset: no SVG optimisation, no pre-flight lint, one priority band up. Not "no mount-time
+	 * measurement": the engine's frame is an inch short of the drawing, so that would clip it.
+	 */
 	fast: boolean;
 	/** 0 uses the platform budget. A user value is clamped to it on mobile. */
 	timeoutSeconds: number;
-	concurrency: number;
 
 	// --- source -------------------------------------------------------------------------------
 	/**
@@ -45,7 +48,6 @@ export const DEFAULT_SETTINGS: TikzSettings = {
 	svgo: 'preset',
 	fast: false,
 	timeoutSeconds: 0,
-	concurrency: 0,
 	sourceHandling: 'corrected',
 	preamblePath: '',
 	autoPreambleName: 'tikz-preamble.tex',
@@ -94,6 +96,11 @@ export function migrateSettings(raw: unknown): TikzSettings {
 	if (typeof data['invertColorsInDarkMode'] === 'boolean' && data['colors'] === undefined) {
 		merged.colors = data['invertColorsInDarkMode'] ? 'adapt' : 'preserve';
 	}
+
+	// Retired, and ours to drop — unlike a key from a newer device, which is kept. Never in the
+	// settings tab, yet in every data.json from the defaults, and unread since one worker runs one
+	// job at a time: a second queue slot only queued a job inside the worker with its clock running.
+	delete (merged as TikzSettings & { concurrency?: unknown }).concurrency;
 
 	merged.settingsVersion = Math.max(SETTINGS_VERSION, Number(data['settingsVersion']) || 0);
 	return merged;

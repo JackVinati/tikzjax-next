@@ -69,9 +69,9 @@ export default class TikzjaxNextPlugin extends Plugin {
 			return;
 		}
 
-		// `settings.concurrency` is deliberately not read: there is one worker, and it runs one job at
-		// a time, so a second slot would only queue a job inside the worker with its clock running.
-		// See DESKTOP.concurrency in platform/budgets.ts.
+		// No setting changes the concurrency any more: there is one worker, and it runs one job at a
+		// time, so a second slot would only queue a job inside the worker with its clock running. See
+		// DESKTOP.concurrency in platform/budgets.ts.
 		//
 		// Nor is the time limit folded in here any more. The processor reads it per block, so a
 		// change applies to the next diagram rather than after a restart, and a limit set back to 0

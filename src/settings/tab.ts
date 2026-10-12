@@ -119,9 +119,8 @@ export class TikzSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Fast mode')
 			.setDesc(
-				'Skip SVG optimisation, the ink-bounds measurement and the pre-flight check. ' +
-					'Faster, slightly rougher framing. Fast and full renders are cached separately, ' +
-					'so switching back costs nothing.',
+				'Skip SVG optimisation and the pre-flight check, and render ahead of other diagrams. ' +
+					'Fast and full renders are cached separately, so switching back costs nothing.',
 			)
 			.addToggle((t) =>
 				t.setValue(this.plugin.settings.fast).onChange(async (value) => {

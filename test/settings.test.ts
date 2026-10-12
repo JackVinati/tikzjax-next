@@ -21,7 +21,6 @@ const CHANGED: TikzSettings = {
 	svgo: 'off',
 	fast: true,
 	timeoutSeconds: 45,
-	concurrency: 3,
 	sourceHandling: 'legacy',
 	preamblePath: 'tex/preamble.tex',
 	autoPreambleName: '',
@@ -122,6 +121,17 @@ describe('migrateSettings', () => {
 		expect(settings['paletteFromTheme']).toEqual({ accent: true });
 		expect(settings['renderOnSave']).toBe('always');
 		expect(JSON.parse(JSON.stringify(settings))).toEqual(future);
+	});
+
+	/**
+	 * Every data.json written so far holds `"concurrency": 0`, from the defaults. Nothing has read it
+	 * since one worker runs one job at a time (main.ts), and a key this build no longer has is not a
+	 * newer device's to keep: it is ours, retired.
+	 */
+	it('drops the concurrency setting, which nothing reads any more', () => {
+		const settings = migrateSettings({ ...DEFAULT_SETTINGS, concurrency: 2 });
+		expect('concurrency' in settings).toBe(false);
+		expect('concurrency' in DEFAULT_SETTINGS).toBe(false);
 	});
 
 	it('never moves settingsVersion backwards, or below this build', () => {
