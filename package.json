@@ -6,7 +6,7 @@
   "type": "module",
   "private": true,
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12"
   },
   "//": [
     "Two TypeScripts, deliberately. See internal/DECISIONS.md D5.",
@@ -22,7 +22,7 @@
     "dev": "node scripts/esbuild.config.mjs",
     "build": "npm run typecheck && node scripts/esbuild.config.mjs production",
     "typecheck": "node node_modules/tsgo/bin/tsc --noEmit",
-    "typecheck:legacy": "tsc --noEmit",
+    "typecheck:legacy": "node node_modules/typescript/bin/tsc --noEmit",
     "lint": "oxlint src scripts engine-src test --ignore-pattern \"engine-src/upstream/**\"",
     "lint:store": "eslint .",
     "format": "prettier --write .",
@@ -41,26 +41,27 @@
   "dependencies": {
     "@drgrice1/dvi2html": "0.0.7-beta4",
     "buffer": "^6.0.3",
-    "idb": "8.0.3",
-    "pako": "3.0.1"
+    "idb": "8.0.4",
+    "pako": "3.0.2"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@types/node": "26.4.0",
-    "@vitest/coverage-v8": "4.1.11",
+    "@types/node": "26.6.5",
+    "@vitest/coverage-v8": "5.0.4",
     "esbuild": "0.28.2",
-    "eslint": "10.9.1",
+    "eslint": "10.12.0",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-obsidianmd": "0.4.2",
-    "happy-dom": "20.12.0",
-    "obsidian": "1.13.1",
-    "oxlint": "1.80.0",
-    "prettier": "3.9.6",
+    "happy-dom": "21.0.1",
+    "obsidian": "1.14.4",
+    "oxlint": "1.87.0",
+    "prettier": "3.9.10",
     "svgo": "4.1.0",
     "tsgo": "npm:typescript@7.0.2",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.68.0",
-    "vitest": "4.1.11"
+    "typescript-eslint": "8.71.1",
+    "vite": "8.3.4",
+    "vitest": "5.0.4"
   },
   "overrides": {
     "eslint-plugin-obsidianmd": {

@@ -164,7 +164,7 @@ Decision:
 |---|---|
 | Typecheck (`npm run typecheck`, CI, pre-commit) | **`typescript@7.0.2`**, `tsc --noEmit` |
 | Fast lint in the dev loop | **`oxlint@1.80.0`** — Rust, no TS program, milliseconds |
-| Store-compliance lint (CI gate) | **`eslint@10.9.1` + `typescript-eslint@8.68.0` + `eslint-plugin-obsidianmd@0.4.2`**, with `typescript@5.9.3` supplied to *that* stack alone via npm `overrides` |
+| Store-compliance lint (CI gate) | **`eslint@10.12.0` + `typescript-eslint@8.71.1` + `eslint-plugin-obsidianmd@0.4.2`**, on `typescript@5.9.3` installed as a plain devDependency. The original note said npm `overrides` supplied it; it never did, and `overrides` only covers the plugin's `obsidian` and `@eslint/js`. Rechecked 2026-10-12: no typescript-eslint release supports TypeScript 7; upstream support is a draft, opt-in backend waiting on TypeScript 7.1 |
 
 `eslint-plugin-obsidianmd` is kept deliberately: it encodes the community-store rules
 (`§9.7`) — no `innerHTML`/`outerHTML`, no global `app`, teardown registration, settings casing —

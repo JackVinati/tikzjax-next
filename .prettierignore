@@ -15,3 +15,6 @@ engine-src/upstream/
 # Written by engine-build/collect-tex-files.sh. Reformatting it makes every regeneration a
 # 200-line diff against a file no one edits by hand.
 engine-build/tex-files.collected.json
+
+# Generated coverage reports.
+coverage/

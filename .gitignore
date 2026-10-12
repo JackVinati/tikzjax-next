@@ -31,3 +31,6 @@ engine-build/out/dist/*
 # Local dev
 .env
 .hotreload
+
+# `npx vitest run --coverage` writes here; a stray report broke format:check and lint:store.
+coverage/

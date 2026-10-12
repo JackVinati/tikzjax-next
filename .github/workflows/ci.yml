@@ -41,6 +41,14 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Typecheck under TypeScript 5
+        # TypeScript 7 does the real typechecking, but the store's linter reads this code through
+        # TypeScript 5, and the two do not always agree: a declaration TS 7 accepted came out of
+        # TS 5 as an error type and silently untyped the worker's inventory. This used to be
+        # `tsc --noEmit`, which never ran TS 5 at all — both packages ship a `tsc` bin and the
+        # TypeScript 7 alias won — so it is called by path now.
+        run: npm run typecheck:legacy
+
       - name: Test
         run: npm test
 
