@@ -134,8 +134,8 @@ export default class TikzjaxNextPlugin extends Plugin {
 					// export's popup used to stay here, with the fonts injected into it, until the
 					// plugin unloaded — the one thing platform/context.ts says this must not do.
 					for (const touched of this.touchedDocuments) {
-						if (!touched.defaultView || touched.defaultView.closed)
-							this.touchedDocuments.delete(touched);
+						const view = touched.defaultView;
+						if (!view || view.closed) this.touchedDocuments.delete(touched);
 					}
 					this.touchedDocuments.add(doc);
 					ensureFonts(doc, COLD_FONT_CSS);
