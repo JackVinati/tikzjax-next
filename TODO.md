@@ -83,7 +83,9 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] Viewport gate (one `IntersectionObserver` per scroll root) **+ the 2 s zero-record escape hatch**
 - [x] Debounce; pre-start cancellation on unload. Mid-flight termination only on timeout / plugin unload / backpressure
 - [x] Export detection from `el.doc` + per-block export budget — **closes #45 #114 #101 #109**
-- [ ] **reopened** — the TOTAL export budget. `exportTotalBudgetMs` is defined in `src/platform/budgets.ts` and read nowhere, so this line was ticked for code that does not exist: an export of a note with many uncached diagrams is bounded only per diagram (30 s each, one at a time on mobile). Found by the October review of issue #1
+- [x] The TOTAL export budget, for real this time (0.1.5). It was ticked in 0.1.0 for code that did not exist — `exportTotalBudgetMs` was read nowhere. Now each `.print` container gets one deadline and its blocks an `expired` event that ends on a "not ready in time for the export" card; export blocks are exempt from the depth cap, so the PDF never prints a "Render diagram" button
+- [x] One worker, one job in it (0.1.5): the host queues the rest, a job's clock starts when the worker takes it, a timeout takes down only its own worker, and an interruption (backgrounding, Restart, unload) puts the block back in line instead of showing a card. Desktop concurrency is 1 like mobile; the `concurrency` setting is retired
+- [x] Pop-out windows are not exports (0.1.5): `isExportContext` used to call every document but the main one an export
 - [x] Per-mount id stamping — **closes #12**
 - [x] Sized placeholders from the persisted bbox — no layout shift
 - [x] Pre-flight source lint (§7.6's six rules) — **closes #52 #49 #67, partial #96**
@@ -100,23 +102,26 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] Modes `adapt | preserve | paper | invert` — **closes #38 #103 #15 #48**
 - [x] Mount-time `await document.fonts.ready` → `getBBox()` → corrected viewBox, persisted — **closes #66 #71 #29**
 - [x] Width / align / scale on the **wrapper**, never on the `<svg>` — **closes #14 #26 #42**
-- [x] SVGO modes `preset | targeted | off`; `targeted` stays opt-in until #6 is reproduced on a real device
-- [x] Mandatory non-skippable `sanitize` stage; `MOUNTED(degraded)` + a warning chip instead of any silent fallthrough
+- [x] SVGO modes `preset | targeted | off`; `targeted` stays opt-in until #6 is reproduced on a real device. Until 0.1.5 the mode reached the cache key and nothing else, so `svgo=off` changed nothing; it reaches the pipeline now
+- [x] Mandatory non-skippable `sanitize` stage; `MOUNTED(degraded)` + a warning chip instead of any silent fallthrough. Since 0.1.5 an allowlist of what the engine emits, its removals shown in a chip, and a document that never passed it is an error card rather than a "degraded" mount of the raw output
+- [x] One stored artifact for every colour mode (0.1.5); the mode is only CSS, so `colors=` on one copy of a diagram no longer decides what the others get
+- [x] `scale=` and `width=` enlarge as well as shrink (0.1.5): the svg fills a wrapper the block sized, and the scale is in points
 - [x] No `String.prototype` methods on the hot path — Pretty BibTeX 2.0.0 monkey-patched `replaceAll` and silently killed both inversion and SVGO (#48). Enforced by a lint rule
-- [x] Fast mode as a defined preset: `svgo: off` + skip measure + skip lint + priority boost; **never** skips sanitize or ids
+- [x] Fast mode as a defined preset: `svgo: off` + skip lint + priority boost; **never** skips sanitize or ids. It does not skip the measurement after all — the engine's frame is an inch short, so a fast diagram would be clipped — and the priority boost was only implemented in 0.1.5
 
 ## 5 · Errors
 
 - [x] Structural classification — failed iff `texify` rejected or no `Output written on input.dvi`
 - [x] `Overfull \hbox` never produces an error card
-- [x] Error card: message, offending line with a caret, capability-driven hint, collapsible log, Copy log / Retry / Docs — **closes #81 #100**
+- [x] Error card: message, offending line with a caret, capability-driven hint, collapsible log, Copy log / Retry / Docs — **closes #81 #100**. Since 0.1.5 the line is right behind a preamble of several lines, and a line in a preamble file is shown from that file
 - [x] Session-only poison set; never persisted
 
 ## 6 · Mobile
 
 - [x] `styles.css` split: 12 core faces stay (191 KB), the other 140 become a cold string injected per-`Document` **on first mount, not first render**
 - [x] One Blob materialisation of the worker instead of four
-- [x] Teardown on `visibilitychange → hidden`; concurrency hard-clamped to 1 on mobile
+- [x] Teardown on `visibilitychange → hidden`; concurrency hard-clamped to 1 on mobile (and since 0.1.5 everywhere). A diagram compiling at that moment is interrupted, not failed, and finishes when the app comes back
+- [x] Half the boot peak (0.1.5): the core dump inflates into one buffer, 313 → 156 MiB of ArrayBuffers right after inflating (Node 22, V8)
 - [x] TTF → WOFF2 — **closes #111 #91 #7 #24 #3**
 
 ## 7 · Preamble, options, export
@@ -129,16 +134,23 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [ ] **not doing for now** — declarative settings (`getSettingDefinitions`). It is 1.13-only, and the floor is 1.7.2 so that the plugin installs on mobile at all (D6). Adopting it means carrying both paths; it buys settings-search discoverability on 1.13+ and costs everyone below it
 - [ ] **open** — render-vault. render-note ships; a vault-wide pass needs a progress UI and a cancel path, and is the kind of thing that wants a device measurement first
 - [ ] **planned, after 0.1.4** — `![[file.tex]]` renders the diagram in place (issue #1). Only `app.embedRegistry.registerExtension('tex', …)` reaches Live Preview, and it is undocumented: feature-detected, guarded against another plugin owning `tex`, falling back to today's grey box. The embed hands the file to the same path a block takes (refactor `createProcessor` into an exported `processSource`), with `sourcePath` = the .tex file so `%:input` resolves like LaTeX's `\input`, and a small adapter that comments out `\documentclass` — today a second one only warns, then hangs to the timeout. Waiting on the reporter: full documents or bare `tikzpicture`s?
-- [ ] **open** — a preamble change re-renders Reading view only (`rerenderOpenViews` calls `previewMode.rerender`); Live Preview blocks keep the stale diagram until the note is reopened
-- [ ] **open** — `keysBySource` in `main.ts` is unbounded; harmless for blocks, but it would hold whole file texts once embeds exist
+- [x] A preamble change re-renders Live Preview as well as Reading view (0.1.5), through `post-processor-change`, which both rebuild on. Verified against the 1.14.4 bundle, not yet on a 1.7.2 install
+- [x] `keysBySource` is gone (0.1.5): the commands derive the key with the processor's own code from the scanned text, so they also find a diagram after a restart, in Source mode, and for a block never processed this session
+- [x] Settings tab section for the preamble files (0.1.5), with file suggestions; settings apply without a restart, Sync included
+- [ ] **open** — the commands at the cursor in a `tikz` block inside a list item, in Live Preview: Live Preview hands the processor the block with the list's indentation, the scanner dedents it, so the two keys differ and the command may say the diagram has not been rendered. Top-level blocks are unaffected. Fix: try a second, raw candidate key
 
 ## 8 · pgfplots
 
 - [x] **S1** — the missing `tikzlibrarypgfplots.*.code.tex` files are bundled. That was the whole of **#28 #79**
 - [ ] **open** — extended-engine loader: pinned URL + pinned SHA-256 + `vault.adapter.writeBinary` to `.obsidian/plugins/<id>/engines/`, fall back to core on any failure (D3). Not needed for anything that ships today; it is how a bigger TeX set would arrive without putting it in `main.js`
 - [x] ~~Evaluate `@rod2ik/tikzjax` 1.6.0~~ — superseded by D10 and answered by it. The question that mattered was whether expl3 runs; it does, on our own build (`changes/expanded.ch`, `changes/strcmp.ch`), so forest, xparse, mathtools and siunitx compile. The ~37-issue "permanently impossible" partition was wrong, and `internal/BACKLOG.md` records the correction
-- [ ] **open** — **E1**: ship the `net` TeX Live flavour instead of Ubuntu's 2023 packages. As of 2026-10: pgf 3.1.12, pgfplots 1.18.3, circuitikz 1.8.7, chemfig 1.82, siunitx 3.6.3 (we ship 3.1.10, 1.18.1, 1.6.6, 1.66, 3.3.10). Its own engine release, not a dependency bump: the `net` path has never actually been built, pgf 3.1.12 changes every bp→pt coordinate so every diagram's output moves, and tlnet changes daily — it has to be pinned to a dated snapshot (`texlive.info/tlnet-archive/YYYY/MM/DD`) to be reproducible. Validation: build both flavours, diff the fixture SVGs, read every difference
-- [ ] **open** — ENGINE_ID hashes the engine archives and every `engine-src/*.ts`, but not the npm packages bundled into the worker (`@drgrice1/dvi2html`, `pako`, `buffer`). A dvi2html release that changed its SVG would not invalidate caches. Today all three are at their latest and dvi2html upstream is dormant; the fix is to hash the bundled worker with the id replaced by a placeholder
+- [ ] **open** — **E1**: ship the `net` TeX Live flavour instead of Ubuntu's 2023 packages. As of 2026-10: pgf 3.1.12, pgfplots 1.18.3, circuitikz 1.8.7, chemfig 1.82, siunitx 3.6.4 (we ship 3.1.10, 1.18.1, 1.6.6, 1.66, 3.3.10). Its own engine release, not a dependency bump: the `net` path has never actually been built, pgf 3.1.12 changes every bp→pt coordinate so every diagram's output moves, and tlnet changes daily — it has to be pinned to a dated snapshot (`texlive.info/tlnet-archive/YYYY/MM/DD`) to be reproducible. Validation: build both flavours, diff the fixture SVGs, read every difference
+- [x] ENGINE_ID covers what the worker bundles (0.1.5). It hashed the engine archives and every `engine-src/*.ts` but not the npm packages bundled into the worker, nor the contents of the TeX files. It is now the sha256 of the minified worker bundle with the id replaced by a placeholder (`scripts/engine-assets.mjs` `buildWorker`), so dvi2html, pako, buffer, the dvi2html patch and every TeX file's bytes are in it; `test/engine-id.test.ts`
+- [x] Letters with a dieresis and the last character of every font (0.1.5): dvi2html's TFM reader stopped one short, patched in the bundler (`scripts/dvi2html-patch.mjs`, D11)
+- [x] `°` `×` `→` `±` `µ`, siunitx's units and list bullets (0.1.5): TS1, which the converter cannot draw, so the worker redefines 23 TS1 text commands to math-font glyphs when a block can use them (`engine-src/ts1-shim.ts`)
+- [ ] **open** — `Ł` and `ł` fail inside dvi2html, "Cannot read properties of undefined (reading 'toString')"; found by `npm run scan:native`
+- [ ] **open** — `€` `£` `©` `®`, `\pounds`, `\textcopyright` and `\textordfeminine` still fail: TS1 with no math stand-in. Real TS1 needs tcrm metrics in the converter and a cm-super face
+- [ ] **open** — send the prepared dvi2html PR (the TFM fix), and retire `scripts/dvi2html-patch.mjs` once a release carries it; its exactly-one guard will fail the build to say so
 
 ## 9 · Release gate
 
@@ -152,7 +164,7 @@ The manual matrix in DESIGN.md §10.4, in full. The three that catch the most:
 
 Submitted to the community plugin browser on 2026-09-01 through Obsidian's developer portal. The automated review runs on every version and pulls a failing one from search within a day, so each release is held to it: 0.1.3 passed with zero errors and a byte-for-byte reproducible `main.js`.
 
-Open contributions: PR #2 (Unicode labels through an SVG bridge) — changes requested, see the review on the PR.
+Open contributions: PR #2 (Unicode labels through an SVG bridge) — changes requested, see the review on the PR. To add to that review after 0.1.5: letters with a dieresis are native now and must not be bridged; the bridge has to skip both `isNativeUnicode()` (`src/source/native-unicode.ts`) and `isTs1Symbol()` (`engine-src/ts1-shim.ts`) code points; and the worker's input is assembled in `engine-src/document.ts` now, which is where a bridge would hook in.
 
 ---
 
@@ -163,8 +175,8 @@ Full reasoning in `internal/BACKLOG.md`. The short version:
 - **The `needs-tex-rebuild` partition is much smaller than it looked.** expl3 runs, so the packages
   that depend on it are not blocked. What is genuinely blocked is narrower and mostly one thing:
   `@drgrice1/dvi2html` has a fixed font table covering Computer Modern only, and it is not
-  extensible from outside — which is `\mathfrak`, `\mathscr` and siunitx's unit symbols (#55 #84
-  #113). The `patterns` driver gap (#59) is a missing pattern definition in the DVI, chemfig's
+  extensible from outside — which is `\mathfrak` and `\mathscr` (#55 #84). siunitx's unit symbols
+  (#113) were the third, and render since 0.1.5, drawn from the math fonts instead. The `patterns` driver gap (#59) is a missing pattern definition in the DVI, chemfig's
   `\schemestart` (#25 #54) loses its bonds before any JavaScript runs, CJK (#19) is impossible on
   an 8-bit engine, and LuaTeX-only packages (#20) stay LuaTeX-only.
 - **13 issues close as answered or out of scope** — including Obsidian Publish (#37 #47: Publish
