@@ -541,7 +541,7 @@ const LAZY = ['on', 'off', 'manual'] as const;
 /** Every event, including the ones that make no sense where they land. That is the point. */
 function randomEvent(rnd: () => number): Event {
 	const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)] as T;
-	const n = Math.floor(rnd() * 23);
+	const n = Math.floor(rnd() * 24);
 	switch (n) {
 		case 0:
 			return { type: 'load' };
@@ -592,6 +592,8 @@ function randomEvent(rnd: () => number): Event {
 			return { type: 'retry' };
 		case 19:
 			return { type: 'rejected', reason: rnd() < 0.5 ? 'depthCap' : pick(ERROR_KINDS) };
+		case 22:
+			return { type: 'expired' };
 		default:
 			// Weighted up: unload at every point, and duplicated, is the interesting axis.
 			return { type: 'unload' };
@@ -683,6 +685,7 @@ describe('property: exactly one settle, over randomised event sequences', () => 
 				{ type: 'ok' } as Event,
 				{ type: 'timeout' } as Event,
 				{ type: 'interrupted' } as Event,
+				{ type: 'expired' } as Event,
 				{ type: 'mounted' } as Event,
 				{ type: 'retry' } as Event,
 			]) {
@@ -799,6 +802,62 @@ describe('a queue rejection before the job starts', () => {
 		// `rejected` must not quietly bypass terminateWorker + poison.
 		const compiling = stateFor('COMPILING');
 		expect(reduce(compiling, { type: 'rejected', reason: 'timeout' })[0]).toBe(compiling);
+	});
+});
+
+// -------------------------------------------------------------------------------------------
+// The total export budget
+
+describe('an export that ran out of time', () => {
+	/**
+	 * Obsidian's PDF export waits on every block's promise and has no timeout of its own. Without
+	 * a total budget, a note with forty uncached diagrams held "Preparing PDF" for forty compiles.
+	 */
+	it('SCHEDULING + expired -> FAILED(export-budget): the block gives up its place and settles', () => {
+		const scheduled = drive(initialState(), [...TO_LOOKUP, { type: 'miss', isExport: true }]).state;
+		const [state, fx] = reduce(scheduled, { type: 'expired' });
+		expect(state).toMatchObject({ phase: 'FAILED', reason: 'export-budget' });
+		expect(kinds(fx)).toEqual(['release', 'mountErrorCard', 'settle']);
+	});
+
+	it('COMPILING + expired -> FAILED(export-budget), without aborting the compile', () => {
+		const [state, fx] = reduce(stateFor('COMPILING'), { type: 'expired' });
+		expect(state).toMatchObject({ phase: 'FAILED', reason: 'export-budget' });
+		expect(kinds(fx)).toEqual(['release', 'mountErrorCard', 'settle']);
+		expect(kinds(fx)).not.toContain('abort');
+	});
+
+	it('LOOKUP + expired -> FAILED(export-budget), and the late answer is ignored', () => {
+		const [state, fx] = reduce(stateFor('LOOKUP'), { type: 'expired' });
+		expect(state).toMatchObject({ phase: 'FAILED', reason: 'export-budget' });
+		expect(kinds(fx)).toEqual(['mountErrorCard', 'settle']);
+		expect(reduce(state, { type: 'hit', tier: 'l2' })[0]).toBe(state);
+	});
+
+	it('a compile it gave up on cannot paint over the card when it finishes', () => {
+		const { state, effects } = drive(initialState(), [
+			...TO_COMPILING,
+			{ type: 'expired' },
+			{ type: 'ok' },
+			{ type: 'timeout' },
+		]);
+		expect(state).toMatchObject({ phase: 'FAILED', reason: 'export-budget' });
+		expect(kinds(effects)).not.toContain('mount');
+		expect(countSettles(effects)).toBe(1);
+	});
+
+	it('an unloaded compile just ends', () => {
+		const unloaded = reduce(stateFor('COMPILING'), { type: 'unload' })[0];
+		const [state, fx] = reduce(unloaded, { type: 'expired' });
+		expect(state.phase).toBe('DISPOSED');
+		expect(kinds(fx)).toEqual(['settle']);
+	});
+
+	it('changes nothing for a block that is already done, or never started', () => {
+		for (const phase of ['MOUNTED', 'FAILED', 'IDLE_MANUAL', 'GATING', 'DEBOUNCING'] as const) {
+			const state = stateFor(phase);
+			expect(reduce(state, { type: 'expired' })[0], phase).toBe(state);
+		}
 	});
 });
 

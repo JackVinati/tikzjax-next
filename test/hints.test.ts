@@ -350,6 +350,14 @@ describe('the remaining kinds', () => {
 		expect(d.hint).toMatch(/never put on the page or cached/);
 	});
 
+	it('says a diagram an export stopped waiting for was not rendered in time, and how to get it in', () => {
+		const d = explain(failure({ kind: 'export-budget', message: '' }), caps());
+
+		expect(d.message).toBe('This diagram was not ready in time for the export.');
+		expect(d.hint).toMatch(/Render all diagrams in this note/);
+		expect(d.message).not.toMatch(/TeX/);
+	});
+
 	it('does not say TeX ran for a block with nothing in it to run', () => {
 		const d = explain(failure({ kind: 'empty-source', message: '' }), caps());
 

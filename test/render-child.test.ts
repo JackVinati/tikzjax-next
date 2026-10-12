@@ -135,6 +135,7 @@ function spec(over: Partial<TexJobSpec> = {}): TexJobSpec {
 		legacySource: null,
 		timeoutMs: 1000,
 		isExport: false,
+		budgeted: false,
 		preflight: [],
 		...over,
 	};
@@ -300,11 +301,11 @@ interface Run {
 }
 
 /** The real RenderQueue on real timers, with a runner the test settles by hand. */
-function realQueue(startupMs?: number) {
+function realQueue(startupMs?: number, depthCap = 64) {
 	const runs: Run[] = [];
 	const queue = new RenderQueue<TexJobSpec, TexResult>({
 		concurrency: 1,
-		depthCap: 64,
+		depthCap,
 		run: (job, signal) =>
 			new Promise<TexResult>((resolve, reject) => runs.push({ job, signal, resolve, reject })),
 		timers: {
@@ -399,6 +400,30 @@ describe('two blocks showing the same diagram', () => {
 		runs[0]?.resolve(RESULT);
 		await vi.waitFor(() => expect(exportDone.done).toBe(true));
 		expect(el.querySelector('svg')).not.toBeNull();
+	});
+});
+
+describe('an export with more diagrams to compile than the queue holds', () => {
+	it('renders every one of them — no "Render diagram" button in the PDF', async () => {
+		// The depth cap is 16 on a phone; the cap evicted export jobs like any other, and an
+		// evicted block rests on its button, which is what went into the PDF.
+		const { queue, runs } = realQueue(undefined, 1);
+		const els = [container(), container(), container()];
+		const blocks = els.map(
+			(el, i) =>
+				new TikzBlock(el, spec({ key: `K${i}`, isExport: true, budgeted: true }), deps({ queue })),
+		);
+		for (const block of blocks) block.onload();
+
+		for (let i = 0; i < els.length; i++) {
+			await vi.waitFor(() => expect(runs).toHaveLength(i + 1));
+			runs[i]?.resolve(RESULT);
+		}
+		for (const block of blocks) await block.settled;
+		for (const el of els) {
+			expect(el.querySelector('.tikzjax-manual')).toBeNull();
+			expect(el.querySelector('svg')).not.toBeNull();
+		}
 	});
 });
 

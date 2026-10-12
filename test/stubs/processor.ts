@@ -1,6 +1,7 @@
 import { expect } from 'vitest';
 import type { MarkdownPostProcessorContext } from 'obsidian';
 import { Component } from './obsidian';
+import { FakeTimers } from './timers';
 import { fakeApp } from './vault';
 import { createProcessor, type ProcessorDeps } from '../../src/block/processor';
 import type { TexJobSpec } from '../../src/block/render-child';
@@ -70,6 +71,7 @@ export function processorDeps(over: Partial<ProcessorDeps> = {}, app = fakeApp()
 	const { l1, l2, cache } = tieredCache();
 	const seen: TexJobSpec[] = [];
 	const settings: { current: TikzSettings } = { current: { ...DEFAULT_SETTINGS } };
+	const timers = new FakeTimers();
 	const deps: ProcessorDeps = {
 		app,
 		settings: () => settings.current,
@@ -81,12 +83,24 @@ export function processorDeps(over: Partial<ProcessorDeps> = {}, app = fakeApp()
 		observe: () => undefined,
 		unobserve: () => undefined,
 		ensureFonts: () => undefined,
-		now: () => 0,
+		now: timers.time,
+		timers,
 		preamble: new PreambleService(app, (text) => String(text.length)),
 		onBlock: (spec) => void seen.push(spec),
 		...over,
 	};
-	return { deps, seen, settings, l1, l2 };
+	return { deps, seen, settings, timers, l1, l2 };
+}
+
+/** One processor per set of deps, as the plugin registers one: it keeps state across blocks. */
+const processors = new WeakMap<ProcessorDeps, ReturnType<typeof createProcessor>>();
+function processorFor(deps: ProcessorDeps): ReturnType<typeof createProcessor> {
+	let processor = processors.get(deps);
+	if (!processor) {
+		processor = createProcessor(deps);
+		processors.set(deps, processor);
+	}
+	return processor;
 }
 
 /**
@@ -108,7 +122,7 @@ export async function processBlock(
 		sourcePath: opts.path ?? 'note.md',
 		addChild: (child: Component) => parent.addChild(child),
 	} as unknown as MarkdownPostProcessorContext;
-	const settled = createProcessor(deps)(source, el, ctx);
+	const settled = processorFor(deps)(source, el, ctx);
 	// The processor goes async only to resolve a preamble; give it the turns that takes.
 	for (let i = 0; i < 20 && seen.length === before; i++) await Promise.resolve();
 	expect(seen.length).toBe(before + 1);

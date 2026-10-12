@@ -10,7 +10,7 @@ import { artifactRevision, type TikzSettings } from '../settings/schema';
 import { TikzBlock, type BlockDeps, type TexJobSpec } from './render-child';
 import { standaloneMarkup } from './mount';
 import { asProcessorSource } from '../note/finalize';
-import type { RenderQueue } from '../queue/queue';
+import type { QueueTimers, RenderQueue } from '../queue/queue';
 import type { DiagramCache } from '../cache';
 import type { Budgets } from '../types';
 import type { PreambleService } from '../preamble/vault';
@@ -45,14 +45,46 @@ export interface ProcessorDeps {
 	unobserve: BlockDeps['unobserve'];
 	ensureFonts: BlockDeps['ensureFonts'];
 	now: () => number;
+	/** For the deadline of a PDF export's total budget. */
+	timers: QueueTimers;
 	preamble: PreambleService;
 	/** Notified so the debug view can list what happened without the child knowing about it. */
 	onBlock?: ((spec: TexJobSpec) => void) | undefined;
 }
 
+/** Where a block is on the page, as far as its spec is concerned. */
+interface Place {
+	isExport: boolean;
+	/** Inside a PDF export, and so under its total budget. */
+	budgeted: boolean;
+}
+
 export function createProcessor(deps: ProcessorDeps) {
+	/**
+	 * When each PDF export stops waiting, keyed by the export's `.print` container: every block of
+	 * one export is rendered into it, and the budget is for the export as a whole.
+	 *
+	 * Weak, so a finished export's popup is not kept alive by its entry here. Keyed by the
+	 * container rather than by the document, which would also catch a pop-out window — open for
+	 * hours, and no export at all.
+	 */
+	const exportDeadlines = new WeakMap<Element, number>();
+
 	return (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext): Promise<void> => {
-		const prepared = prepare(source, deps, ctx.sourcePath, isExportContext(deps.app, el));
+		// printToPdf builds its `.print` container and puts the note in it before it runs any
+		// processor (read in the 1.14.4 bundle), so this finds it.
+		const print = el.closest('.print');
+		let deadline: number | undefined;
+		if (print) {
+			deadline = exportDeadlines.get(print);
+			if (deadline === undefined) {
+				deadline = deps.now() + deps.budgets.exportTotalBudgetMs;
+				exportDeadlines.set(print, deadline);
+			}
+		}
+
+		const place: Place = { isExport: isExportContext(deps.app, el), budgeted: print !== null };
+		const prepared = prepare(source, deps, ctx.sourcePath, place);
 
 		// The common case — no preamble configured anywhere — stays SYNCHRONOUS, and that is not an
 		// optimisation. A cached diagram is only painted in the same frame as the text around it if
@@ -60,9 +92,9 @@ export function createProcessor(deps: ProcessorDeps) {
 		// nothing to resolve would put every cache hit a microtask late and bring the placeholder
 		// back. A vault that does configure a preamble opts into the async path.
 		if (prepared instanceof Promise) {
-			return prepared.then((spec) => attach(spec, el, ctx, deps));
+			return prepared.then((spec) => attach(spec, el, ctx, deps, deadline));
 		}
-		return attach(prepared, el, ctx, deps);
+		return attach(prepared, el, ctx, deps, deadline);
 	};
 }
 
@@ -71,6 +103,7 @@ function attach(
 	el: HTMLElement,
 	ctx: MarkdownPostProcessorContext,
 	deps: ProcessorDeps,
+	deadline: number | undefined,
 ): Promise<void> {
 	deps.onBlock?.(spec);
 	{
@@ -89,8 +122,23 @@ function attach(
 		// Obsidian owns load()/unload() from here, which is what ties cancellation to the block's
 		// real lifetime instead of to a guess about when a section went away.
 		ctx.addChild(child);
+		if (deadline !== undefined) expireAt(child, deadline, deps);
 		return child.settled;
 	}
+}
+
+/**
+ * Hold one block of a PDF export to the export's deadline (budgets.ts `exportTotalBudgetMs`).
+ *
+ * Obsidian's export waits on every block's promise and has no timeout of its own, and each block
+ * was bounded only by its own 30 s, one after another in the one engine: forty uncached diagrams
+ * held "Preparing PDF" for up to twenty minutes. At the deadline every block still waiting rests
+ * on a card that says it was not ready in time — the PDF prints that in its place — and the export
+ * goes ahead. A block that comes to rest first takes its timer with it.
+ */
+function expireAt(child: TikzBlock, deadline: number, deps: ProcessorDeps): void {
+	const id = deps.timers.setTimeout(() => child.expire(), Math.max(0, deadline - deps.now()));
+	void child.settled.then(() => deps.timers.clearTimeout(id));
 }
 
 /** What deriving a block's key needs — everything but the block's place on the page. */
@@ -108,7 +156,7 @@ export type KeyDeps = Pick<ProcessorDeps, 'settings' | 'budgets' | 'host' | 'pre
  * processor, because it is the processor.
  */
 export function keyFor(source: string, notePath: string, deps: KeyDeps): string | Promise<string> {
-	const prepared = prepare(source, deps, notePath, false);
+	const prepared = prepare(source, deps, notePath, { isExport: false, budgeted: false });
 	return prepared instanceof Promise ? prepared.then((spec) => spec.key) : prepared.key;
 }
 
@@ -163,7 +211,7 @@ function prepare(
 	source: string,
 	deps: KeyDeps,
 	notePath: string,
-	isExport: boolean,
+	place: Place,
 ): TexJobSpec | Promise<TexJobSpec> {
 	// Once, so a block whose preamble resolves after a settings change is still built from one
 	// set of settings rather than half of each.
@@ -176,7 +224,7 @@ function prepare(
 		settings.preamblePath !== '' ||
 		settings.autoPreambleName !== '';
 
-	if (!needsPreamble) return buildSpec(parsed, settings, deps, isExport, null);
+	if (!needsPreamble) return buildSpec(parsed, settings, deps, place, null);
 
 	return deps.preamble
 		.resolve({
@@ -186,17 +234,18 @@ function prepare(
 			inputs: parsed.inputs,
 			notePath,
 		})
-		.then((resolved) => buildSpec(parsed, settings, deps, isExport, resolved));
+		.then((resolved) => buildSpec(parsed, settings, deps, place, resolved));
 }
 
 function buildSpec(
 	parsed: ReturnType<typeof parseDirectives>,
 	settings: TikzSettings,
 	deps: KeyDeps,
-	isExport: boolean,
+	place: Place,
 	resolved: Awaited<ReturnType<PreambleService['resolve']>> | null,
 ): TexJobSpec {
 	const { budgets } = deps;
+	const { isExport, budgeted } = place;
 	const options = parsed.options;
 
 	if (resolved) {
@@ -242,6 +291,7 @@ function buildSpec(
 		legacySource: legacySourceFor(parsed.body, options.baked, settings),
 		timeoutMs,
 		isExport,
+		budgeted,
 		preflight: [
 			// A missing preamble file or an include cycle is a diagnostic in its own right, shown
 			// beside the diagram. PR #77's author conceded that theirs spliced an empty string and

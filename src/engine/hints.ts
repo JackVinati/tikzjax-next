@@ -20,11 +20,12 @@ import type { Diagnostic, EngineCapabilities, TexErrorKind } from '../types';
  * Plus the ones the plugin finds itself, which need copy of their own because the engine's would
  * be false: `poisoned` (refused because the same diagram timed out earlier this session) and
  * `empty-source` (nothing between the fences) — both used to fall through to `empty-output`, "TeX
- * ran successfully but produced no diagram", when TeX had not run at all — and `pipeline` (TeX's
- * output could not be put through sanitize and ids, so it is not shown).
+ * ran successfully but produced no diagram", when TeX had not run at all — `pipeline` (TeX's
+ * output could not be put through sanitize and ids, so it is not shown), and `export-budget` (a
+ * PDF export stopped waiting for the diagram).
  */
 export interface TexFailure {
-	kind: TexErrorKind | 'poisoned' | 'empty-source' | 'pipeline';
+	kind: TexErrorKind | 'poisoned' | 'empty-source' | 'pipeline' | 'export-budget';
 	message: string;
 	/** The first `! …` line, when there was one. */
 	firstError?: string | undefined;
@@ -461,6 +462,15 @@ export function explain(error: TexFailure, caps: EngineCapabilities): Diagnostic
 				kind: 'timeout',
 				message: 'This diagram timed out earlier in this session, so it was not run again.',
 				hint: 'Press Retry to run it once more. If it needs longer, add a line like %!tikz timeout=30 (seconds) to the block first; if it keeps timing out, simplify it.',
+			};
+
+		// Printed into the PDF in the diagram's place, so it speaks to whoever reads the PDF as much
+		// as to whoever made it. Nothing went wrong with the diagram, so no `timeout` kind.
+		case 'export-budget':
+			return {
+				kind: 'empty-output',
+				message: 'This diagram was not ready in time for the export.',
+				hint: 'An export waits only so long, in all, for diagrams that are not cached yet. Run "Render all diagrams in this note" first, or open the note and let its diagrams render, then export again: cached diagrams go into the PDF at once.',
 			};
 
 		case 'engine-unavailable':

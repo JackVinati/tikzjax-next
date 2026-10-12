@@ -50,6 +50,12 @@ export interface TexJobSpec {
 	legacySource: string | null;
 	timeoutMs: number;
 	isExport: boolean;
+	/**
+	 * Part of a PDF export, whose total budget bounds how long the block waits (processor.ts). Not
+	 * every `isExport` block: that one fails open, and also takes in a pop-out window's blocks,
+	 * which no export budget bounds and the queue's depth cap still has to.
+	 */
+	budgeted: boolean;
 	preflight: Diagnostic[];
 }
 
@@ -107,6 +113,15 @@ export class TikzBlock extends MarkdownRenderChild {
 
 	override onunload(): void {
 		this.dispatch({ type: 'unload' });
+	}
+
+	/**
+	 * The PDF export this block is part of has spent its total budget: stop waiting, and rest on a
+	 * card. Does nothing to a block that is already at rest. Called by the processor, which is
+	 * what knows which blocks make up one export.
+	 */
+	expire(): void {
+		this.dispatch({ type: 'expired' });
 	}
 
 	// -------------------------------------------------------------------------------------------
@@ -321,6 +336,10 @@ export class TikzBlock extends MarkdownRenderChild {
 				// block submitted the key first.
 				onStart: () => this.dispatch({ type: 'slot' }),
 				...(this.spec.isExport ? { ignorePoison: true } : {}),
+				// A block of a PDF export may not be refused for queue depth: the refusal is a
+				// "Render diagram" button, and that is what went into the PDF. The export's total
+				// budget bounds its wait instead.
+				...(this.spec.budgeted ? { uncapped: true } : {}),
 			});
 
 			// The RAW engine output, not a finished artifact: the pipeline is a separate phase, and
@@ -527,7 +546,10 @@ export class TikzBlock extends MarkdownRenderChild {
 					// The failures the plugin finds itself have no TexError kind of their own, and
 					// falling back to `empty-output` told the user TeX had run and drawn nothing.
 					kind:
-						reason === 'poisoned' || reason === 'empty-source' || reason === 'pipeline'
+						reason === 'poisoned' ||
+						reason === 'empty-source' ||
+						reason === 'pipeline' ||
+						reason === 'export-budget'
 							? reason
 							: failure.kind,
 					message: failure.message,

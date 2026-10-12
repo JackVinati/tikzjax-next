@@ -36,8 +36,12 @@ export type ManualReason = 'manual' | 'depthCap';
  *
  * `pipeline`: TeX produced output, but no document came out of the SVG pipeline having passed
  * sanitize and ids, so there is nothing that may be shown.
+ *
+ * `export-budget`: a PDF export spent its total budget before this diagram was ready, and stopped
+ * waiting for it. Nothing is known against the diagram; it is just not in this PDF.
  */
-export type FailureReason = TexErrorKind | 'empty-source' | 'preflight' | 'poisoned' | 'pipeline';
+export type FailureReason =
+	TexErrorKind | 'empty-source' | 'preflight' | 'poisoned' | 'pipeline' | 'export-budget';
 
 export type Phase =
 	| 'INIT'
@@ -131,6 +135,12 @@ export type Event =
 	 * the diagram did nothing wrong, and nothing is known against it.
 	 */
 	| { type: 'interrupted' }
+	/**
+	 * The PDF export this block belongs to spent its total budget (budgets.ts
+	 * `exportTotalBudgetMs`) before the block was ready. Obsidian's export waits on every block's
+	 * promise and has no timeout of its own, so this is what lets it finish.
+	 */
+	| { type: 'expired' }
 	/** The pipeline produced nothing safe: the output did not parse, or `sanitize` or `ids` threw. */
 	| { type: 'stageThrew' }
 	/** The pipeline skipped an optional stage. What is left passed sanitize and ids. */
@@ -317,6 +327,8 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 					]);
 				case 'miss':
 					return miss(state, event);
+				case 'expired':
+					return expire(state, []);
 				default:
 					return noop(state);
 			}
@@ -380,6 +392,7 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 				const [compiling] = go(state, { phase: 'COMPILING', priority: state.priority }, []);
 				return reduce(compiling, event);
 			}
+			if (event.type === 'expired') return expire(state, [{ kind: 'release' }]);
 			return noop(state);
 
 		case 'COMPILING':
@@ -414,6 +427,11 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 					return go(state, { phase: 'SCHEDULING', priority: state.priority }, [
 						{ kind: 'submit', priority: state.priority },
 					]);
+				case 'expired':
+					// Not aborted: the compile runs on, bounded by its own timeout, and still serves
+					// any other block on the same key. This one just stops waiting for it.
+					if (state.unloaded) return go(state, { phase: 'DISPOSED' }, []);
+					return expire(state, [{ kind: 'release' }]);
 				default:
 					return noop(state);
 			}
@@ -498,6 +516,19 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 			}
 			return noop(state);
 	}
+}
+
+/**
+ * The export this block belongs to stopped waiting for it. Only the phases an export block can be
+ * WAITING in take it — LOOKUP, SCHEDULING, COMPILING; the others are synchronous, never reached by
+ * an export, or already at rest — and the block rests on a card that says so, which is what the
+ * PDF shows in its place.
+ */
+function expire(state: State, effects: Effect[]): [State, Effect[]] {
+	return go(state, { phase: 'FAILED', reason: 'export-budget' }, [
+		...effects,
+		{ kind: 'mountErrorCard', reason: 'export-budget' },
+	]);
 }
 
 /**

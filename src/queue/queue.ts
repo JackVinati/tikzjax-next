@@ -107,6 +107,16 @@ export interface SubmitOptions {
 	ignorePoison?: boolean | undefined;
 
 	/**
+	 * Never evicted by the depth cap, and not counted against it.
+	 *
+	 * Export/print only, and bounded by the export's own total budget rather than by the cap. An
+	 * export of a note with more uncached diagrams than the cap (16 on a phone) used to have its
+	 * newest jobs evicted like any others, and an evicted block rests on a "Render diagram" button
+	 * — which is what the PDF then contained. A caller joining a job with this set protects it too.
+	 */
+	uncapped?: boolean | undefined;
+
+	/**
 	 * Called once when the job this caller is waiting for starts — at once, if it already has.
 	 *
 	 * Per caller, not per job, because dedup gives every caller of a key the FIRST caller's job. The
@@ -158,6 +168,8 @@ interface Entry<J, T> {
 	 * Each owner maps to its own start notification (SubmitOptions.onStart).
 	 */
 	owners: Map<unknown, (() => void) | undefined>;
+	/** Some caller submitted it `uncapped`: the depth cap neither evicts it nor counts it. */
+	uncapped: boolean;
 	started: boolean;
 	promise: Promise<T>;
 	resolve: (value: T) => void;
@@ -193,7 +205,10 @@ export class RenderQueue<J, T> {
 		this.startupMs = opts.startupMs;
 	}
 
-	/** Jobs waiting for a slot. Started jobs are not counted; the depth cap is over this number. */
+	/**
+	 * Jobs waiting for a slot. Started jobs are not counted; the depth cap is over this number,
+	 * less the jobs submitted `uncapped`.
+	 */
 	size(): number {
 		return this.pending.length;
 	}
@@ -285,6 +300,7 @@ export class RenderQueue<J, T> {
 			// timeout does not, and `start` re-arms its timer to honour a raise.
 			if (priority < existing.priority) existing.priority = priority;
 			if (timeoutMs > existing.timeoutMs) existing.timeoutMs = timeoutMs;
+			if (opts?.uncapped === true) existing.uncapped = true;
 			return existing.promise;
 		}
 
@@ -302,6 +318,7 @@ export class RenderQueue<J, T> {
 			timeoutMs,
 			seq: this.seq++,
 			owners: new Map([[owner, opts?.onStart]]),
+			uncapped: opts?.uncapped === true,
 			started: false,
 			promise,
 			resolve,
@@ -485,11 +502,16 @@ export class RenderQueue<J, T> {
 	 * the rest back as `depth-cap` for a "Render diagram" button, instead of committing to hours.
 	 */
 	private enforceDepthCap(): void {
-		while (this.pending.length > this.depthCap) {
+		// Uncapped jobs are bounded by their export's budget instead, so they take none of the cap.
+		let capped = 0;
+		for (const entry of this.pending) if (!entry.uncapped) capped++;
+
+		while (capped > this.depthCap) {
 			const victim = this.leastUrgentPending();
 			if (victim === undefined) return;
 			this.drop(victim);
 			this.entries.delete(victim.key);
+			capped--;
 			victim.reject(new QueueError('depth-cap', victim.key, `queue is full (${this.depthCap})`));
 		}
 	}
@@ -504,9 +526,11 @@ export class RenderQueue<J, T> {
 		return best;
 	}
 
+	/** Among the jobs the cap may evict: never an uncapped one. */
 	private leastUrgentPending(): Entry<J, T> | undefined {
 		let worst: Entry<J, T> | undefined;
 		for (const entry of this.pending) {
+			if (entry.uncapped) continue;
 			if (worst === undefined) worst = entry;
 			else if (entry.priority > worst.priority) worst = entry;
 			else if (entry.priority === worst.priority && entry.seq > worst.seq) worst = entry;

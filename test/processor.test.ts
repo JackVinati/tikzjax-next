@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { installObsidianDom } from './stubs/obsidian-dom';
-import { processBlock, processorDeps } from './stubs/processor';
+import { artifact, processBlock, processorDeps } from './stubs/processor';
 import { rendersDifferently } from '../src/block/processor';
 import { budgetsFor } from '../src/platform/budgets';
 import { DEFAULT_SETTINGS, type TikzSettings } from '../src/settings/schema';
@@ -11,6 +11,103 @@ beforeAll(() => {
 });
 
 const SOURCE = '\\begin{tikzpicture}\\draw (0,0) circle (1);\\end{tikzpicture}';
+
+/** Let every pending microtask run: the lookups, the submits, the settlements. */
+async function flush(): Promise<void> {
+	for (let i = 0; i < 20; i++) await Promise.resolve();
+}
+
+function tracked(promise: Promise<void>): { done: boolean } {
+	const state = { done: false };
+	void promise.then(() => (state.done = true));
+	return state;
+}
+
+const cardText = (el: HTMLElement): string | null | undefined =>
+	el.querySelector('.tikzjax-error-message')?.textContent;
+
+describe('a PDF export', () => {
+	/**
+	 * printToPdf renders the note into a `.print` container and waits on every block's promise,
+	 * with no timeout of its own. Each block had 30 s, one after another, so a note with forty
+	 * uncached diagrams held "Preparing PDF" for up to twenty minutes; the total budget was
+	 * defined in budgets.ts and read nowhere.
+	 */
+	const printed = (): HTMLElement => document.body.createDiv({ cls: 'print' });
+	const TOTAL = budgetsFor(false).exportTotalBudgetMs;
+
+	it('stops waiting once its total budget is spent, and says so on every diagram it gave up on', async () => {
+		const { deps, seen, timers } = processorDeps();
+		const print = printed();
+		const blocks = [];
+		for (let i = 0; i < 3; i++) {
+			blocks.push(
+				await processBlock(deps, seen, `\\draw (${i},0) circle (1);`, { el: print.createDiv() }),
+			);
+		}
+		const done = blocks.map((b) => tracked(b.settled));
+		await flush();
+
+		timers.advance(TOTAL - 1);
+		await flush();
+		expect(done.map((d) => d.done)).toEqual([false, false, false]);
+
+		timers.advance(1);
+		await vi.waitFor(() => expect(done.map((d) => d.done)).toEqual([true, true, true]));
+		for (const block of blocks) {
+			expect(cardText(block.el)).toBe('This diagram was not ready in time for the export.');
+		}
+	});
+
+	it('gives a block that joins the export late only what is left of the budget', async () => {
+		const { deps, seen, timers } = processorDeps();
+		const print = printed();
+		const first = await processBlock(deps, seen, SOURCE, { el: print.createDiv() });
+		timers.advance(TOTAL - 1000);
+		const late = await processBlock(deps, seen, `${SOURCE}%`, { el: print.createDiv() });
+		const firstDone = tracked(first.settled);
+		const lateDone = tracked(late.settled);
+
+		timers.advance(1000);
+		await vi.waitFor(() => expect(lateDone.done).toBe(true));
+		expect(firstDone.done).toBe(true);
+	});
+
+	it('gives each export its own budget', async () => {
+		const { deps, seen, timers } = processorDeps();
+		const earlier = await processBlock(deps, seen, SOURCE, { el: printed().createDiv() });
+		timers.advance(TOTAL - 1000);
+		const later = await processBlock(deps, seen, SOURCE, { el: printed().createDiv() });
+		const laterDone = tracked(later.settled);
+
+		timers.advance(1000);
+		await flush();
+		await earlier.settled;
+		expect(laterDone.done).toBe(false);
+	});
+
+	it('leaves a diagram that was ready alone, and keeps no timer for it', async () => {
+		const { deps, seen, timers, l1 } = processorDeps();
+		const probe = await processBlock(deps, seen, SOURCE, { load: false });
+		l1.set(probe.spec.key, artifact());
+
+		const cached = await processBlock(deps, seen, SOURCE, { el: printed().createDiv() });
+		await cached.settled;
+		await flush();
+		expect(cached.el.querySelector('svg')).not.toBeNull();
+		expect(timers.outstanding).toBe(0);
+	});
+
+	it('is the only thing the budget applies to', async () => {
+		const { deps, seen, timers } = processorDeps();
+		const block = await processBlock(deps, seen, SOURCE);
+		const done = tracked(block.settled);
+		await flush();
+		timers.advance(TOTAL * 2);
+		await flush();
+		expect(done.done).toBe(false);
+	});
+});
 
 describe('the settings a block is built with', () => {
 	/**

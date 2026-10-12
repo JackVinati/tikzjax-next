@@ -126,6 +126,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 					ensureFonts(doc, COLD_FONT_CSS);
 				},
 				now: () => Date.now(),
+				timers,
 				preamble: this.preamble,
 				onBlock: (spec) => {
 					this.preamble?.track(

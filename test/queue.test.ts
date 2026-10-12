@@ -967,6 +967,46 @@ describe('depth cap', () => {
 		expect(retried.status).toBe('fulfilled');
 	});
 
+	it('never turns away an uncapped job, nor counts it against the cap', async () => {
+		// A PDF export of a note with more uncached diagrams than the cap — 16 on a phone — printed
+		// a "Render diagram" button for each one over it: the cap evicted export jobs like any other.
+		const h = harness({ concurrency: 1, depthCap: 2 });
+		h.submit('blocker', 1);
+		await tick();
+		const exports = ['e1', 'e2', 'e3', 'e4'].map((key) =>
+			track(h.queue.submit(key, { id: key }, 0, 1000, { uncapped: true })),
+		);
+		await tick();
+		expect(exports.map((e) => e.status)).toEqual(['pending', 'pending', 'pending', 'pending']);
+
+		// Ordinary work still has the whole cap to itself.
+		const a = h.submit('a', 1);
+		const b = h.submit('b', 1);
+		const c = h.submit('c', 2);
+		await tick();
+		expect(isQueueError(c.error, 'depth-cap')).toBe(true);
+		expect(a.status).toBe('pending');
+		expect(b.status).toBe('pending');
+		expect(exports.map((e) => e.status)).toEqual(['pending', 'pending', 'pending', 'pending']);
+	});
+
+	it('protects a waiting job once an uncapped caller joins it', async () => {
+		const h = harness({ concurrency: 1, depthCap: 1 });
+		h.submit('blocker', 1);
+		await tick();
+		const shared = h.submit('k', 3);
+		const joined = track(h.queue.submit('k', { id: 'k' }, 3, 1000, { uncapped: true }));
+		const first = h.submit('o1', 1);
+		const second = h.submit('o2', 1);
+		await tick();
+
+		// `k` is the least urgent job waiting, and would have been the one to go.
+		expect(shared.status).toBe('pending');
+		expect(joined.status).toBe('pending');
+		expect(first.status).toBe('pending');
+		expect(isQueueError(second.error, 'depth-cap')).toBe(true);
+	});
+
 	it('does not evict a job that a free slot can take immediately', async () => {
 		const h = harness({ concurrency: 2, depthCap: 1 });
 		const a = h.submit('a', 1);
