@@ -153,4 +153,34 @@ for (const name of names) {
 }
 
 console.log(`\n${names.length - failures}/${names.length} match the reference render.`);
+
+// --- the blamed line, under a preamble of several lines -----------------------------------------
+// TeX's l.NN counts the whole input file, preamble first. The worker reports the line the block
+// starts on, so the plugin can name the block's own line: with a three-line preamble TeX blames a
+// line two further down, and `bodyLine` has to move with it. The undefined control sequence in
+// broken.tex is on its third line, whatever comes before it.
+if (names.includes('broken')) {
+	const source = readFileSync(join(FIXTURES, 'broken.tex'), 'utf8');
+	const blamed = [];
+	for (const addToPreamble of ['', '\\def\\a{1}\n\\def\\b{2}\n\\def\\c{3}']) {
+		const reply = await send({
+			type: 'render',
+			id: ++id,
+			source,
+			options: { addToPreamble, captureLog: true },
+		});
+		blamed.push(
+			reply.line === undefined || reply.bodyLine === undefined
+				? `l.${reply.line} with bodyLine ${reply.bodyLine}`
+				: reply.line - reply.bodyLine + 1,
+		);
+	}
+	const ok = blamed.every((line) => line === 3);
+	if (!ok) failures++;
+	console.log(
+		`${ok ? '\x1b[32mOK  \x1b[0m' : '\x1b[31mFAIL\x1b[0m'}  the blamed line is the block's line 3, ` +
+			`with a one-line and a three-line preamble: ${blamed.join(', ')}`,
+	);
+}
+
 process.exit(failures ? 1 : 0);

@@ -30,6 +30,7 @@ import { ungzip } from 'pako';
 import { dvi2html } from '@drgrice1/dvi2html';
 import * as library from './library';
 import { describeConvertError } from './convert-error';
+import { buildInput } from './document';
 import { inflateExactly } from './inflate';
 import { CORE_DUMP_GZ, ENGINE_ID, INVENTORY, TEX_FILES, TEX_WASM_GZ } from 'virtual:engine-assets';
 import type { ErrorMessage, OkMessage, RenderOptions, TexErrorKind, WorkerRequest } from './protocol';
@@ -73,31 +74,6 @@ const texModule = new WebAssembly.Module(ungzip(fromBase64(TEX_WASM_GZ)));
  * the 156 MiB dump twice at boot (./inflate).
  */
 const coreDump = inflateExactly(fromBase64(CORE_DUMP_GZ), library.pages * 65536);
-
-// --- document assembly --------------------------------------------------------------------------
-
-const DOCUMENT_START = /\\begin\s*\{document\}/;
-
-const buildInput = (source: string, options: RenderOptions): string => {
-	const packages = Object.entries(options.texPackages ?? {})
-		.map(([name, opts]) => `\\usepackage${opts ? `[${opts}]` : ''}{${name}}`)
-		.join('');
-
-	const libraries = options.tikzLibraries ? `\\usetikzlibrary{${options.tikzLibraries}}` : '';
-
-	// \nonstopmode is why a bad diagram now produces a transcript instead of hanging. Without it
-	// TeX reaches the interactive `? ` prompt and suspends the asyncify'd wasm, and a suspended
-	// asyncify continuation cannot be resumed — only terminated. Upstream #18 #23 #27 #39 #51
-	// #82 #85 #89, roughly 22 reporters, are all downstream of this one token.
-	const preamble = `\\nonstopmode${packages}${libraries}${options.addToPreamble ?? ''}`;
-
-	const wrap = options.wrap ?? 'auto';
-	const needsWrap = wrap === 'always' || (wrap === 'auto' && !DOCUMENT_START.test(source));
-
-	return needsWrap
-		? `${preamble}\\begin{document}\n${source}\n\\end{document}\n`
-		: `${preamble}\n${source}\n`;
-};
 
 // --- transcript analysis --------------------------------------------------------------------------
 
@@ -430,7 +406,9 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	const logging = options.captureLog !== false;
 	if (logging) library.setShowConsole();
 
-	const input = new TextEncoder().encode(buildInput(source, options));
+	// Both passes read this same text, so `bodyLine` holds for an `l.NN` from either.
+	const { text, bodyLine } = buildInput(source, options);
+	const input = new TextEncoder().encode(text);
 
 	/** Where the first pass's transcript ends, so its diagnosis can never be read out of pass two. */
 	let firstEnd: number;
@@ -504,6 +482,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 			message: describeConvertError(reported.convertError),
 			firstError: diagnostics.firstError,
 			line: diagnostics.line,
+			bodyLine,
 			log,
 			missing,
 			durationMs,
@@ -513,7 +492,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	if (!reported.wroteDvi || !gotSvg) {
 		// Only ever reached with a failed FIRST pass — a failed second one is discarded above — so
 		// `transcript` here is that pass's own, not a later run's.
-		return { type: 'error', id, ...diagnose(transcript, missing), log, missing, durationMs };
+		return { type: 'error', id, ...diagnose(transcript, missing), bodyLine, log, missing, durationMs };
 	}
 	return {
 		type: 'ok',
@@ -524,6 +503,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 		durationMs,
 		firstError: diagnostics.firstError,
 		line: diagnostics.line,
+		bodyLine,
 	};
 }
 
