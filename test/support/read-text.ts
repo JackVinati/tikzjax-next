@@ -15,7 +15,7 @@ import { buildSync } from 'esbuild';
 export function readText(path: string): string {
 	const [built] = buildSync({
 		entryPoints: [path],
-		loader: { '.ts': 'text', '.css': 'text' },
+		loader: { '.ts': 'text', '.css': 'text', '.svg': 'text' },
 		bundle: false,
 		write: false,
 		format: 'iife',

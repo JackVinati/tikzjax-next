@@ -221,9 +221,10 @@ function addClass(element: Element, name: string): void {
  *
  * `url('a;b.png')` and `rgb(0, 0, 0)` both contain characters a naive `split(';')` mishandles, and
  * this attribute is also what the `ids` stage sweeps for `url(#…)` references, so being sloppy
- * here would corrupt a declaration nobody asked us to touch.
+ * here would corrupt a declaration nobody asked us to touch. Exported for the sanitize stage, which
+ * filters the same attribute declaration by declaration and must split it the same way.
  */
-function splitDeclarations(style: string): string[] {
+export function splitDeclarations(style: string): string[] {
 	const out: string[] = [];
 	let depth = 0;
 	let quote = '';
