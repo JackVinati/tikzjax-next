@@ -7,7 +7,8 @@
  * CHANGES FROM UPSTREAM (internal/DECISIONS.md D10):
  *  - assets are injected at build time instead of fetched from a urlRoot;
  *  - the WebAssembly.Module is compiled ONCE, not on every render;
- *  - no `coredump.slice(0)` — at pages=2500 that copy is 156.25 MiB per render;
+ *  - no `coredump.slice(0)` — at pages=2500 that copy is 156.25 MiB per render — and the dump is
+ *    inflated into one buffer rather than glued together from chunks into a second (./inflate);
  *  - \begin{document} wrapping is conditional (upstream nests it into every existing vault);
  *  - \nonstopmode, so a TeX error is logged instead of blocking on the interactive `? ` prompt;
  *  - errors are classified and returned, not swallowed into a broken-image marker;
@@ -29,6 +30,7 @@ import { ungzip } from 'pako';
 import { dvi2html } from '@drgrice1/dvi2html';
 import * as library from './library';
 import { describeConvertError } from './convert-error';
+import { inflateExactly } from './inflate';
 import { CORE_DUMP_GZ, ENGINE_ID, INVENTORY, TEX_FILES, TEX_WASM_GZ } from 'virtual:engine-assets';
 import type { ErrorMessage, OkMessage, RenderOptions, TexErrorKind, WorkerRequest } from './protocol';
 
@@ -62,14 +64,15 @@ library.setBundledFiles(bundled, (gz) => ungzip(gz));
  * which recompiles 526 KB of wasm each time; instantiating a Module reuses the compiled code.
  */
 const texModule = new WebAssembly.Module(ungzip(fromBase64(TEX_WASM_GZ)));
-const coreDump = ungzip(fromBase64(CORE_DUMP_GZ));
 
-if (coreDump.length !== library.pages * 65536) {
-	// The runtime .set()s the dump over the whole non-growable Memory, so a short dump would
-	// leave live TeX state uninitialised — a corruption that would surface much later as garbage
-	// output rather than as a failure here.
-	throw new Error(`core dump is ${coreDump.length} B, expected ${library.pages * 65536} B`);
-}
+/**
+ * Inflated straight into one buffer of the size the Memory needs, and asserted to be exactly that
+ * size: the runtime .set()s the dump over the whole non-growable Memory, so a short dump would
+ * leave live TeX state uninitialised — a corruption that would surface much later as garbage output
+ * rather than as a failure here. Not `ungzip`, which glues 64 KiB chunks into a copy and so holds
+ * the 156 MiB dump twice at boot (./inflate).
+ */
+const coreDump = inflateExactly(fromBase64(CORE_DUMP_GZ), library.pages * 65536);
 
 // --- document assembly --------------------------------------------------------------------------
 
