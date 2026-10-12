@@ -254,7 +254,8 @@ describe('transition table', () => {
 		const failed = drive(initialState(), [...TO_COMPILING, { type: 'timeout' }]).state;
 		const [state, fx] = reduce(failed, { type: 'retry' });
 		expect(state).toMatchObject({ phase: 'SCHEDULING', priority: 1 });
-		expect(kinds(fx)).toEqual(['unpoison', 'submit']);
+		// The card gives way to a spinner first: it used to stay up, under the diagram that replaced it.
+		expect(kinds(fx)).toEqual(['paintPlaceholder', 'unpoison', 'submit']);
 	});
 
 	it('FAILED(empty-source) + retry never enqueues', () => {
@@ -271,7 +272,7 @@ describe('transition table', () => {
 	it('IDLE_MANUAL + retry -> SCHEDULING (the "Render diagram" button)', () => {
 		const [state, fx] = reduce(stateFor('IDLE_MANUAL'), { type: 'retry' });
 		expect(state).toMatchObject({ phase: 'SCHEDULING', priority: 1 });
-		expect(fx).toEqual([{ kind: 'submit', priority: 1 }]);
+		expect(fx).toEqual([{ kind: 'paintPlaceholder' }, { kind: 'submit', priority: 1 }]);
 	});
 
 	it('any + unload -> DISPOSED, with teardown scoped to what that phase actually holds', () => {
@@ -773,7 +774,7 @@ describe('a queue rejection before the job starts', () => {
 		const capped = reduce(stateFor('SCHEDULING'), { type: 'rejected', reason: 'depthCap' })[0];
 		const [state, fx] = reduce(capped, { type: 'retry' });
 		expect(state).toMatchObject({ phase: 'SCHEDULING', priority: 1 });
-		expect(fx).toEqual([{ kind: 'submit', priority: 1 }]);
+		expect(fx).toEqual([{ kind: 'paintPlaceholder' }, { kind: 'submit', priority: 1 }]);
 	});
 
 	it('a settlement that arrives without a `slot` still leaves SCHEDULING', () => {

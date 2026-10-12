@@ -162,6 +162,9 @@ export class TikzBlock extends MarkdownRenderChild {
 				// Defence in depth against the reordering the dispatch queue now prevents: a
 				// placeholder painted after the diagram is already up is a spinner nobody removes.
 				if (this.body.querySelector('svg') || this.placeholder) return;
+				// The wrapper shows one thing at a time. On a Retry or a "Render diagram" press it
+				// still holds the card or the button, and those give way to the spinner.
+				this.body.empty();
 				this.placeholder = renderPlaceholder(this.body, this.deps.cache.peekSize(this.spec.key));
 				return;
 
@@ -247,7 +250,8 @@ export class TikzBlock extends MarkdownRenderChild {
 				return;
 
 			case 'mountManualButton':
-				this.placeholder?.remove();
+				this.placeholder = null;
+				this.body.empty();
 				renderManualTrigger(this.body, () => this.dispatch({ type: 'retry' }), STRINGS.renderDiagram);
 				return;
 
@@ -474,8 +478,10 @@ export class TikzBlock extends MarkdownRenderChild {
 		if (this.state.unloaded || !this.artifact) return;
 
 		this.deps.ensureFonts(this.body.doc);
-		this.placeholder?.remove();
+		// Replaces whatever the wrapper held — the spinner, and before this, on a Retry or a
+		// "Render diagram" press, the card or the button, which stayed up under the diagram.
 		this.placeholder = null;
+		this.body.empty();
 
 		const mounted = mountArtifact(this.body, this.artifact, this.spec.options.presentation);
 		if (!mounted) {

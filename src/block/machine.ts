@@ -470,9 +470,13 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 			return noop(state);
 
 		case 'IDLE_MANUAL':
-			// The "Render diagram" button. Priority 1: the user is looking straight at it.
+			// The "Render diagram" button. Priority 1: the user is looking straight at it. The
+			// button gives way to a spinner at once — it used to stay up, dead, under the diagram.
 			if (event.type === 'retry') {
-				return go(state, { phase: 'SCHEDULING', priority: 1 }, [{ kind: 'submit', priority: 1 }]);
+				return go(state, { phase: 'SCHEDULING', priority: 1 }, [
+					{ kind: 'paintPlaceholder' },
+					{ kind: 'submit', priority: 1 },
+				]);
 			}
 			return noop(state);
 
@@ -483,7 +487,9 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 			// enqueue" exists to prevent — and a Retry wired generically to every error card is
 			// the obvious way for that to happen.
 			if (event.type === 'retry' && state.reason !== 'empty-source') {
+				// The card gives way to a spinner, as the button does above.
 				return go(state, { phase: 'SCHEDULING', priority: 1 }, [
+					{ kind: 'paintPlaceholder' },
 					{ kind: 'unpoison' },
 					{ kind: 'submit', priority: 1 },
 				]);

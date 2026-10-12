@@ -500,6 +500,26 @@ describe('Retry', () => {
 		await vi.waitFor(() => expect(el.querySelector('svg')).not.toBeNull());
 	});
 
+	it('replaces the card: a spinner while it compiles, then the diagram alone', async () => {
+		// The card used to stay where it was, under the diagram, once the retry succeeded.
+		const { queue, runs } = realQueue();
+		const el = container();
+		const child = new TikzBlock(el, spec({ timeoutMs: 20 }), deps({ queue }));
+		child.onload();
+		await child.settled;
+
+		press(el, 'Retry');
+		await vi.waitFor(() => expect(runs).toHaveLength(2));
+		expect(el.querySelector('.tikzjax-error')).toBeNull();
+		expect(el.querySelectorAll('.tikzjax-placeholder')).toHaveLength(1);
+
+		runs[1]?.resolve(RESULT);
+		await vi.waitFor(() => expect(el.querySelector('svg')).not.toBeNull());
+		expect(el.querySelectorAll('svg')).toHaveLength(1);
+		expect(el.querySelector('.tikzjax-error')).toBeNull();
+		expect(el.querySelector('.tikzjax-placeholder')).toBeNull();
+	});
+
 	it('shows what went wrong this time, not last time', async () => {
 		const { queue, runs } = realQueue();
 		const el = container();
@@ -513,6 +533,33 @@ describe('Retry', () => {
 			new TexError('tex-error', ['! Undefined control sequence.'], 'Undefined control sequence.', 3),
 		);
 		await vi.waitFor(() => expect(cardText(el)).toMatch(/Undefined control sequence/));
+	});
+});
+
+describe('"Render diagram"', () => {
+	it('gives way to a spinner, then to the diagram — the button does not linger', async () => {
+		// lazy=manual, and every block pushed past the queue's depth cap, get this button. It used
+		// to stay under the rendered diagram, doing nothing when pressed.
+		const { queue, runs } = realQueue();
+		const el = container();
+		const child = new TikzBlock(
+			el,
+			spec({ options: options({ presentation: { lazy: 'manual' } }) }),
+			deps({ queue }),
+		);
+		child.onload();
+		await child.settled;
+		expect(el.querySelector('.tikzjax-manual')).not.toBeNull();
+
+		press(el, 'Render diagram');
+		await vi.waitFor(() => expect(runs).toHaveLength(1));
+		expect(el.querySelector('.tikzjax-manual')).toBeNull();
+		expect(el.querySelectorAll('.tikzjax-placeholder')).toHaveLength(1);
+
+		runs[0]?.resolve(RESULT);
+		await vi.waitFor(() => expect(el.querySelector('svg')).not.toBeNull());
+		expect(el.querySelector('.tikzjax-manual')).toBeNull();
+		expect(el.querySelector('.tikzjax-placeholder')).toBeNull();
 	});
 });
 
