@@ -209,6 +209,7 @@ function buildSpec(
 			? legacyTidyTikzSource(parsed.body)
 			: normalizeSource(parsed.body);
 
+	const svgo = parsed.svgo ?? settings.svgo;
 	const key = deriveKey({
 		normalizedSource: normalized,
 		baked: options.baked,
@@ -217,7 +218,7 @@ function buildSpec(
 		pipeline: {
 			raw: options.raw,
 			fast: options.fast,
-			svgo: parsed.svgo ?? settings.svgo,
+			svgo,
 		},
 	});
 
@@ -229,6 +230,7 @@ function buildSpec(
 		key,
 		source: normalized,
 		options,
+		svgo,
 		texOptions: {
 			...(Object.keys(options.baked.packages).length ? { texPackages: options.baked.packages } : {}),
 			...(options.baked.libraries ? { tikzLibraries: options.baked.libraries } : {}),

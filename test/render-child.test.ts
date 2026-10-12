@@ -130,6 +130,7 @@ function spec(over: Partial<TexJobSpec> = {}): TexJobSpec {
 		key: 'K',
 		source: '\\draw (0,0) circle (1);',
 		options: options(),
+		svgo: 'preset',
 		texOptions: {},
 		legacySource: null,
 		timeoutMs: 1000,
@@ -837,5 +838,48 @@ describe('fast mode', () => {
 		} finally {
 			restore();
 		}
+	});
+});
+
+describe('the svgo setting and directive', () => {
+	/**
+	 * They reached the cache key and nothing else: `%!tikz svgo=off` recompiled the diagram and
+	 * changed nothing about it, because the pipeline only ever asked whether the block was fast.
+	 * `alignment-baseline` on a <text> is what the targeted transform removes.
+	 */
+	const TEXT_SVG =
+		'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><text alignment-baseline="baseline">x</text></svg>';
+
+	async function mountedWith(over: Partial<TexJobSpec>): Promise<Element | null> {
+		const el = container();
+		const child = new TikzBlock(
+			el,
+			spec(over),
+			deps({ queue: answering({ svg: TEXT_SVG, log: [], durationMs: 1 }) }),
+		);
+		child.onload();
+		await child.settled;
+		return el.querySelector('text');
+	}
+
+	it('off leaves the engine output unoptimised', async () => {
+		const text = await mountedWith({ svgo: 'off' });
+		expect(text?.getAttribute('alignment-baseline')).toBe('baseline');
+	});
+
+	it('targeted runs the targeted transform', async () => {
+		const text = await mountedWith({ svgo: 'targeted' });
+		expect(text).not.toBeNull();
+		expect(text?.hasAttribute('alignment-baseline')).toBe(false);
+	});
+
+	it('preset, with SVGO not bundled, runs the targeted transform as it always has', async () => {
+		const text = await mountedWith({ svgo: 'preset' });
+		expect(text?.hasAttribute('alignment-baseline')).toBe(false);
+	});
+
+	it('fast mode turns every optimisation off, whatever svgo says', async () => {
+		const text = await mountedWith({ svgo: 'targeted', options: options({ fast: true }) });
+		expect(text?.getAttribute('alignment-baseline')).toBe('baseline');
 	});
 });

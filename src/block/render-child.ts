@@ -1,5 +1,5 @@
 import { MarkdownRenderChild } from 'obsidian';
-import type { Artifact, BlockOptions, Diagnostic, TexHost, TexResult } from '../types';
+import type { Artifact, BlockOptions, Diagnostic, SvgoMode, TexHost, TexResult } from '../types';
 import { InterruptedError, TexError } from '../types';
 import {
 	initialState,
@@ -37,6 +37,8 @@ export interface TexJobSpec {
 	key: string;
 	source: string;
 	options: BlockOptions;
+	/** The optimisation the block asked for: its `%!tikz svgo=`, else the setting. In the key too. */
+	svgo: SvgoMode;
 	texOptions: {
 		texPackages?: Record<string, string>;
 		tikzLibraries?: string;
@@ -407,9 +409,16 @@ export class TikzBlock extends MarkdownRenderChild {
 		try {
 			let markup = raw;
 
+			// What the block asked for, and fast mode switches all of it off. The setting and the
+			// directive used to reach the cache key and nothing else — this asked only whether the
+			// block was fast — so `%!tikz svgo=off` recompiled a diagram and changed nothing in it.
+			//
+			// `preset` is SVGO's preset and then the targeted transform. SVGO is not bundled (see
+			// main.ts), so today `preset` is the targeted transform alone, as it always has been.
+			const mode: SvgoMode = this.spec.options.fast ? 'off' : this.spec.svgo;
+
 			// SVGO works on a string, not a document, so it wraps the DOM stages rather than being
 			// one of them.
-			const mode = this.spec.options.fast ? 'off' : 'preset';
 			if (mode === 'preset' && this.deps.svgo) {
 				try {
 					markup = optimizeString(this.deps.svgo, markup);
@@ -425,7 +434,7 @@ export class TikzBlock extends MarkdownRenderChild {
 				doc,
 				buildStages({
 					colors: this.spec.options.presentation.colors ?? 'adapt',
-					optimize: this.spec.options.fast ? 'off' : 'targeted',
+					optimize: mode === 'off' ? 'off' : 'targeted',
 				}),
 				{ raw: this.spec.options.raw },
 			);

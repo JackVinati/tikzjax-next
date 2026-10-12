@@ -92,3 +92,16 @@ describe('the time limit from the settings', () => {
 		expect(spec.timeoutMs).toBe(60_000);
 	});
 });
+
+describe('the optimisation a block asks for', () => {
+	it('is its own svgo= when it has one, and the setting when it does not', async () => {
+		const { deps, seen, settings } = processorDeps();
+		settings.current = { ...settings.current, svgo: 'targeted' };
+		const fromSetting = await processBlock(deps, seen, SOURCE, { load: false });
+		const fromBlock = await processBlock(deps, seen, `%!tikz svgo=off\n${SOURCE}`, { load: false });
+
+		expect(fromSetting.spec.svgo).toBe('targeted');
+		expect(fromBlock.spec.svgo).toBe('off');
+		expect(fromBlock.spec.key).not.toBe(fromSetting.spec.key);
+	});
+});
