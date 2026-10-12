@@ -1,0 +1,3 @@
+{
+  "note": "° × → ± µ, their text commands, \\S, \\dag and an itemize bullet are all set in TS1 (tcrm1000), which dvi2html cannot draw: each one used to lose the whole diagram. The worker's TS1 shim (engine-src/ts1-shim.ts) draws them from the math fonts."
+}

@@ -44,8 +44,10 @@ const faceRule = (family, woff2) =>
  * `font-display: block` rather than the default `auto`: these faces carry mathematical glyphs, and
  * a fallback rendering of a maths symbol is not a slightly-wrong letter, it is a wrong diagram.
  * Blocking briefly beats showing something incorrect.
+ *
+ * `banner` goes first: where the source is, and where the fonts' licences are (scripts/banner.mjs).
  */
-export function buildStyles(root) {
+export function buildStyles(root, banner = '') {
 	const distFonts = join(root, 'engine-build', 'out', 'dist', 'fonts');
 
 	// LF, whatever the checkout used. styles.css is a SHIPPED ARTIFACT: the community store checks
@@ -69,7 +71,7 @@ export function buildStyles(root) {
 		(CORE_FACES.has(family) ? core : cold).push(rule);
 	}
 
-	const css = `${base}\n/* Core TeX faces. The remaining ${cold.length} are injected on first mount; see scripts/gen-styles.mjs. */\n${core.join('\n')}\n`;
+	const css = `${banner}${base}\n/* Core TeX faces. The remaining ${cold.length} are injected on first mount; see scripts/gen-styles.mjs. */\n${core.join('\n')}\n`;
 	const coldCss = cold.join('\n');
 
 	writeFileSync(join(root, 'styles.css'), css, 'utf8');

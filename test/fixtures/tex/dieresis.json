@@ -1,0 +1,3 @@
+{
+  "note": "The last character of every font — the dieresis accent in cmr10, \\spadesuit in cmsy10 — used to fail with \"Could not find font metric for 127\": dvi2html's TFM reader stopped one short. Fixed by the build's patch to dvi2html (scripts/dvi2html-patch.mjs)."
+}

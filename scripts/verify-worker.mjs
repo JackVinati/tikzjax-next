@@ -17,8 +17,7 @@ import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 
 import { join, basename } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import esbuild from 'esbuild';
-import { engineAssetsPlugin, engineIsBuilt } from './engine-assets.mjs';
+import { buildWorker, engineIsBuilt } from './engine-assets.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const FIXTURES = join(root, 'test', 'fixtures', 'tex');
@@ -30,18 +29,10 @@ if (!engineIsBuilt(root)) {
 	process.exit(2);
 }
 
+// The production build's worker, minified and carrying its ENGINE_ID, from the same function the
+// build calls, so the string evaluated here is the one a release puts into main.js.
 console.log('Bundling the worker…');
-const built = await esbuild.build({
-	entryPoints: [join(root, 'engine-src', 'worker.ts')],
-	bundle: true,
-	write: false,
-	format: 'iife',
-	platform: 'browser',
-	target: 'es2022',
-	logLevel: 'warning',
-	plugins: [engineAssetsPlugin(root)],
-});
-const workerSource = built.outputFiles[0].text;
+const { source: workerSource, engineId } = await buildWorker(root);
 console.log(`  ${(workerSource.length / 1048576).toFixed(2)} MB\n`);
 
 // --- boot it ---------------------------------------------------------------------------------
@@ -64,6 +55,12 @@ const bootMs = Date.now() - t0;
 const ready = inbox.find((m) => m.type === 'ready');
 if (!ready) {
 	console.error('Worker never signalled ready. Messages:', inbox);
+	process.exit(1);
+}
+// The id is written into the bundle after it is hashed. A worker announcing anything else — the
+// placeholder, or an id from another build — would key every diagram it renders wrongly.
+if (ready.engineId !== engineId || ready.inventory.engineId !== engineId) {
+	console.error(`Worker announced ENGINE_ID ${ready.engineId}, the build computed ${engineId}.`);
 	process.exit(1);
 }
 console.log(
@@ -156,4 +153,34 @@ for (const name of names) {
 }
 
 console.log(`\n${names.length - failures}/${names.length} match the reference render.`);
+
+// --- the blamed line, under a preamble of several lines -----------------------------------------
+// TeX's l.NN counts the whole input file, preamble first. The worker reports the line the block
+// starts on, so the plugin can name the block's own line: with a three-line preamble TeX blames a
+// line two further down, and `bodyLine` has to move with it. The undefined control sequence in
+// broken.tex is on its third line, whatever comes before it.
+if (names.includes('broken')) {
+	const source = readFileSync(join(FIXTURES, 'broken.tex'), 'utf8');
+	const blamed = [];
+	for (const addToPreamble of ['', '\\def\\a{1}\n\\def\\b{2}\n\\def\\c{3}']) {
+		const reply = await send({
+			type: 'render',
+			id: ++id,
+			source,
+			options: { addToPreamble, captureLog: true },
+		});
+		blamed.push(
+			reply.line === undefined || reply.bodyLine === undefined
+				? `l.${reply.line} with bodyLine ${reply.bodyLine}`
+				: reply.line - reply.bodyLine + 1,
+		);
+	}
+	const ok = blamed.every((line) => line === 3);
+	if (!ok) failures++;
+	console.log(
+		`${ok ? '\x1b[32mOK  \x1b[0m' : '\x1b[31mFAIL\x1b[0m'}  the blamed line is the block's line 3, ` +
+			`with a one-line and a three-line preamble: ${blamed.join(', ')}`,
+	);
+}
+
 process.exit(failures ? 1 : 0);

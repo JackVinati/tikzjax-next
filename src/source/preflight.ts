@@ -1,4 +1,5 @@
 import type { BakedOptions, Diagnostic, EngineCapabilities } from '../types';
+import { isTs1Symbol } from '../../engine-src/ts1-shim';
 import { isNativeUnicode } from './native-unicode';
 
 /**
@@ -327,15 +328,20 @@ const MAX_REPORTED_CHARS = 5;
  * scripts/scan-native-unicode.mjs renders each one through the committed engine and writes
  * ./native-unicode. It is the same reason `caps` is generated — a hand-kept list would be true of
  * one engine and quietly wrong after the next rebuild. What remains genuinely fails: TeX leaves
- * Greek, Cyrillic and CJK out with "Unicode character … not set up for use with LaTeX", and €, ™
- * and → compile into a TS1 font the SVG converter cannot draw, which loses the whole diagram.
+ * Greek, Cyrillic and CJK out with "Unicode character … not set up for use with LaTeX", and € and
+ * £ compile into a TS1 font the SVG converter cannot draw, which loses the whole diagram.
  *
- * Latin-1 is covered too, because the scan measured it and most of it is native but not all: ° and
- * × need the same TS1 font as €, and ä, ö, ü — any letter with a dieresis — fail inside the SVG
- * converter, which has no metrics for the accent. The cause there is the converter, and \"u
- * written by hand fails the same way, so the warning cannot offer a spelling that works. It says
- * so instead, before the user meets a blank diagram: the alternative was silence here and a card
- * that, until the worker's message was fixed, named a font called "metric".
+ * Most of TS1 is drawable all the same. °, ×, µ, → and the others in engine-src/ts1-shim.ts have a
+ * glyph in the math fonts, and the worker redefines them to it for any block that can use one. The
+ * scan measures the bare engine, which still cannot draw them, so the shim's table is consulted
+ * here as well: a warning on 90° would be false.
+ *
+ * Latin-1 is covered too, because the scan measured it and most of it is native but not all.
+ * Letters with a dieresis — ä, ö, ü — were an exception, and this rule had to warn that no
+ * spelling of them worked, \"u included: the SVG converter skipped the last character of every
+ * font, and in cmr10 that is the accent. The build patches the converter
+ * (scripts/dvi2html-patch.mjs), and the scan measures them native like any other accented letter,
+ * so they pass here without a rule of their own.
  */
 function checkEncoding(text: string, out: Diagnostic[]): void {
 	const offenders = new Map<string, number>();
@@ -345,7 +351,7 @@ function checkEncoding(text: string, out: Diagnostic[]): void {
 		// `for..of` iterates codepoints, so an astral character is one entry rather than two
 		// surrogate halves — otherwise the report would name characters that do not exist.
 		const cp = ch.codePointAt(0) ?? 0;
-		if (cp > 0x7f && !isNativeUnicode(cp) && !offenders.has(ch)) offenders.set(ch, i);
+		if (cp > 0x7f && !isNativeUnicode(cp) && !isTs1Symbol(cp) && !offenders.has(ch)) offenders.set(ch, i);
 		i += ch.length;
 	}
 	if (offenders.size === 0) return;
@@ -360,35 +366,21 @@ function checkEncoding(text: string, out: Diagnostic[]): void {
 		kind: 'warning',
 		message: `Characters this engine cannot typeset: ${listed.join(', ')}${rest > 0 ? ` and ${rest} more` : ''}.`,
 		line: lineOf(text, first),
-		// No inputenc here, although the old hint offered it: the format already reads UTF-8, and
-		// what stops these characters is that nothing defines them, which inputenc does not change.
-		// The examples are ones this engine draws; `\"o` and `\textdegree` were in this hint, and on
-		// this engine neither renders.
-		hint: encodingHint([...offenders.keys()]),
+		hint: ENCODING_HINT,
 	});
 }
 
 /**
- * Advice that is true for the characters actually found. A dieresis has no spelling that works on
- * this engine, so offering `\"u` — the old hint did — would send the user from one blank diagram to
- * another; ° and × do have math equivalents that render.
+ * No inputenc here, although the old hint offered it: the format already reads UTF-8, and what
+ * stops these characters is that nothing defines them, which inputenc does not change. The
+ * examples are math commands this engine draws for characters it does not; °, × and → were the
+ * examples once, and they need none now. Nor is there a word about the dieresis any more: it
+ * renders, however it is written.
  */
-function encodingHint(found: string[]): string {
-	const dieresis = found.some((ch) => ch.normalize('NFD').includes('̈'));
-	const parts = [
-		'The engine typesets most accented letters, curly quotes and dashes itself, but not these: TeX either ' +
-			'leaves each one out with an error or produces a diagram the SVG converter cannot draw.',
-	];
-	if (dieresis) {
-		parts.push(
-			'Letters with a dieresis (ä, ö, ü) cannot be drawn at all yet, however they are written — \\"u fails the same way.',
-		);
-	}
-	parts.push(
-		'Where TeX has a command, write that instead: $^\\circ$, $\\times$, $\\Omega$, $\\rightarrow$.',
-	);
-	return parts.join(' ');
-}
+const ENCODING_HINT =
+	'The engine typesets most accented letters, curly quotes, dashes and symbols such as ° × → itself, ' +
+	'but not these: TeX either leaves each one out with an error or produces a diagram the SVG converter ' +
+	'cannot draw. Where TeX has a math command, write that instead: $\\Omega$, $\\alpha$, $\\in$, $\\infty$.';
 
 function codepoint(ch: string): string {
 	return `U+${(ch.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}`;

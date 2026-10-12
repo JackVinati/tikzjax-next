@@ -2,17 +2,22 @@
  * TeX worker.
  *
  * Forked from drgrice1/tikzjax src/run-tex.js @ 461ac15f (GPL-3.0-or-later). Copyright the
- * original authors: Jim Fowler, Glenn Rice. This file remains GPL-3.0-or-later. See NOTICE.
+ * original authors: Jim Fowler, Glenn Rice. Modified by JackVinati in 2026, as listed below.
+ * This file remains GPL-3.0-or-later. See NOTICE.
  *
  * CHANGES FROM UPSTREAM (internal/DECISIONS.md D10):
  *  - assets are injected at build time instead of fetched from a urlRoot;
  *  - the WebAssembly.Module is compiled ONCE, not on every render;
- *  - no `coredump.slice(0)` — at pages=2500 that copy is 156.25 MiB per render;
- *  - \begin{document} wrapping is conditional (upstream nests it into every existing vault);
+ *  - no `coredump.slice(0)` — at pages=2500 that copy is 156.25 MiB per render — and the dump is
+ *    inflated into one buffer rather than glued together from chunks into a second (./inflate);
+ *  - \begin{document} wrapping is conditional (upstream nests it into every existing vault), and the
+ *    input is assembled in ./document, with a TS1 shim for a block that can use one (./ts1-shim);
  *  - \nonstopmode, so a TeX error is logged instead of blocking on the interactive `? ` prompt;
  *  - errors are classified and returned, not swallowed into a broken-image marker;
  *  - threads.js is replaced by the tagged protocol in ./protocol.ts;
- *  - TeX can be run TWICE, opt-in per block, so a second run can read the first run's .aux.
+ *  - TeX can be run TWICE, opt-in per block, so a second run can read the first run's .aux;
+ *  - dvi2html is bundled with its TFM reader patched to read the last character of every font
+ *    (scripts/dvi2html-patch.mjs), without which ä, ö, ü and \spadesuit lose the whole diagram.
  */
 
 // `buffer/` with the trailing slash, which is the specifier that CANNOT resolve to Node's builtin:
@@ -26,6 +31,9 @@ import { Buffer } from 'buffer/';
 import { ungzip } from 'pako';
 import { dvi2html } from '@drgrice1/dvi2html';
 import * as library from './library';
+import { describeConvertError } from './convert-error';
+import { buildInput } from './document';
+import { inflateExactly } from './inflate';
 import { CORE_DUMP_GZ, ENGINE_ID, INVENTORY, TEX_FILES, TEX_WASM_GZ } from 'virtual:engine-assets';
 import type { ErrorMessage, OkMessage, RenderOptions, TexErrorKind, WorkerRequest } from './protocol';
 
@@ -59,39 +67,15 @@ library.setBundledFiles(bundled, (gz) => ungzip(gz));
  * which recompiles 526 KB of wasm each time; instantiating a Module reuses the compiled code.
  */
 const texModule = new WebAssembly.Module(ungzip(fromBase64(TEX_WASM_GZ)));
-const coreDump = ungzip(fromBase64(CORE_DUMP_GZ));
 
-if (coreDump.length !== library.pages * 65536) {
-	// The runtime .set()s the dump over the whole non-growable Memory, so a short dump would
-	// leave live TeX state uninitialised — a corruption that would surface much later as garbage
-	// output rather than as a failure here.
-	throw new Error(`core dump is ${coreDump.length} B, expected ${library.pages * 65536} B`);
-}
-
-// --- document assembly --------------------------------------------------------------------------
-
-const DOCUMENT_START = /\\begin\s*\{document\}/;
-
-const buildInput = (source: string, options: RenderOptions): string => {
-	const packages = Object.entries(options.texPackages ?? {})
-		.map(([name, opts]) => `\\usepackage${opts ? `[${opts}]` : ''}{${name}}`)
-		.join('');
-
-	const libraries = options.tikzLibraries ? `\\usetikzlibrary{${options.tikzLibraries}}` : '';
-
-	// \nonstopmode is why a bad diagram now produces a transcript instead of hanging. Without it
-	// TeX reaches the interactive `? ` prompt and suspends the asyncify'd wasm, and a suspended
-	// asyncify continuation cannot be resumed — only terminated. Upstream #18 #23 #27 #39 #51
-	// #82 #85 #89, roughly 22 reporters, are all downstream of this one token.
-	const preamble = `\\nonstopmode${packages}${libraries}${options.addToPreamble ?? ''}`;
-
-	const wrap = options.wrap ?? 'auto';
-	const needsWrap = wrap === 'always' || (wrap === 'auto' && !DOCUMENT_START.test(source));
-
-	return needsWrap
-		? `${preamble}\\begin{document}\n${source}\n\\end{document}\n`
-		: `${preamble}\n${source}\n`;
-};
+/**
+ * Inflated straight into one buffer of the size the Memory needs, and asserted to be exactly that
+ * size: the runtime .set()s the dump over the whole non-growable Memory, so a short dump would
+ * leave live TeX state uninitialised — a corruption that would surface much later as garbage output
+ * rather than as a failure here. Not `ungzip`, which glues 64 KiB chunks into a copy and so holds
+ * the 156 MiB dump twice at boot (./inflate).
+ */
+const coreDump = inflateExactly(fromBase64(CORE_DUMP_GZ), library.pages * 65536);
 
 // --- transcript analysis --------------------------------------------------------------------------
 
@@ -383,6 +367,7 @@ const runPass = async (job: string): Promise<PassResult> => {
 		//   - readFileSync throws when TeX never wrote a DVI at all;
 		//   - dvi2html throws when the DVI names a font its built-in metric table does not carry
 		//     (eufm10, rsfs10, tcrm1000 ...), which is a SUCCESSFUL TeX run we cannot draw.
+		//     See ./convert-error for what the user is told.
 		// Swallowing both produced "TeX produced no output" for a compile that worked perfectly.
 		if (wroteDvi) convertError = error instanceof Error ? error.message : String(error);
 	}
@@ -423,7 +408,9 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	const logging = options.captureLog !== false;
 	if (logging) library.setShowConsole();
 
-	const input = new TextEncoder().encode(buildInput(source, options));
+	// Both passes read this same text, so `bodyLine` holds for an `l.NN` from either.
+	const { text, bodyLine } = buildInput(source, options);
+	const input = new TextEncoder().encode(text);
 
 	/** Where the first pass's transcript ends, so its diagnosis can never be read out of pass two. */
 	let firstEnd: number;
@@ -490,28 +477,14 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	// Output decides success; the transcript decides what to say about it. Under \nonstopmode a
 	// mistyped macro usually yields BOTH a diagram and an error, and the user needs both.
 	if (reported.convertError !== undefined) {
-		// Two different failures share a prefix. dvi2html says "Could not find font metric for 127"
-		// when a font it knows lacks one character's metrics, and "Could not find font tcrm1000"
-		// when it does not know the font at all. Matched the other way round, the first read as a
-		// font named "metric", and a German label showed "The font metric is not supported". 127 in
-		// cmr10 is the dieresis accent: ä, ö, ü — and \"u written by hand — all end up here.
-		const glyph = /Could not find font metric for (\d+)/.exec(reported.convertError)?.[1];
-		const font =
-			glyph === undefined ? /Could not find font (\S+)/.exec(reported.convertError)?.[1] : undefined;
 		return {
 			type: 'error',
 			id,
 			kind: 'missing-file',
-			message:
-				glyph === '127'
-					? 'The SVG converter cannot draw the dieresis accent (¨), so a letter like ä, ö or ü — typed, or written as \\"u — loses the whole diagram. Remove it for now.'
-					: glyph !== undefined
-						? `The SVG converter has no metrics for character ${glyph} of a font this diagram uses.`
-						: font
-							? `The font ${font} is not supported by the SVG converter.`
-							: `The diagram compiled but could not be converted: ${reported.convertError}`,
+			message: describeConvertError(reported.convertError),
 			firstError: diagnostics.firstError,
 			line: diagnostics.line,
+			bodyLine,
 			log,
 			missing,
 			durationMs,
@@ -521,7 +494,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	if (!reported.wroteDvi || !gotSvg) {
 		// Only ever reached with a failed FIRST pass — a failed second one is discarded above — so
 		// `transcript` here is that pass's own, not a later run's.
-		return { type: 'error', id, ...diagnose(transcript, missing), log, missing, durationMs };
+		return { type: 'error', id, ...diagnose(transcript, missing), bodyLine, log, missing, durationMs };
 	}
 	return {
 		type: 'ok',
@@ -532,6 +505,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 		durationMs,
 		firstError: diagnostics.firstError,
 		line: diagnostics.line,
+		bodyLine,
 	};
 }
 

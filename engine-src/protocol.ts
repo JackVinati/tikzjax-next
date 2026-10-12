@@ -97,8 +97,10 @@ export interface OkMessage {
 	 * diagram AND shows the diagnostic.
 	 */
 	firstError?: string | undefined;
-	/** The `l.NN` line TeX blamed. */
+	/** The `l.NN` line TeX blamed: a line of the whole input file. See `bodyLine`. */
 	line?: number | undefined;
+	/** See ErrorMessage.bodyLine. */
+	bodyLine?: number | undefined;
 }
 
 export interface ErrorMessage {
@@ -108,8 +110,18 @@ export interface ErrorMessage {
 	message: string;
 	/** The first `! ...` line, when there is one. */
 	firstError?: string | undefined;
-	/** The `l.NN` line number TeX blamed, when it gave one. */
+	/** The `l.NN` line number TeX blamed, when it gave one: a line of the whole input file. */
 	line?: number | undefined;
+	/**
+	 * The line of TeX's input file on which the block's own first line sits.
+	 *
+	 * TeX's `l.NN` counts the assembled input — `\nonstopmode`, packages, libraries and every
+	 * preamble file first — so the block's own line is `line - bodyLine + 1`, and a `line` below
+	 * `bodyLine` is in the preamble rather than in the block. It is 2 only when the preamble is one
+	 * line; each line a preamble file adds moves it down by one. Absent when TeX never ran: a
+	 * worker that failed to boot, a ping.
+	 */
+	bodyLine?: number | undefined;
 	log: string[];
 	missing: string[];
 	durationMs: number;

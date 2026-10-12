@@ -4,6 +4,6 @@
       "eufrak": ""
     }
   },
-  "note": "upstream #84. The eufrak fonts and their .fd files were lost in the rebuild. KNOWN LIMIT: TeX loads the metric (it is bundled) and the WOFF2 face exists, but dvi2html calls tfmData() itself when parsing the DVI and its built-in table covers only Computer Modern. Fixing this means extending or vendoring @drgrice1/dvi2html.",
+  "note": "upstream #84. KNOWN LIMIT: TeX loads the metric (eufm10.tfm is bundled) and the WOFF2 face ships (eufm*.woff2), but dvi2html reads metrics from its own built-in table when it parses the DVI, and that table has no Euler fonts. Fixing this means a font hook in, or a fork of, @drgrice1/dvi2html.",
   "expect": "unsupported"
 }

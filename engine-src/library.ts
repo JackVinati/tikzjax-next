@@ -3,7 +3,7 @@
  *
  * Forked from drgrice1/tikzjax src/library.js @ 461ac15f (GPL-3.0-or-later), which is itself
  * derived from kisonecat/tikzjax. Copyright the original authors: Jim Fowler, Glenn Rice.
- * This file remains GPL-3.0-or-later. See NOTICE.
+ * Modified by JackVinati in 2026, as listed below. This file remains GPL-3.0-or-later. See NOTICE.
  *
  * CHANGES FROM UPSTREAM (see internal/DECISIONS.md D10):
  *
@@ -161,14 +161,17 @@ const openSync = (filename: string, mode: 'r' | 'w'): number => {
 		buffer = filesystem[filename];
 	} else if (filename.endsWith('.tfm')) {
 		// dvi2html carries a built-in metric table. It is tried FIRST so every font the engine
-		// already rendered keeps rendering byte-identically — but it covers only the Computer
-		// Modern set, and it THROWS on anything else. That throw escaped openSync, crossed the
-		// wasm frames and killed the whole run: a single `\mathfrak` took the engine down rather
-		// than producing an error anyone could read.
+		// already rendered keeps rendering byte-identically — but it covers only Computer Modern,
+		// lasy and the AMS symbol fonts (msam, msbm), and it THROWS on anything else. That throw
+		// escaped openSync, crossed the wasm frames and killed the whole run: a single `\mathfrak`
+		// took the engine down rather than producing an error anyone could read.
 		//
-		// So: built-in first, then the bundle, then not-found. The bundled fallback is what makes
-		// eufm/eusm/msam/msbm usable at all — their WOFF2 faces were always in the font set;
-		// only the metrics were missing (upstream #55, #84, #113).
+		// So: built-in first, then the bundle, then not-found. The bundled fallback lets TeX load
+		// the Euler (eufm, eusm) and rsfs metrics, so `\mathfrak` and `\mathscr` compile, and the
+		// failure that follows is dvi2html's readable "Could not find font eufm10" rather than a
+		// dead engine. Drawing them is a separate gap: dvi2html's own table has neither family,
+		// and of their faces only the Euler ones ship — rsfs has metrics and no web font at all
+		// (upstream #55, #84, #113).
 		try {
 			buffer = Uint8Array.from(tfmData(filename.replace(/\.tfm$/, '')) as ArrayLike<number>);
 		} catch {
