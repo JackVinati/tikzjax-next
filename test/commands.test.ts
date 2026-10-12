@@ -139,7 +139,7 @@ describe('renderedMarkup', () => {
 		const span = only(findTikzBlocks(note));
 		l1.set(await processedKey(deps, seen, readingView(note, span), 'note.md'), artifact());
 
-		const markup = (await renderedMarkup(span.source, 'note.md', deps)) ?? '';
+		const markup = (await renderedMarkup(span.source, 'note.md', deps))?.markup ?? '';
 		expect(markup).not.toContain('__TZ__');
 		const svg = new DOMParser().parseFromString(markup, 'image/svg+xml').documentElement;
 		const id = svg.querySelector('clipPath')?.getAttribute('id') ?? '';
@@ -158,7 +158,22 @@ describe('renderedMarkup', () => {
 
 		const first = await renderedMarkup(span.source, 'note.md', deps);
 		const second = await renderedMarkup(span.source, 'note.md', deps);
-		expect(first).not.toBe(second);
+		expect(first?.markup).not.toBe(second?.markup);
+	});
+
+	it('says which colour mode the block is in, for the zoom view to draw it the same way', async () => {
+		const { deps, seen, l1, settings } = processorDeps();
+		const note = '```tikz\n%!tikz colors=paper\n\\draw (0,0);\n```\n```tikz\n\\draw (1,1);\n```\n';
+		const [paper, plain] = findTikzBlocks(note);
+		if (!paper || !plain) throw new Error('the note has two blocks');
+		for (const span of [paper, plain]) {
+			l1.set(await processedKey(deps, seen, readingView(note, span), 'note.md'), artifact());
+		}
+		settings.current = { ...settings.current, colors: 'invert' };
+
+		expect((await renderedMarkup(paper.source, 'note.md', deps))?.colors).toBe('paper');
+		// The setting, for a block that names no mode; the mode is not in the key.
+		expect((await renderedMarkup(plain.source, 'note.md', deps))?.colors).toBe('invert');
 	});
 });
 

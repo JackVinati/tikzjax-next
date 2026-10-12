@@ -1,4 +1,5 @@
 import { Modal, type App } from 'obsidian';
+import type { ColorMode } from '../types';
 
 /**
  * Pan and zoom one diagram. Upstream #104, and the real answer to #42 and #14 as well — a diagram
@@ -11,22 +12,33 @@ import { Modal, type App } from 'obsidian';
  */
 export class ZoomModal extends Modal {
 	private readonly markup: string;
+	private readonly colors: ColorMode;
 	private scale = 1;
 	private tx = 0;
 	private ty = 0;
 	private surface: HTMLElement | null = null;
 	private dragging: { x: number; y: number } | null = null;
 
-	constructor(app: App, markup: string) {
+	/**
+	 * `colors` is the block's mode. The stored artifact is the same for every mode, which differ only
+	 * in the tokens base.css gives the class — on the figure in the note, and on this surface.
+	 */
+	constructor(app: App, markup: string, colors: ColorMode = 'adapt') {
 		super(app);
 		this.markup = markup;
+		this.colors = colors;
 	}
 
 	override onOpen(): void {
 		this.modalEl.addClass('tikzjax-zoom-modal');
 		this.titleEl.setText('Diagram');
 
-		const surface = this.contentEl.createDiv({ cls: 'tikzjax-zoom-surface' });
+		const surface = this.contentEl.createDiv({
+			cls:
+				this.colors === 'adapt'
+					? 'tikzjax-zoom-surface'
+					: ['tikzjax-zoom-surface', `is-${this.colors}`],
+		});
 		this.surface = surface;
 		// eslint-disable-next-line no-unsanitized/method -- the markup is a stored artifact, which only exists after the mandatory sanitize stage.
 		surface.appendChild(this.contentEl.doc.createRange().createContextualFragment(this.markup));

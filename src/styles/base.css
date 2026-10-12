@@ -279,6 +279,21 @@
 	cursor: grabbing;
 }
 
+/* The block's colour mode, as on the figure in the note: the same tokens, on the zoom surface. */
+.tikzjax-zoom-surface.is-preserve,
+.tikzjax-zoom-surface.is-invert {
+	--tikz-ink: #000;
+	--tikz-paper: #fff;
+}
+.tikzjax-zoom-surface.is-paper {
+	--tikz-ink: #000;
+	--tikz-paper: #fff;
+	background: #fff;
+}
+.theme-dark .tikzjax-zoom-surface.is-invert svg {
+	filter: invert(1) hue-rotate(180deg);
+}
+
 .tikzjax-zoom-surface svg {
 	fill: currentColor;
 	max-width: none;

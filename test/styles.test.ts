@@ -84,4 +84,19 @@ describe('colour modes in base.css', () => {
 		const filter = declarationsOf('.theme-dark .tikzjax-figure.is-invert svg').get('filter');
 		expect(filter).toBe('invert(1) hue-rotate(180deg)');
 	});
+
+	it('gives the zoom view each block mode the figure has, so it draws the diagram the same way', () => {
+		for (const mode of ['preserve', 'paper', 'invert']) {
+			const figure = declarationsOf(`.tikzjax-figure.is-${mode}`);
+			const surface = declarationsOf(`.tikzjax-zoom-surface.is-${mode}`);
+			expect(surface.get('--tikz-ink'), `--tikz-ink for is-${mode}`).toBe(figure.get('--tikz-ink'));
+			expect(surface.get('--tikz-paper'), `--tikz-paper for is-${mode}`).toBe(
+				figure.get('--tikz-paper'),
+			);
+		}
+		expect(declarationsOf('.tikzjax-zoom-surface.is-paper').get('background')).toBe('#fff');
+		expect(declarationsOf('.theme-dark .tikzjax-zoom-surface.is-invert svg').get('filter')).toBe(
+			'invert(1) hue-rotate(180deg)',
+		);
+	});
 });

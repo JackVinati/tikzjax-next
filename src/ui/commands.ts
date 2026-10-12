@@ -4,6 +4,7 @@ import { findTikzBlocks, finalizeBlock, unfinalizeBlock, type TikzBlockSpan } fr
 import { freezeSvg } from '../svg/freeze';
 import { ZoomModal } from './zoom';
 import { STRINGS } from '../ui/strings';
+import type { RenderedDiagram } from '../block/processor';
 
 /**
  * Commands. Upstream #21, #33, #95, #97, #104.
@@ -16,7 +17,7 @@ import { STRINGS } from '../ui/strings';
 export interface CommandDeps {
 	app: App;
 	/** The finished markup for a block's source, or null if it has not been rendered yet. */
-	markupFor(source: string, notePath: string): Promise<string | null>;
+	markupFor(source: string, notePath: string): Promise<RenderedDiagram | null>;
 	/**
 	 * Render every block in a note and resolve once they have all come to rest, or at once when
 	 * `signal` aborts. `failed` is every block that did not end up showing its diagram.
@@ -44,9 +45,9 @@ export function registerCommands(plugin: Plugin, deps: CommandDeps): void {
 		notePath: string,
 		opaque: boolean,
 	): Promise<string | null> => {
-		const markup = await deps.markupFor(span.source, notePath);
-		if (markup === null) return null;
-		return freezeSvg(markup, {
+		const rendered = await deps.markupFor(span.source, notePath);
+		if (rendered === null) return null;
+		return freezeSvg(rendered.markup, {
 			ink: EXPORT_INK,
 			paper: EXPORT_PAPER,
 			opaque,
@@ -169,9 +170,9 @@ export function registerCommands(plugin: Plugin, deps: CommandDeps): void {
 			void (async () => {
 				const span = blockAtCursor(editor);
 				if (!span) return void new Notice('The cursor is not inside a TikZ block.');
-				const markup = await deps.markupFor(span.source, view.file?.path ?? '');
-				if (markup === null) return void new Notice('That diagram has not been rendered yet.');
-				new ZoomModal(app, markup).open();
+				const rendered = await deps.markupFor(span.source, view.file?.path ?? '');
+				if (rendered === null) return void new Notice('That diagram has not been rendered yet.');
+				new ZoomModal(app, rendered.markup, rendered.colors).open();
 			})();
 		},
 	});
@@ -207,10 +208,10 @@ async function finalizeNote(app: App, file: TFile, deps: CommandDeps): Promise<v
 		for (let index = 0; index < spans.length; index++) {
 			const span = spans[index];
 			if (!span) continue;
-			const markup = await deps.markupFor(span.source, file.path);
-			if (markup === null) continue;
+			const rendered = await deps.markupFor(span.source, file.path);
+			if (rendered === null) continue;
 
-			const svg = freezeSvg(markup, {
+			const svg = freezeSvg(rendered.markup, {
 				ink: EXPORT_INK,
 				paper: EXPORT_PAPER,
 				opaque: true,

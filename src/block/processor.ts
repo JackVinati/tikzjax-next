@@ -1,5 +1,5 @@
 import type { App, MarkdownPostProcessorContext } from 'obsidian';
-import type { BakedOptions, BlockOptions, TexHost, TexResult } from '../types';
+import type { BakedOptions, BlockOptions, ColorMode, TexHost, TexResult } from '../types';
 import { normalizeSource } from '../source/normalize';
 import { legacyTidyTikzSource } from '../source/legacy-tidy';
 import { parseDirectives } from '../source/directives';
@@ -219,12 +219,19 @@ export type KeyDeps = Pick<ProcessorDeps, 'settings' | 'budgets' | 'host' | 'pre
  * processor, because it is the processor.
  */
 export function keyFor(source: string, notePath: string, deps: KeyDeps): string | Promise<string> {
-	const prepared = prepare(source, deps, notePath, {
-		isExport: false,
-		budgeted: false,
-		offscreen: false,
-	});
+	const prepared = specFor(source, notePath, deps);
 	return prepared instanceof Promise ? prepared.then((spec) => spec.key) : prepared.key;
+}
+
+function specFor(source: string, notePath: string, deps: KeyDeps): TexJobSpec | Promise<TexJobSpec> {
+	return prepare(source, deps, notePath, { isExport: false, budgeted: false, offscreen: false });
+}
+
+/** A rendered diagram taken out of the note, and the colour mode its block shows it in. */
+export interface RenderedDiagram {
+	markup: string;
+	/** Not in the stored artifact, which is the same for every mode: the block's, or the setting. */
+	colors: ColorMode;
 }
 
 /**
@@ -239,17 +246,18 @@ export async function renderedMarkup(
 	scanned: string,
 	notePath: string,
 	deps: KeyDeps & { cache: DiagramCache },
-): Promise<string | null> {
-	const key = await keyFor(asProcessorSource(scanned), notePath, deps);
-	let artifact = deps.cache.peek(key);
+): Promise<RenderedDiagram | null> {
+	const spec = await specFor(asProcessorSource(scanned), notePath, deps);
+	let artifact = deps.cache.peek(spec.key);
 	if (!artifact) {
 		try {
-			artifact = (await deps.cache.lookup(key, null))?.artifact;
+			artifact = (await deps.cache.lookup(spec.key, null))?.artifact;
 		} catch {
 			artifact = undefined;
 		}
 	}
-	return artifact ? standaloneMarkup(artifact) : null;
+	if (!artifact) return null;
+	return { markup: standaloneMarkup(artifact), colors: spec.options.presentation.colors ?? 'adapt' };
 }
 
 /**
