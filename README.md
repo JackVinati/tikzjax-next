@@ -68,8 +68,13 @@ To load packages or libraries, write them the way a LaTeX file would, ahead of a
 
 …or name them in a `%!tikz` line (below) and keep the block to the picture. A diagram renders when
 it scrolls into view; one you have seen before appears instantly, from the cache, in the same frame
-as the text around it. When TeX reports an error, the block shows it with its line and, where it
-can, what to change; a mistyped macro usually still renders the rest of the diagram.
+as the text around it. When TeX reports an error, the block shows it with its line — or, for an
+error in a preamble file, that file and its line — and, where it can, what to change; a mistyped
+macro usually still renders the rest of the diagram.
+
+Accented letters work as typed, dieresis included (Grüße, naïve, `\"u`), and so do `°` `×` `±`
+`µ` `→`, list bullets and siunitx's units; see the limitations below for the characters that do
+not.
 [`test/vault/TikZ-smoke-test.md`](test/vault/TikZ-smoke-test.md) is a note full of examples to copy
 from.
 
@@ -101,7 +106,8 @@ Options go in the block body, as `%!tikz` lines. They are stripped before the so
 | `preamble` | a `.tex` file in the vault, put in front of the block. See below |
 | `twopass` | runs TeX a second time when the first run left something to re-read, so `\label` and `\ref` resolve. Off by default: it can double the compile time |
 | `wrap` | `auto` (default) wraps the block in `\begin{document}` … `\end{document}` unless it has one; `always` and `never` decide for it |
-| `fast` | skips SVG optimisation and the ink measurement |
+| `fast` | skips SVG optimisation and the pre-flight check, and renders ahead of other diagrams |
+| `svgo` | `off` leaves the engine's SVG as it is; `targeted` and the default `preset` simplify how text is placed and drop an attribute browsers disagree on |
 | `raw` | runs only the mandatory pipeline stages |
 | `nocache` | skips the cache in both directions |
 
@@ -110,8 +116,11 @@ tail during PDF export, in embeds or in hover previews, so the same block would 
 different cache keys and the PDF would get a differently compiled diagram.
 
 The plugin's settings cover colours, lazy rendering, fast mode, the time limit, how the source is
-cleaned up, the pre-flight checks, the TeX log and the cache. Where an option shares its name with a
-setting — `colors`, `lazy`, `timeout`, `fast` — the option wins for its block.
+cleaned up, the pre-flight checks, the preamble files, the TeX log and the cache. A change applies
+to the open notes straight away, also when it arrives from another device through Sync. Where an
+option shares its name with a setting — `colors`, `lazy`, `timeout`, `fast` — the option wins for
+its block. On a phone the time limit setting gives a diagram at most 20 seconds; a block's own
+`timeout` is not capped.
 
 ## Shared preambles
 
@@ -144,12 +153,11 @@ A note:
 Four things can name a preamble file. Every one that applies is used, in this order, so a later
 file can use what an earlier one defines:
 
-1. **The vault-wide preamble**, the `preamblePath` setting. It has no field in the settings tab
-   yet: set it in `.obsidian/plugins/tikzjax-next/data.json`, for example
-   `"preamblePath": "latex/diagrams.tex"`, and reload the plugin.
+1. **The vault-wide preamble**: Settings → Preamble → Preamble file, a path in the vault. The field
+   suggests the vault's `.tex`, `.sty`, `.ltx`, `.def` and `.txt` files as you type.
 2. **A folder preamble**: a file named `tikz-preamble.tex` in the note's folder, or failing that the
    nearest folder above it, up to the root of the vault. Only the nearest one is used. The name is
-   the `autoPreambleName` setting, in the same file; `""` turns the search off.
+   Settings → Preamble → Folder preamble file name; empty turns the search off.
 3. **`%!tikz preamble=path/to/file.tex`** in the block.
 4. **`%:input path/to/file.tex`** lines in the block, in the order they are written. A preamble file
    can `%:input` other files as well.
@@ -163,7 +171,8 @@ nothing.
 
 The contents of every preamble file are part of the cache key of each diagram that uses it. Edit
 the file and those diagrams — and only those — are compiled again the next time they render; a stale
-one is never served from the cache. Open notes in Reading view re-render straight away.
+one is never served from the cache. Open notes re-render straight away, in Reading view and in Live
+Preview. When TeX stops on a line of a preamble file, the error card names the file and the line.
 
 ## Commands
 
@@ -173,7 +182,7 @@ one is never served from the cache. Open notes in Reading view re-render straigh
 | Save the diagram at the cursor as an SVG file | Writes it to your attachment folder. |
 | Finalize the diagrams in this note | Saves each diagram as an attachment and rewrites the note as `![[diagram.svg]]` with the original fence preserved verbatim inside an Obsidian `%%` comment. The point is that the note now renders without this plugin — in Publish, in another editor, on GitHub. |
 | Un-finalize the diagrams in this note | The exact inverse. The source was never thrown away. |
-| Render all diagrams in this note | Ignores lazy rendering and compiles everything now. |
+| Render all diagrams in this note | Ignores lazy rendering and compiles everything now, with a Stop button, and says how many rendered. |
 | Open the diagram at the cursor in a zoom view | A scrollable, zoomable view of one diagram. |
 | Open TikZ diagnostics | The TeX log, the cache key and the compile timings for recent renders. Start here when a diagram does something inexplicable. |
 | Clear the diagram cache | Forgets every diagram this plugin has rendered; each compiles again when it is next shown. |
@@ -229,20 +238,20 @@ Being in the list means the file is there, not that everything in it can work: `
 LuaTeX and `external` needs to run programs, and this engine has neither. What a fixture in
 `test/fixtures/tex` renders end to end through the shipped worker, on every CI run: plain TikZ,
 `pgfplots` including its libraries, `circuitikz`, `chemfig`, `tikz-cd`, `forest`, `mathtools`,
-`xparse`, `tikz-feynhand`, `arrows.meta` and shadings. The `patterns` library loads too, but see
-the limitations below.
+`xparse`, `siunitx`, `tikz-feynhand`, `arrows.meta`, shadings, letters with a dieresis, and `°` `×`
+`→` `±` `µ` with their text commands. The `patterns` library loads too, but see the limitations
+below.
 
 ## Known limitations
 
 | | |
 | --- | --- |
-| `\mathfrak`, `\mathscr`, siunitx's unit symbols | TeX compiles them, and then the diagram fails: the DVI-to-SVG converter has a fixed font table covering only Computer Modern, and it is not extensible from outside. For `\mathfrak` the Euler face and its metrics both ship, so the fix is in `@drgrice1/dvi2html`. `\mathscr` (rsfs) and the unit symbols (the TS1 text companion font) have only their metrics bundled, with no face at all, so a converter change alone would not draw them. |
+| `\mathfrak`, `\mathscr` | TeX compiles them, and then the diagram fails: the DVI-to-SVG converter has a fixed font table, and it has neither the Euler fonts nor rsfs. For `\mathfrak` the Euler face and its metrics both ship, so the fix is in `@drgrice1/dvi2html`. `\mathscr` (rsfs) has only its metrics bundled and no face at all, so it would need a face built as well as a converter change. |
 | `patterns` draws nothing | The driver emits the pattern reference but not the pattern definition. |
 | `chemfig`'s `\schemestart` loses bonds | The bonds are already missing in the DVI, before any JavaScript runs. |
 | `tikz-feynman` | LuaTeX only. `tikz-feynhand` is bundled and works. |
-| Greek, Cyrillic, CJK, IPA, emoji | Not set up in this engine's LaTeX format: TeX leaves them out with an error. Most accented Latin letters work as typed (Dvořák, Erdős, İstanbul, café), as do curly quotes, dashes and `…` — the exact set is measured from the engine and listed in `src/source/native-unicode.ts`. |
-| Letters with a dieresis: ä ö ü ë ï ÿ | The SVG converter has no metrics for the dieresis accent, so the whole diagram fails — also when written as `\"u`. Pre-flight warns before you get there. |
-| `°` `×` `€` `™` `→` typed directly | They come from a font the SVG converter cannot draw, and the diagram fails. Use `$^\circ$`, `$\times$`, `$\rightarrow$`. |
+| Greek, Cyrillic, CJK, IPA, emoji | Not set up in this engine's LaTeX format: TeX leaves them out with an error. Most accented Latin letters work as typed (Dvořák, Erdős, İstanbul, café, Grüße, naïve), as do curly quotes, dashes and `…` — the exact set is measured from the engine and listed in `src/source/native-unicode.ts`. `Ł` and `ł` are the exception: TeX sets them, and the SVG converter then fails on them. |
+| `€` `£` `©` `®` typed directly, `\pounds`, `\textcopyright` | They come from the TS1 text companion font, which the SVG converter cannot draw, and the diagram fails. Pre-flight warns about the typed ones. `°` `×` `±` `µ` `·` `÷` `¬` `§` `¶` `†` `‡` `•` `™` `℃` `←` `↑` `→` `↓` `Ω` and `²` `³` `¹`, their `\text…` commands, siunitx's units (`\degree`, `\micro`, `\ohm` and the rest), `\S`, `\dag` and list bullets do render: they are drawn from the math fonts instead, so `µ` comes out as the italic math `μ`. |
 | Obsidian Sync Standard does not sync `main.js` | It is 11.7 MB, and that plan caps a file at 5 MB. The plugin still installs from the community browser or a release on every device; only syncing the plugin folder itself is affected. The size is the TeX engine — a 156 MiB core dump, gzipped and base64'd — and shrinking it means a smaller engine, not tighter code. |
 | Obsidian Publish | Publish runs no community plugins. Save the diagram as an SVG attachment, or finalize the note, and the result publishes as ordinary content. |
 
@@ -310,12 +319,14 @@ instead of stopping at an interactive prompt. If a diagram exceeds its time budg
 terminated and restarted, and only that diagram fails. In the original, one bad diagram blocked
 every later one until Obsidian was restarted.
 
-**Diagrams render when they scroll into view**, one or two at a time, so a note with thirty of them
-does not lock up the editor.
+**Diagrams render when they scroll into view**, one at a time, so a note with thirty of them does
+not lock up the editor.
 
 **PDF export waits for the diagrams.** The processor returns a promise, which is what Obsidian
-actually awaits before taking the print snapshot. Colours are pinned to black on white for print
-regardless of your theme.
+actually awaits before taking the print snapshot — for at most a minute in all, after which a
+diagram not yet compiled is printed as a short note saying so; "Render all diagrams in this note"
+beforehand makes sure there is none. Colours are pinned to black on white for print regardless of
+your theme.
 
 **Dark mode is handled in CSS, not by rewriting the SVG.** The old plugin string-replaced `black`
 and `white` inside the markup, which could not tell TeX's default ink from a colour you chose, and
