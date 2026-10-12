@@ -21,15 +21,17 @@ export default defineConfig({
 			exclude: ['src/platform/**', 'src/ui/**', 'src/main.ts'],
 			// The table for the terminal, the JSON for CI's job summary.
 			reporter: ['text', 'json-summary'],
-			// Floors, not targets: a little under what the suite measured on 2026-10-12 (statements
-			// 76.9, branches 72.8, functions 67.1, lines 78.6), so a change that lands a pile of untested
-			// code fails `npm run test:coverage` instead of lowering the numbers quietly. Raise them as
-			// the gaps close — the 0% files are listed least-covered-first in CI's job summary.
+			// Floors, not targets: a little under what the suite measured on 2026-10-13 (statements
+			// 92.6, branches 85.8, functions 92.5, lines 95.3; it was 76.9, 72.8, 67.1 and 78.6 the day
+			// before, until 0.1.5's work brought the block lifecycle, the processor, the commands and
+			// the cache under test), so a change that lands a pile of untested code fails
+			// `npm run test:coverage` instead of lowering the numbers quietly. Raise them as the gaps
+			// close — the least-covered files are listed first in CI's job summary.
 			thresholds: {
-				statements: 75,
-				branches: 70,
-				functions: 65,
-				lines: 76,
+				statements: 90,
+				branches: 83,
+				functions: 90,
+				lines: 93,
 			},
 		},
 	},
