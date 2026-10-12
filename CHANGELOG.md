@@ -10,6 +10,8 @@ top of its notes on GitHub, and will not publish a version that has none.
   licence in `vendor/LICENSES/` and the CTAN location it requires. `NOTICE` also lists every TeX
   package the engine bundles, and the two npm packages `buffer` brings in, `base64-js` and
   `ieee754`; their licence texts are in `vendor/LICENSES/npm/`.
+- New: `CONTRIBUTING.md`, `SECURITY.md` (private vulnerability reporting), issue forms for bugs and
+  package requests, and a pull request checklist.
 - Releases run CI's whole gate on the tagged commit before publishing, and publish from a separate
   job that is the only one allowed to write. Their notes start with the section from this file.
 - CI renders every test fixture through the engine and reports test coverage. Dependabot proposes
