@@ -121,6 +121,12 @@ export type Event =
 	| { type: 'ok' }
 	| { type: 'err'; reason: TexErrorKind }
 	| { type: 'timeout' }
+	/**
+	 * The engine was stopped under the job for a reason that is not the job's — the app was
+	 * backgrounded, the engine restarted — so it goes back to be scheduled again. Never a card:
+	 * the diagram did nothing wrong, and nothing is known against it.
+	 */
+	| { type: 'interrupted' }
 	| { type: 'stageThrew' }
 	| { type: 'mounted' }
 	| { type: 'cssChange' }
@@ -349,7 +355,12 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 							{ kind: 'mountErrorCard', reason: event.reason },
 						]);
 			}
-			if (event.type === 'ok' || event.type === 'err' || event.type === 'timeout') {
+			if (
+				event.type === 'ok' ||
+				event.type === 'err' ||
+				event.type === 'timeout' ||
+				event.type === 'interrupted'
+			) {
 				// A settlement with no `slot` before it. The queue tells every owner when a job
 				// starts, but a block that missed the word must not ignore its own result: that was
 				// a second block on the same key, left here unsettled for good while the first one
@@ -383,6 +394,14 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 						{ kind: 'mountErrorCard', reason: 'timeout' },
 					]);
 				}
+				case 'interrupted':
+					// Back in line at the band it had, with the placeholder still up. An unloaded
+					// block has nobody left to show the diagram to, so it just ends; the next mount
+					// of this key will ask for it again.
+					if (state.unloaded) return go(state, { phase: 'DISPOSED' }, []);
+					return go(state, { phase: 'SCHEDULING', priority: state.priority }, [
+						{ kind: 'submit', priority: state.priority },
+					]);
 				default:
 					return noop(state);
 			}

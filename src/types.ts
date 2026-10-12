@@ -154,6 +154,22 @@ export class TexError extends Error {
 	}
 }
 
+/**
+ * The engine was stopped while this job was in it, for a reason that is not the job's: the app was
+ * backgrounded, the engine was restarted, or the plugin is unloading.
+ *
+ * Deliberately not a TexError. Every TexError ends on an error card, and this must not: the
+ * diagram did nothing wrong, so its block goes back to be scheduled again (`interrupted` in
+ * block/machine.ts). It used to arrive as TexError('timeout'), and switching apps on iOS while a
+ * diagram compiled left a card saying it took longer than its time budget.
+ */
+export class InterruptedError extends Error {
+	constructor(reason: string) {
+		super(reason);
+		this.name = 'InterruptedError';
+	}
+}
+
 export interface EngineCapabilities {
 	expl3: boolean;
 	twoPass: boolean;
@@ -169,7 +185,13 @@ export interface TexHost {
 	readonly id: string;
 	readonly capabilities: EngineCapabilities;
 	ready(): Promise<void>;
-	render(job: TexJob, signal: AbortSignal): Promise<TexResult>;
+	/**
+	 * `onRunning` is called when the engine actually starts this job — after any boot, and after
+	 * any job ahead of it — which is when the job's own time budget should start. Aborting
+	 * `signal` abandons the job; a job abandoned mid-run takes its engine with it, because a TeX
+	 * run cannot be interrupted and nothing else could run behind it.
+	 */
+	render(job: TexJob, signal: AbortSignal, onRunning?: () => void): Promise<TexResult>;
 	dispose(): void;
 }
 

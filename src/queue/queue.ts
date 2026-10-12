@@ -9,7 +9,13 @@
  * accounting at all, so one wedged render blocks every later diagram until Obsidian restarts
  * (upstream #18 #23 #27 #39 #51 #82 #85 #89, ~22 reporters). Here the `finally` that frees a slot
  * is attached to the *race*, not to the job — so a compile that never settles costs one slot for
- * `timeoutMs` and nothing afterwards.
+ * `startupMs + timeoutMs` and nothing afterwards.
+ *
+ * A job's time is counted in two parts. `timeoutMs` is the diagram's own budget, and it starts when
+ * the runner says the job has reached the engine (`running`), not when the queue hands it over:
+ * booting the engine is not the diagram's work, and on a phone it is seconds of it. Until then the
+ * job is in its startup, bounded by `startupMs`; one that never gets there is `stalled`, which
+ * says nothing about the diagram and so poisons nothing.
  */
 
 /** 0 export/print · 1 visible · 2 within rootMargin · 3 prefetch / manual / zero-record fallback. */
@@ -28,16 +34,23 @@ export interface QueueTimers {
 export type QueueRejectionKind =
 	/** Outlived `timeoutMs`. The job's signal is aborted and its key is poisoned for the session. */
 	| 'timeout'
+	/**
+	 * Started, but never reached the engine within `startupMs`: the engine did not come up. The
+	 * job's signal is aborted so the runner can stop waiting on it; the key is NOT poisoned,
+	 * because the diagram never ran.
+	 */
+	| 'stalled'
 	/** Refused at the door: this key timed out earlier this session, so `run` was never called. */
 	| 'poisoned'
 	/** The queue was over its depth cap and this was the least urgent job waiting in it. */
 	| 'depth-cap'
-	/** Released by its last holder before it started. */
+	/** Released by its last holder before it started, or dropped because the queue was closed. */
 	| 'cancelled';
 
 /**
  * Distinguishable so the caller can branch on a kind rather than parse a message: `depth-cap` and
- * `cancelled` mount a "Render diagram" button, `timeout` and `poisoned` mount an error card.
+ * `cancelled` mount a "Render diagram" button; `timeout`, `stalled` and `poisoned` mount an error
+ * card, each with its own copy.
  */
 export class QueueError extends Error {
 	readonly kind: QueueRejectionKind;
@@ -108,8 +121,19 @@ export interface SubmitOptions {
 export interface RenderQueueOptions<J, T> {
 	concurrency: number;
 	depthCap: number;
-	run: (job: J, signal: AbortSignal) => Promise<T>;
+	/**
+	 * Do the job. Call `running` once it has reached whatever actually runs it: that is when its
+	 * `timeoutMs` starts. Called any later, or more than once, it is ignored.
+	 */
+	run: (job: J, signal: AbortSignal, running: () => void) => Promise<T>;
 	timers: QueueTimers;
+	/**
+	 * How long a started job may take to call `running` before it is given up as `stalled`.
+	 *
+	 * Omitted: no startup at all — the job is running from the moment it starts, which is right
+	 * for a runner with nothing to wait for.
+	 */
+	startupMs?: number | undefined;
 }
 
 interface Entry<J, T> {
@@ -142,13 +166,15 @@ interface Entry<J, T> {
 }
 
 /** Folded rather than thrown, so the losing side of the race can never be an unhandled rejection. */
-type Outcome<T> = { kind: 'ok'; value: T } | { kind: 'error'; error: unknown } | { kind: 'timeout' };
+type Outcome<T> =
+	{ kind: 'ok'; value: T } | { kind: 'error'; error: unknown } | { kind: 'timeout' } | { kind: 'stalled' };
 
 export class RenderQueue<J, T> {
 	private readonly concurrency: number;
 	private readonly depthCap: number;
-	private readonly run: (job: J, signal: AbortSignal) => Promise<T>;
+	private readonly run: (job: J, signal: AbortSignal, running: () => void) => Promise<T>;
 	private readonly timers: QueueTimers;
+	private readonly startupMs: number | undefined;
 
 	/** Every live key, pending or started. This map is what makes dedup work across both states. */
 	private readonly entries = new Map<string, Entry<J, T>>();
@@ -157,12 +183,15 @@ export class RenderQueue<J, T> {
 
 	private inflight = 0;
 	private seq = 0;
+	private paused = false;
+	private closed = false;
 
 	constructor(opts: RenderQueueOptions<J, T>) {
 		this.concurrency = Math.max(1, Math.floor(opts.concurrency));
 		this.depthCap = Math.max(1, Math.floor(opts.depthCap));
 		this.run = opts.run;
 		this.timers = opts.timers;
+		this.startupMs = opts.startupMs;
 	}
 
 	/** Jobs waiting for a slot. Started jobs are not counted; the depth cap is over this number. */
@@ -188,9 +217,48 @@ export class RenderQueue<J, T> {
 		else this.poisoned.delete(key);
 	}
 
+	/**
+	 * Start nothing new until `resume`. A job already started carries on; submissions still queue.
+	 *
+	 * For the phone being backgrounded: the worker is killed to give its memory back, the job that
+	 * was in it is resubmitted by its block, and starting it straight away would boot a fresh
+	 * worker in the background — undoing the very thing the kill was for.
+	 */
+	pause(): void {
+		this.paused = true;
+	}
+
+	resume(): void {
+		this.paused = false;
+		this.pump();
+	}
+
+	/**
+	 * Refuse everything from here on, and drop everything not yet started: the plugin is unloading.
+	 *
+	 * Without it, the job that unloading interrupts frees its slot in a `finally` that starts the
+	 * next one, and that one boots a worker nothing will ever terminate. Jobs already started are
+	 * left to the runner, whose own teardown settles them.
+	 */
+	close(): void {
+		this.closed = true;
+		for (const entry of this.pending.splice(0)) {
+			this.entries.delete(entry.key);
+			entry.reject(
+				new QueueError('cancelled', entry.key, `${entry.key} was dropped: the plugin is unloading`),
+			);
+		}
+	}
+
 	submit(key: string, job: J, priority: Priority, timeoutMs: number, opts?: SubmitOptions): Promise<T> {
 		// A distinct token per anonymous submission, so two anonymous callers still count as two.
 		const owner = opts?.owner ?? Symbol('tikz-anonymous-owner');
+
+		if (this.closed) {
+			return Promise.reject(
+				new QueueError('cancelled', key, `${key} was refused: the plugin is unloading`),
+			);
+		}
 
 		if (opts?.ignorePoison !== true && this.poisoned.has(key)) {
 			return Promise.reject(
@@ -287,7 +355,7 @@ export class RenderQueue<J, T> {
 	}
 
 	private pump(): void {
-		while (this.inflight < this.concurrency) {
+		while (!this.paused && !this.closed && this.inflight < this.concurrency) {
 			const entry = this.nextToStart();
 			if (entry === undefined) return;
 			this.drop(entry);
@@ -300,39 +368,76 @@ export class RenderQueue<J, T> {
 		this.inflight += 1;
 		const controller = new AbortController();
 		let timerId: number | undefined;
+		let done = false;
+		let running = false;
+
+		// §5.3: a bare setTimeout around the await is not enough — `Worker.terminate()` fires no
+		// message, so the pending deferred inside the host never settles and the await hangs forever.
+		// Racing an explicit timer is the contract. Built before `run` is called, because the runner
+		// may say `running` before it even returns.
+		let expire: (outcome: Outcome<T>) => void = () => undefined;
+		const timer = new Promise<Outcome<T>>((settle) => {
+			expire = settle;
+		});
+
+		// Re-armed rather than fired when a caller who joined *after* the start raised the deadline:
+		// an export (30 s) that dedups onto an already-compiling visible block (10 s) must not be cut
+		// at 10 s and have its key poisoned for the session by a compile that was never given its own
+		// budget. Waiting only the difference not yet waited keeps the total exact without a clock,
+		// which this module has no business holding.
+		let armed = 0;
+		const arm = (): void => {
+			const remaining = entry.timeoutMs - armed;
+			armed = entry.timeoutMs;
+			timerId = this.timers.setTimeout(() => {
+				if (entry.timeoutMs > armed) arm();
+				else expire({ kind: 'timeout' });
+			}, remaining);
+		};
+
+		// The job reached the engine: its own budget starts now, and not a moment before.
+		const begin = (): void => {
+			if (running || done) return;
+			running = true;
+			if (timerId !== undefined) this.timers.clearTimeout(timerId);
+			try {
+				arm();
+			} catch (error) {
+				// Called back from the runner, outside the `try` below; a broken timer seam must still
+				// end the job rather than leave it unbounded.
+				expire({ kind: 'error', error });
+			}
+		};
 
 		try {
 			for (const onStart of entry.owners.values()) notify(onStart);
 
-			// §5.3: a bare setTimeout around the await is not enough — `Worker.terminate()` fires no
-			// message, so the pending deferred inside the host never settles and the await hangs
-			// forever. Racing an explicit timer is the contract.
+			if (this.startupMs === undefined) {
+				running = true;
+				arm();
+			} else {
+				timerId = this.timers.setTimeout(() => expire({ kind: 'stalled' }), this.startupMs);
+			}
+
 			const outcome = await Promise.race<Outcome<T>>([
-				this.invoke(entry.job, controller.signal),
-				new Promise<Outcome<T>>((settle) => {
-					// Re-armed rather than fired when a caller who joined *after* the start raised the
-					// deadline: an export (30 s) that dedups onto an already-compiling visible block
-					// (10 s) must not be cut at 10 s and have its key poisoned for the session by a
-					// compile that was never given its own budget. Waiting only the difference not yet
-					// waited keeps the total exact without a clock, which this module has no business
-					// holding.
-					let armed = 0;
-					const arm = (): void => {
-						const remaining = entry.timeoutMs - armed;
-						armed = entry.timeoutMs;
-						timerId = this.timers.setTimeout(() => {
-							if (entry.timeoutMs > armed) arm();
-							else settle({ kind: 'timeout' });
-						}, remaining);
-					};
-					arm();
-				}),
+				this.invoke(entry.job, controller.signal, begin),
+				timer,
 			]);
 
 			if (outcome.kind === 'ok') {
 				entry.resolve(outcome.value);
 			} else if (outcome.kind === 'error') {
 				entry.reject(outcome.error);
+			} else if (outcome.kind === 'stalled') {
+				const error = new QueueError(
+					'stalled',
+					entry.key,
+					`the engine did not take ${entry.key} within ${this.startupMs ?? 0}ms`,
+				);
+				// Aborted so the runner stops waiting on whatever never came up. Not poisoned: the
+				// diagram never ran, so nothing is known against it.
+				controller.abort(error);
+				entry.reject(error);
 			} else {
 				const error = new QueueError('timeout', entry.key, `render exceeded ${entry.timeoutMs}ms`);
 				// Session-scoped: one wedging block must not starve the vault for the rest of the
@@ -350,6 +455,7 @@ export class RenderQueue<J, T> {
 			// the guarantee is structural rather than by inspection of the code above.
 			entry.reject(error);
 		} finally {
+			done = true;
 			if (timerId !== undefined) this.timers.clearTimeout(timerId);
 			this.inflight -= 1;
 			this.entries.delete(entry.key);
@@ -358,9 +464,9 @@ export class RenderQueue<J, T> {
 	}
 
 	/** Never rejects. Folding both settlements into a value is what keeps the losing racer quiet. */
-	private invoke(job: J, signal: AbortSignal): Promise<Outcome<T>> {
+	private invoke(job: J, signal: AbortSignal, running: () => void): Promise<Outcome<T>> {
 		try {
-			return this.run(job, signal).then(
+			return this.run(job, signal, running).then(
 				(value): Outcome<T> => ({ kind: 'ok', value }),
 				(error: unknown): Outcome<T> => ({ kind: 'error', error }),
 			);

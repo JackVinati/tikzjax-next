@@ -4,7 +4,7 @@ import { installObsidianDom } from './stubs/obsidian-dom';
 import { TikzBlock, type BlockDeps, type TexJobSpec } from '../src/block/render-child';
 import { RenderQueue } from '../src/queue/queue';
 import type { Artifact, BlockOptions, EngineCapabilities, TexHost, TexResult } from '../src/types';
-import { TexError } from '../src/types';
+import { InterruptedError, TexError } from '../src/types';
 
 beforeAll(() => {
 	installObsidianDom(window as unknown as Window & typeof globalThis);
@@ -267,7 +267,7 @@ interface Run {
 }
 
 /** The real RenderQueue on real timers, with a runner the test settles by hand. */
-function realQueue() {
+function realQueue(startupMs?: number) {
 	const runs: Run[] = [];
 	const queue = new RenderQueue<TexJobSpec, TexResult>({
 		concurrency: 1,
@@ -278,6 +278,7 @@ function realQueue() {
 			setTimeout: (fn, ms) => window.setTimeout(fn, ms),
 			clearTimeout: (id) => window.clearTimeout(id),
 		},
+		...(startupMs === undefined ? {} : { startupMs }),
 	});
 	return { queue, runs };
 }
@@ -365,5 +366,72 @@ describe('two blocks showing the same diagram', () => {
 		runs[0]?.resolve(RESULT);
 		await vi.waitFor(() => expect(exportDone.done).toBe(true));
 		expect(el.querySelector('svg')).not.toBeNull();
+	});
+});
+
+describe('a compile the engine was stopped under', () => {
+	/**
+	 * Backgrounding iOS kills the worker, and so do "Restart the TeX engine" and a neighbour's
+	 * timeout. The diagram did nothing wrong, and used to get a card saying it took too long.
+	 */
+	it('runs again and mounts, with no error card in between', async () => {
+		const { queue, runs } = realQueue();
+		const el = container();
+		const child = new TikzBlock(el, spec(), deps({ queue }));
+		const done = tracked(child);
+		child.onload();
+		await vi.waitFor(() => expect(runs).toHaveLength(1));
+
+		runs[0]?.reject(new InterruptedError('the app was backgrounded'));
+		await vi.waitFor(() => expect(runs).toHaveLength(2));
+		expect(el.querySelector('.tikzjax-error')).toBeNull();
+		expect(el.querySelector('.tikzjax-placeholder')).not.toBeNull();
+		expect(done.done).toBe(false);
+
+		runs[1]?.resolve(RESULT);
+		await vi.waitFor(() => expect(done.done).toBe(true));
+		expect(el.querySelector('svg')).not.toBeNull();
+		expect(el.querySelector('.tikzjax-error')).toBeNull();
+	});
+
+	it('says the engine did not start when it never came up — not that the diagram took too long', async () => {
+		// A runner that never reports the job running: a boot that hangs.
+		const { queue, runs } = realQueue(20);
+		const el = container();
+		const child = new TikzBlock(el, spec(), deps({ queue }));
+		child.onload();
+		await child.settled;
+
+		expect(runs).toHaveLength(1);
+		expect(runs[0]?.signal.aborted).toBe(true);
+		expect(el.querySelector('.tikzjax-error-message')?.textContent).toBe(
+			'The TeX engine could not start.',
+		);
+		expect(queue.isPoisoned('K')).toBe(false);
+	});
+
+	it('brings both blocks of a shared compile back', async () => {
+		const { queue, runs } = realQueue();
+		const a = container();
+		const b = container();
+		const first = new TikzBlock(a, spec(), deps({ queue }));
+		const second = new TikzBlock(b, spec(), deps({ queue }));
+		const secondDone = tracked(second);
+		first.onload();
+		await vi.waitFor(() => expect(runs).toHaveLength(1));
+		second.onload();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+
+		runs[0]?.reject(new InterruptedError('restarted from the command palette'));
+		await vi.waitFor(() => expect(runs).toHaveLength(2));
+		// Re-submitted by both, compiled once.
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(runs).toHaveLength(2);
+
+		runs[1]?.resolve(RESULT);
+		await vi.waitFor(() => expect(secondDone.done).toBe(true));
+		await expect(first.settled).resolves.toBeUndefined();
+		expect(a.querySelector('svg')).not.toBeNull();
+		expect(b.querySelector('svg')).not.toBeNull();
 	});
 });

@@ -1,7 +1,7 @@
 import { Notice, Platform, Plugin } from 'obsidian';
 import { COLD_FONT_CSS } from 'virtual:fonts';
 
-import type { Budgets, TexResult } from './types';
+import { TexError, type Budgets, type TexResult } from './types';
 import type { EngineInventory } from '../engine-src/protocol';
 import { WorkerHost } from './engine/worker-host';
 import { budgetsFor } from './platform/budgets';
@@ -37,7 +37,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 	private host: WorkerHost | null = null;
 	private queue: RenderQueue<TexJobSpec, TexResult> | null = null;
 	private viewport: ViewportGate | null = null;
-	private budgets: Budgets = budgetsFor(false, 4);
+	private budgets: Budgets = budgetsFor(false);
 	private readonly touchedDocuments = new Set<Document>();
 	private preamble: PreambleService | null = null;
 
@@ -60,15 +60,20 @@ export default class TikzjaxNextPlugin extends Plugin {
 			return;
 		}
 
-		this.budgets = budgetsFor(Platform.isMobile, navigator.hardwareConcurrency || 4);
-		if (this.settings.concurrency > 0 && !Platform.isMobile) {
-			this.budgets = { ...this.budgets, concurrency: this.settings.concurrency };
-		}
+		// `settings.concurrency` is deliberately not read: there is one worker, and it runs one job at
+		// a time, so a second slot would only queue a job inside the worker with its clock running.
+		// See DESKTOP.concurrency in platform/budgets.ts.
+		this.budgets = budgetsFor(Platform.isMobile);
 		if (this.settings.timeoutSeconds > 0) {
 			this.budgets = { ...this.budgets, timeoutMs: this.settings.timeoutSeconds * 1000 };
 		}
 
-		this.host = new WorkerHost();
+		const timers = {
+			setTimeout: (fn: () => void, ms: number) => window.setTimeout(fn, ms),
+			clearTimeout: (id: number) => window.clearTimeout(id),
+		};
+
+		this.host = new WorkerHost({ idleTeardownMs: this.budgets.idleTeardownMs, timers });
 		this.preamble = new PreambleService(this.app, sha256Hex);
 		this.cache = new DiagramCache({
 			// `appId` is real but undocumented, so it is not on the public App type. It is what
@@ -84,11 +89,11 @@ export default class TikzjaxNextPlugin extends Plugin {
 		this.queue = new RenderQueue<TexJobSpec, TexResult>({
 			concurrency: this.budgets.concurrency,
 			depthCap: this.budgets.queueDepthCap,
-			run: (job, signal) => this.runJob(job, signal),
-			timers: {
-				setTimeout: (fn, ms) => window.setTimeout(fn, ms),
-				clearTimeout: (id) => window.clearTimeout(id),
-			},
+			run: (job, signal, running) => this.runJob(job, signal, running),
+			timers,
+			// A job's own timeout starts when the worker takes it; until then it is waiting on the
+			// boot, which gets this long.
+			startupMs: this.budgets.firstJobGraceMs,
 		});
 
 		this.viewport = new ViewportGate({
@@ -244,8 +249,16 @@ export default class TikzjaxNextPlugin extends Plugin {
 		this.preamble?.clear();
 		this.keysBySource.clear();
 		this.viewport?.disconnect();
+		// The queue is closed BEFORE the host goes. Disposing interrupts the running job, its slot
+		// is freed in a `finally` that starts the next one, and a host still reachable from
+		// `runJob` would boot a worker for it that nothing would ever terminate. Obsidian rebuilds
+		// Live Preview widgets ~10 ms after the processor is unregistered, so there is usually a
+		// next one.
+		this.queue?.close();
 		this.queue?.clearPoison();
-		this.host?.dispose();
+		const host = this.host;
+		this.host = null;
+		host?.dispose();
 		this.cache?.dispose();
 		for (const doc of this.touchedDocuments) doc.getElementById('tikzjax-fonts')?.remove();
 		this.touchedDocuments.clear();
@@ -266,24 +279,25 @@ export default class TikzjaxNextPlugin extends Plugin {
 	// -------------------------------------------------------------------------------------------
 
 	/**
-	 * One TeX job. The queue owns the slot, the timeout and the abort; this owns the engine call.
+	 * One TeX job. The queue owns the slot, the clock and the abort; the host owns the worker.
 	 *
-	 * A timeout terminates the worker rather than merely abandoning the wait, because that is the
-	 * only thing that actually stops a TeX run: an asyncify continuation that has suspended cannot
-	 * be resumed. \nonstopmode makes the case far rarer — it is why a broken diagram now reports a
-	 * line number instead of hanging — but it is the optimisation; this is the guarantee.
+	 * A timeout still terminates the worker rather than merely abandoning the wait, because that is
+	 * the only thing that actually stops a TeX run: an asyncify continuation that has suspended
+	 * cannot be resumed. The host does it, on the abort, and only to the worker that job is in —
+	 * this used to kill whichever worker was current, interrupting jobs that had nothing to do with
+	 * the timeout and, after a kill during boot, the next job's fresh worker.
 	 */
-	private async runJob(job: TexJobSpec, signal: AbortSignal): Promise<TexResult> {
+	private runJob(job: TexJobSpec, signal: AbortSignal, running: () => void): Promise<TexResult> {
 		const host = this.host;
-		if (!host) throw new Error('engine unavailable');
-
-		signal.addEventListener('abort', () => host.kill(STRINGS.errTimeout(job.timeoutMs / 1000)), {
-			once: true,
-		});
-
+		if (!host) {
+			return Promise.reject(
+				new TexError('engine-unavailable', [], undefined, undefined, 'the plugin was unloaded'),
+			);
+		}
 		return host.render(
 			{ key: job.key, source: job.source, options: job.texOptions, timeoutMs: job.timeoutMs },
 			signal,
+			running,
 		);
 	}
 
@@ -319,11 +333,19 @@ export default class TikzjaxNextPlugin extends Plugin {
 	 * zero while backgrounded is the difference between surviving and being jetsam-killed. A worker
 	 * holding the full core dump is 156 MiB; giving it back the moment the app is hidden is the
 	 * cheapest insurance available (#111, #91).
+	 *
+	 * A diagram compiling at that moment is interrupted, not failed: its block puts it back in the
+	 * queue. The queue is paused first so that nothing — that job above all — boots a new worker
+	 * while the app is still in the background, and resumed when it comes back.
 	 */
 	private registerTeardown(): void {
 		if (!Platform.isMobile) return;
 		this.registerDomEvent(document, 'visibilitychange', () => {
-			if (document.visibilityState !== 'hidden') return;
+			if (document.visibilityState !== 'hidden') {
+				this.queue?.resume();
+				return;
+			}
+			this.queue?.pause();
 			this.host?.kill('the app was backgrounded');
 			this.cache?.dropMemory();
 		});

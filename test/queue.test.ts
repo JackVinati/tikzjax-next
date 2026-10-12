@@ -99,9 +99,13 @@ class Runs {
 	live = 0;
 	maxLive = 0;
 
-	readonly run = (job: Job, signal: AbortSignal): Promise<string> => {
+	/** How to say "this job has reached the engine", per job, for queues with a startup allowance. */
+	readonly running = new Map<string, () => void>();
+
+	readonly run = (job: Job, signal: AbortSignal, running?: () => void): Promise<string> => {
 		this.started.push(job.id);
 		this.signals.set(job.id, signal);
+		if (running) this.running.set(job.id, running);
 		if (this.throwSync.has(job.id)) throw new Error(`sync boom: ${job.id}`);
 		this.live += 1;
 		this.maxLive = Math.max(this.maxLive, this.live);
@@ -131,7 +135,7 @@ class Runs {
 	}
 }
 
-function harness(opts: { concurrency: number; depthCap: number }) {
+function harness(opts: { concurrency: number; depthCap: number; startupMs?: number }) {
 	const timers = new FakeTimers();
 	const runs = new Runs();
 	const queue = new RenderQueue<Job, string>({
@@ -139,6 +143,7 @@ function harness(opts: { concurrency: number; depthCap: number }) {
 		depthCap: opts.depthCap,
 		run: runs.run,
 		timers,
+		...(opts.startupMs === undefined ? {} : { startupMs: opts.startupMs }),
 	});
 	const submit = (key: string, priority: Priority, timeoutMs = 1000): Tracked<string> =>
 		track(queue.submit(key, { id: key }, priority, timeoutMs));
@@ -775,6 +780,131 @@ describe('timeout and poison', () => {
 		await tick();
 		expect(long.status).toBe('fulfilled');
 		expect(h.queue.isPoisoned('long')).toBe(false);
+	});
+});
+
+describe('the clock starts when the job reaches the engine', () => {
+	/**
+	 * A job's `timeoutMs` is the diagram's budget. Booting the engine is not the diagram's work,
+	 * and on a phone it is seconds of it — so a queue given a startup allowance holds the job's
+	 * clock until the runner says the engine has it.
+	 */
+	it('does not count the startup against the timeout', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		const job = h.submit('k', 1, 100);
+		await tick();
+
+		// A slow boot: far longer than the job's own budget, well inside the allowance.
+		h.timers.advance(3000);
+		await tick();
+		expect(job.status).toBe('pending');
+
+		h.runs.running.get('k')?.();
+		h.timers.advance(99);
+		await tick();
+		expect(job.status).toBe('pending');
+
+		h.timers.advance(1);
+		await tick();
+		expect(isQueueError(job.error, 'timeout')).toBe(true);
+		expect(h.queue.isPoisoned('k')).toBe(true);
+	});
+
+	it('gives up on a job that never reaches the engine, without blaming the diagram', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		const job = h.submit('k', 1, 100);
+		const next = h.submit('next', 1, 100);
+		await tick();
+
+		h.timers.advance(5000);
+		await tick();
+
+		expect(isQueueError(job.error, 'stalled')).toBe(true);
+		// The signal is how the runner learns to stop the boot it is waiting on.
+		expect(h.runs.signals.get('k')?.aborted).toBe(true);
+		// The diagram never ran, so nothing is known against it.
+		expect(h.queue.isPoisoned('k')).toBe(false);
+		expect(h.runs.started).toEqual(['k', 'next']);
+		expect(next.status).toBe('pending');
+	});
+
+	it('ignores a `running` that arrives after the job settled', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		h.submit('k', 1, 100);
+		await tick();
+		h.runs.finish('k');
+		await tick();
+
+		h.runs.running.get('k')?.();
+		expect(h.timers.outstanding).toBe(0);
+	});
+
+	it('honours a deadline raised by a caller who joined during the startup', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		const visible = h.submit('k', 1, 100);
+		await tick();
+		track(h.queue.submit('k', { id: 'k' }, 0, 1000));
+
+		h.runs.running.get('k')?.();
+		h.timers.advance(999);
+		await tick();
+		expect(visible.status).toBe('pending');
+		h.timers.advance(1);
+		await tick();
+		expect(isQueueError(visible.error, 'timeout')).toBe(true);
+	});
+});
+
+describe('pause and close', () => {
+	it('starts nothing while paused, and picks up where it left off', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		h.queue.pause();
+		const job = h.submit('k', 1);
+		await tick();
+		expect(h.runs.started).toEqual([]);
+		expect(h.queue.size()).toBe(1);
+
+		h.queue.resume();
+		await tick();
+		expect(h.runs.started).toEqual(['k']);
+		h.runs.finish('k');
+		await tick();
+		expect(job.status).toBe('fulfilled');
+	});
+
+	it('lets a job already running finish while paused, and starts nothing after it', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		const running = h.submit('a', 1);
+		h.submit('b', 1);
+		await tick();
+		h.queue.pause();
+
+		h.runs.finish('a');
+		await tick();
+		expect(running.status).toBe('fulfilled');
+		expect(h.runs.started).toEqual(['a']);
+	});
+
+	it('close() drops everything waiting and refuses everything after, so nothing is left to start', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		h.submit('a', 1);
+		const waiting = h.submit('b', 1);
+		await tick();
+
+		h.queue.close();
+		await tick();
+		expect(isQueueError(waiting.error, 'cancelled')).toBe(true);
+		expect(h.queue.size()).toBe(0);
+
+		const late = h.submit('c', 1);
+		await tick();
+		expect(isQueueError(late.error, 'cancelled')).toBe(true);
+
+		// The job that was running settles, and its `finally` must not start anything.
+		h.runs.finish('a');
+		await tick();
+		expect(h.runs.started).toEqual(['a']);
+		expect(h.queue.inflightCount()).toBe(0);
 	});
 });
 

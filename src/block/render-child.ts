@@ -1,6 +1,6 @@
 import { MarkdownRenderChild } from 'obsidian';
 import type { Artifact, BlockOptions, Diagnostic, TexHost, TexResult } from '../types';
-import { TexError } from '../types';
+import { InterruptedError, TexError } from '../types';
 import { initialState, reduce, type Effect, type Event, type Priority, type State } from './machine';
 import { renderPlaceholder, renderManualTrigger } from './placeholder';
 import { renderErrorCard, renderWarningChip } from './error-card';
@@ -330,9 +330,15 @@ export class TikzBlock extends MarkdownRenderChild {
 		} catch (error) {
 			if (this.state.phase === 'DISPOSED') return;
 
-			// The queue settles submit() four ways and only `timeout` happens after the job has
-			// started. The other three are PRE-START, which the machine has a distinct event for —
-			// without it an over-cap note leaves every evicted block in SCHEDULING forever.
+			// Not this diagram's doing: the engine was stopped under it. Back in line, no card.
+			if (error instanceof InterruptedError) {
+				this.dispatch({ type: 'interrupted' });
+				return;
+			}
+
+			// Of the queue's own refusals, `timeout` and `stalled` happen after the job has started.
+			// The other three are PRE-START, which the machine has a distinct event for — without it
+			// an over-cap note leaves every evicted block in SCHEDULING forever.
 			if (isQueueError(error, 'depth-cap') || isQueueError(error, 'cancelled')) {
 				this.dispatch({ type: 'rejected', reason: 'depthCap' });
 				return;
@@ -344,6 +350,13 @@ export class TikzBlock extends MarkdownRenderChild {
 			if (isQueueError(error, 'timeout')) {
 				this.failure = new TexError('timeout', []);
 				this.dispatch({ type: 'timeout' });
+				return;
+			}
+			if (isQueueError(error, 'stalled')) {
+				// The engine never came up to take the job. That is what the card says; it is not a
+				// timeout, and the diagram is not poisoned for it.
+				this.failure = new TexError('engine-unavailable', [], undefined, undefined, error.message);
+				this.dispatch({ type: 'err', reason: 'engine-unavailable' });
 				return;
 			}
 

@@ -323,6 +323,50 @@ describe('COMPILING + unload does not cancel a started job', () => {
 });
 
 // -------------------------------------------------------------------------------------------
+// Interruption
+
+describe('a job interrupted through no fault of its own', () => {
+	/**
+	 * The engine was killed under it — the app was backgrounded, the engine restarted — so the
+	 * diagram did nothing wrong and nothing is known against it. It used to arrive as a timeout:
+	 * an error card telling the user to simplify a diagram that never got to run.
+	 */
+	it('COMPILING + interrupted -> SCHEDULING again, at the band it had, with no card', () => {
+		const compiling = drive(initialState(), [
+			...TO_DEBOUNCING,
+			{ type: 'timer', priority: 2 },
+			{ type: 'slot' },
+		]).state;
+		const [state, fx] = reduce(compiling, { type: 'interrupted' });
+		expect(state).toMatchObject({ phase: 'SCHEDULING', priority: 2 });
+		expect(fx).toEqual([{ kind: 'submit', priority: 2 }]);
+		expect(state.settled).toBe(false);
+	});
+
+	it('an interrupted block that was unloaded just goes away', () => {
+		const { state, effects } = drive(stateFor('COMPILING'), [
+			{ type: 'unload' },
+			{ type: 'interrupted' },
+		]);
+		expect(state.phase).toBe('DISPOSED');
+		expect(kinds(effects)).toEqual(['release', 'settle']);
+	});
+
+	it('a block still waiting for its slot is re-submitted, not stranded', () => {
+		const [state, fx] = reduce(stateFor('SCHEDULING'), { type: 'interrupted' });
+		expect(state.phase).toBe('SCHEDULING');
+		expect(fx).toEqual([{ kind: 'submit', priority: 1 }]);
+	});
+
+	it('is a no-op everywhere a job is not in flight', () => {
+		for (const phase of ['MOUNTED', 'FAILED', 'IDLE_MANUAL', 'TRANSFORMING'] as Phase[]) {
+			const before = stateFor(phase);
+			expect(reduce(before, { type: 'interrupted' })[0]).toBe(before);
+		}
+	});
+});
+
+// -------------------------------------------------------------------------------------------
 // Unknown events
 
 describe('unknown events', () => {
@@ -344,6 +388,7 @@ describe('unknown events', () => {
 		{ type: 'ok' },
 		{ type: 'err', reason: 'tex-error' },
 		{ type: 'timeout' },
+		{ type: 'interrupted' },
 		{ type: 'stageThrew' },
 		{ type: 'mounted' },
 		{ type: 'cssChange' },
@@ -357,8 +402,9 @@ describe('unknown events', () => {
 				const [after, fx] = reduce(before, event);
 				if (after === before) {
 					expect(fx).toEqual([]);
-				} else {
-					// A real transition must have changed something observable.
+				} else if (fx.length === 0) {
+					// A real transition must have changed something observable: the state, or — an
+					// interrupted block put back in line at the band it had — what it does next.
 					expect(after).not.toEqual(before);
 				}
 			}
@@ -470,7 +516,7 @@ const LAZY = ['on', 'off', 'manual'] as const;
 /** Every event, including the ones that make no sense where they land. That is the point. */
 function randomEvent(rnd: () => number): Event {
 	const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)] as T;
-	const n = Math.floor(rnd() * 21);
+	const n = Math.floor(rnd() * 22);
 	switch (n) {
 		case 0:
 			return { type: 'load' };
@@ -507,6 +553,8 @@ function randomEvent(rnd: () => number): Event {
 			return { type: 'err', reason: pick(ERROR_KINDS) };
 		case 14:
 			return { type: 'timeout' };
+		case 20:
+			return { type: 'interrupted' };
 		case 15:
 			return { type: 'stageThrew' };
 		case 16:
@@ -607,6 +655,7 @@ describe('property: exactly one settle, over randomised event sequences', () => 
 				{ type: 'unload' } as Event,
 				{ type: 'ok' } as Event,
 				{ type: 'timeout' } as Event,
+				{ type: 'interrupted' } as Event,
 				{ type: 'mounted' } as Event,
 				{ type: 'retry' } as Event,
 			]) {
