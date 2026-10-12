@@ -77,6 +77,32 @@ describe('the line an error card points at', () => {
 		expect(excerpt(second)).toBe('2 | \\newcommand{\\vect}{\\mathbf}\n');
 	});
 
+	/**
+	 * Most saved files end in a newline, and so does the expanded preamble then: its last line is
+	 * empty, and the worker's `\begin{document}` is on a line of its own, just above the block. An
+	 * error TeX reports there — an `\AtBeginDocument` hook, a package's or the TS1 shim's — was put
+	 * on a line of the preamble file that does not exist, with nothing to show for it.
+	 */
+	it('names \\begin{document}, not a line past the end of the file, behind a preamble that ends in a newline', () => {
+		const preamble = {
+			text: '\\usepackage{amsmath}\n',
+			lines: [
+				{ path: 'tikz-preamble.tex', line: 1 },
+				{ path: 'tikz-preamble.tex', line: 2 },
+			],
+		};
+
+		const begin = card(0, { preamble });
+		expect(where(begin)).toBe(
+			'TeX stopped before reaching the diagram, at \\begin{document}: in something a package or the preamble runs as the document starts.',
+		);
+		expect(excerpt(begin)).toBeNull();
+
+		const above = card(-1, { preamble });
+		expect(where(above)).toBe('In the preamble: tikz-preamble.tex, line 1');
+		expect(excerpt(above)).toBe('1 | \\usepackage{amsmath}\n');
+	});
+
 	it('names no block line for an error before the block when there is no preamble', () => {
 		// The one line the plugin writes itself: \nonstopmode, the block's packages and libraries,
 		// \begin{document}. A bad `%!tikz packages=` option fails there.
@@ -89,10 +115,10 @@ describe('the line an error card points at', () => {
 	});
 
 	it('shows the line without a file when nothing says where a preamble line came from', () => {
-		const el = card(0, { preamble: { text: '\\standaloneconfig{border=2pt}', lines: [] } });
+		const el = card(0, { preamble: { text: '\\usepackage{amsmath}', lines: [] } });
 
 		expect(where(el)).toBe('In the preamble, line 1');
-		expect(excerpt(el)).toBe('1 | \\standaloneconfig{border=2pt}\n');
+		expect(excerpt(el)).toBe('1 | \\usepackage{amsmath}\n');
 	});
 
 	it('shows nothing about a line when TeX named none', () => {

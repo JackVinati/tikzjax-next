@@ -21,6 +21,8 @@ export interface ErrorCardOptions {
 	/**
 	 * What TeX was given ahead of the block — the preamble files, expanded — and where each of its
 	 * lines was written (preamble/resolve.ts), for an error TeX met before it reached the block.
+	 * The files' text alone, one line to each entry of `lines`: not the `\standaloneconfig` a
+	 * `border=` adds after it, which the worker's line holds with the rest of what it writes.
 	 */
 	preamble?: { text: string; lines: readonly PreambleLine[] } | undefined;
 	log: string[];
@@ -32,7 +34,9 @@ type Place =
 	| { in: 'block'; line: number; text: string }
 	| { in: 'preamble'; path: string | null; line: number; text: string }
 	/** The one line the worker writes itself: the block's packages and libraries, \begin{document}. */
-	| { in: 'head' };
+	| { in: 'head' }
+	/** `\begin{document}` on a line of its own, below a preamble that ends in a newline. */
+	| { in: 'begin' };
 
 /**
  * `line` is numbered as the block's own lines are, from 1 — pre-flight numbers them that way, and
@@ -41,6 +45,11 @@ type Place =
  * writes the preamble's lines immediately before the block, and everything of its own ahead of them
  * on their first line (engine-src/document.ts). Past the block's last line is the `\end{document}`
  * it was wrapped in, and the last line is the nearest thing the user wrote.
+ *
+ * The worker's `\begin{document}` goes on the end of the preamble's last line. A preamble that ends
+ * in a newline — a saved file usually does — has an empty last line, so there the line is the
+ * worker's alone, and an error on it is in something run as the document starts, an
+ * `\AtBeginDocument` hook. It used to be shown as that empty line, numbered past the file's end.
  */
 function place(line: number, source: string, preamble: ErrorCardOptions['preamble']): Place {
 	if (line >= 1) {
@@ -54,6 +63,7 @@ function place(line: number, source: string, preamble: ErrorCardOptions['preambl
 	const lines = text.split('\n');
 	const index = lines.length + line - 1;
 	if (index < 0) return { in: 'head' };
+	if (line === 0 && text.endsWith('\n')) return { in: 'begin' };
 	const origin = preamble?.lines[index];
 	return {
 		in: 'preamble',
@@ -87,6 +97,11 @@ export function renderErrorCard(container: HTMLElement, options: ErrorCardOption
 			card.createDiv({
 				cls: 'tikzjax-error-where',
 				text: 'TeX stopped before reaching the diagram, on the line that loads its packages and libraries.',
+			});
+		} else if (at.in === 'begin') {
+			card.createDiv({
+				cls: 'tikzjax-error-where',
+				text: 'TeX stopped before reaching the diagram, at \\begin{document}: in something a package or the preamble runs as the document starts.',
 			});
 		} else {
 			if (at.in === 'preamble') {

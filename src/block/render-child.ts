@@ -616,7 +616,7 @@ export class TikzBlock extends MarkdownRenderChild {
 		renderErrorCard(this.body, {
 			diagnostic,
 			source: this.spec.source,
-			preamble: { text: this.spec.texOptions.addToPreamble ?? '', lines: this.spec.preambleLines },
+			preamble: { text: this.spec.options.baked.preamble, lines: this.spec.preambleLines },
 			log: failure.log,
 			onRetry: () => this.dispatch({ type: 'retry' }),
 		});

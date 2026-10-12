@@ -4,7 +4,8 @@ import { installObsidianDom } from './stubs/obsidian-dom';
 import { artifact, processBlock, processorDeps } from './stubs/processor';
 import { fakeApp } from './stubs/vault';
 import { BlockTally, OFFSCREEN_CLASS, rendersDifferently } from '../src/block/processor';
-import type { BlockOutcome } from '../src/block/render-child';
+import type { BlockOutcome, TexJobSpec } from '../src/block/render-child';
+import { buildInput } from '../engine-src/document';
 import { budgetsFor } from '../src/platform/budgets';
 import { DEFAULT_SETTINGS, type TikzSettings } from '../src/settings/schema';
 import { TexError } from '../src/types';
@@ -344,6 +345,58 @@ describe('an error TeX found in a preamble file', () => {
 		);
 		expect(el.querySelector('.tikzjax-error-source span')?.textContent).toBe('2 | \\undefinedmacro\n');
 	});
+
+	/**
+	 * Through the worker's own input (engine-src/document.ts) and the host's arithmetic: TeX blames
+	 * the line `\begin{document}` is on, as it does for an `\AtBeginDocument` hook that fails. Behind
+	 * a file that ends in a newline — most saved files do — that line holds nothing of the user's,
+	 * and the card named a line of the file past its end, with nothing on it. With `border=` too,
+	 * whose `\standaloneconfig` the plugin writes on that same line.
+	 */
+	for (const directives of ['%!tikz lazy=off', '%!tikz lazy=off border=2pt']) {
+		it(`names \\begin{document} for an error on its line (${directives})`, async () => {
+			const app = fakeApp({ 'tikz-preamble.tex': '\\usepackage{amsmath}\n' });
+			const submit = vi.fn(
+				(
+					_key: string,
+					job: TexJobSpec,
+					_band: number,
+					_timeout: number,
+					opts?: { onStart?: () => void },
+				) => {
+					opts?.onStart?.();
+					const input = buildInput(job.source, job.texOptions);
+					const at =
+						input.text.split('\n').findIndex((line) => line.endsWith('\\begin{document}')) + 1;
+					// engine/worker-host.ts: a line of the whole input, made a line of the block.
+					const line = at - input.bodyLine + 1;
+					return Promise.reject(
+						new TexError(
+							'tex-error',
+							['! Undefined control sequence.'],
+							'Undefined control sequence.',
+							line,
+						),
+					);
+				},
+			);
+			const { deps, seen } = processorDeps(
+				{
+					queue: { submit, release: () => undefined } as never,
+					budgets: { ...budgetsFor(false), debounceMs: 0 },
+				},
+				app,
+			);
+
+			const { settled, el } = await processBlock(deps, seen, `${directives}\n${SOURCE}`);
+			await settled;
+			expect(submit).toHaveBeenCalled();
+			expect(el.querySelector('.tikzjax-error-where')?.textContent).toBe(
+				'TeX stopped before reaching the diagram, at \\begin{document}: in something a package or the preamble runs as the document starts.',
+			);
+			expect(el.querySelector('.tikzjax-error-source')).toBeNull();
+		});
+	}
 
 	it('leaves a block with no preamble files nothing to look up', async () => {
 		const { deps, seen } = processorDeps();
