@@ -9,7 +9,7 @@ import { ensureFonts } from './platform/context';
 import { DiagramCache } from './cache';
 import { RenderQueue } from './queue/queue';
 import { ViewportGate } from './block/viewport';
-import { createProcessor, renderedMarkup } from './block/processor';
+import { createProcessor, renderedMarkup, rendersDifferently } from './block/processor';
 import type { TexJobSpec } from './block/render-child';
 import { DEFAULT_SETTINGS, migrateSettings, type TikzSettings } from './settings/schema';
 import { PreambleService } from './preamble/vault';
@@ -31,6 +31,8 @@ export default class TikzjaxNextPlugin extends Plugin {
 	 * anyone gets.
 	 */
 	override settings: TikzSettings = { ...DEFAULT_SETTINGS };
+	/** A copy of the settings the open notes were last processed with. */
+	private shownSettings: TikzSettings = { ...DEFAULT_SETTINGS };
 
 	cache: DiagramCache | null = null;
 
@@ -50,6 +52,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 
 	override async onload(): Promise<void> {
 		this.settings = migrateSettings(await this.loadData());
+		this.shownSettings = { ...this.settings };
 
 		if (this.legacyPluginEnabled()) {
 			// Registering anyway would render every diagram in the vault twice. Refusing loudly is
@@ -61,10 +64,11 @@ export default class TikzjaxNextPlugin extends Plugin {
 		// `settings.concurrency` is deliberately not read: there is one worker, and it runs one job at
 		// a time, so a second slot would only queue a job inside the worker with its clock running.
 		// See DESKTOP.concurrency in platform/budgets.ts.
+		//
+		// Nor is the time limit folded in here any more. The processor reads it per block, so a
+		// change applies to the next diagram rather than after a restart, and a limit set back to 0
+		// falls back to this budget rather than to the value it had at load.
 		this.budgets = budgetsFor(Platform.isMobile);
-		if (this.settings.timeoutSeconds > 0) {
-			this.budgets = { ...this.budgets, timeoutMs: this.settings.timeoutSeconds * 1000 };
-		}
 
 		const timers = {
 			setTimeout: (fn: () => void, ms: number) => window.setTimeout(fn, ms),
@@ -105,7 +109,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 			'tikz',
 			createProcessor({
 				app: this.app,
-				settings: this.settings,
+				settings: () => this.settings,
 				budgets: this.budgets,
 				cache: this.cache,
 				queue: this.queue,
@@ -157,7 +161,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 			app: this.app,
 			markupFor: (source, notePath) =>
 				renderedMarkup(source, notePath, {
-					settings: this.settings,
+					settings: () => this.settings,
 					budgets: this.budgets,
 					host,
 					preamble,
@@ -280,15 +284,35 @@ export default class TikzjaxNextPlugin extends Plugin {
 	 */
 	async saveSettings(): Promise<void> {
 		this.queue?.clearPoison();
+		this.showSettings();
 		await this.saveData(this.settings);
 	}
 
-	/** A Sync-delivered settings change must not serve artifacts built under the old settings. */
+	/**
+	 * Sync, iCloud, Syncthing or git rewrote data.json. Obsidian calls this when the file is newer
+	 * than what the plugin last loaded.
+	 *
+	 * L1 is not dropped, as it used to be: every setting that changes a stored artifact is in its
+	 * key (settings/schema.ts `artifactRevision`, the preamble text), so an artifact built under
+	 * the old settings cannot be served for the new ones, and the rest are applied at mount.
+	 */
 	override onExternalSettingsChange(): void {
 		void this.loadData().then((raw) => {
 			this.settings = migrateSettings(raw);
-			this.cache?.dropMemory();
+			this.queue?.clearPoison();
+			this.showSettings();
 		});
+	}
+
+	/**
+	 * Process the open notes again if the settings now in force would build their blocks
+	 * differently. Neither a change in the tab nor one from Sync used to show until a note was
+	 * reopened: a mounted diagram keeps the colours, the lazy mode and the key it was built with.
+	 */
+	private showSettings(): void {
+		if (!rendersDifferently(this.shownSettings, this.settings)) return;
+		this.shownSettings = { ...this.settings };
+		this.rerenderOpenViews();
 	}
 
 	// -------------------------------------------------------------------------------------------

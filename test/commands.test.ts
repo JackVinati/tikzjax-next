@@ -1,17 +1,14 @@
 // @vitest-environment happy-dom
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { App, Command, Editor, MarkdownPostProcessorContext, MarkdownView, Plugin } from 'obsidian';
+import type { App, Command, Editor, MarkdownView, Plugin } from 'obsidian';
 import { installObsidianDom } from './stubs/obsidian-dom';
 import { shownNotices, TFile } from './stubs/obsidian';
 import { fakeApp } from './stubs/vault';
+import { artifact, processBlock, processorDeps } from './stubs/processor';
 import { asProcessorSource, findTikzBlocks, type TikzBlockSpan } from '../src/note/finalize';
-import { createProcessor, renderedMarkup, type ProcessorDeps } from '../src/block/processor';
+import { renderedMarkup, type ProcessorDeps } from '../src/block/processor';
 import type { TexJobSpec } from '../src/block/render-child';
-import { PreambleService } from '../src/preamble/vault';
-import { budgetsFor } from '../src/platform/budgets';
-import { DEFAULT_SETTINGS } from '../src/settings/schema';
 import { registerCommands } from '../src/ui/commands';
-import type { Artifact, EngineCapabilities, TexHost } from '../src/types';
 
 beforeAll(() => {
 	installObsidianDom(window as unknown as Window & typeof globalThis);
@@ -47,89 +44,9 @@ function livePreview(note: string, span: TikzBlockSpan): string {
 
 // -------------------------------------------------------------------------------------------
 
-const CAPS: EngineCapabilities = { expl3: true, twoPass: false, packages: {}, files: new Set() };
-
-const host: TexHost = {
-	id: 'test-engine',
-	capabilities: CAPS,
-	ready: () => Promise.resolve(),
-	render: () => new Promise(() => undefined),
-	dispose: () => undefined,
-};
-
-function artifact(over: Partial<Artifact> = {}): Artifact {
-	return {
-		v: 1,
-		template:
-			'<svg xmlns="http://www.w3.org/2000/svg" width="100pt" height="50pt" viewBox="-72 -72 100 50">' +
-			'<clipPath id="__TZ__0"><rect width="10" height="10"/></clipPath>' +
-			'<g clip-path="url(#__TZ__0)"><rect width="20" height="20"/></g></svg>',
-		w: 40,
-		h: 20,
-		viewBox: '0 0 40 20',
-		fonts: [],
-		bytes: 200,
-		engineId: 'test-engine',
-		origin: 'render',
-		createdAt: 0,
-		lastUsed: 0,
-		...over,
-	};
-}
-
-/** L1 and L2 as two maps, so a test can put an artifact in either. */
-function tieredCache() {
-	const l1 = new Map<string, Artifact>();
-	const l2 = new Map<string, Artifact>();
-	const cache = {
-		peek: (key: string) => l1.get(key),
-		peekSize: () => undefined,
-		lookup: (key: string, legacy: string | null) => {
-			// The commands must never be handed an L3 record: it has not been through the pipeline.
-			expect(legacy).toBeNull();
-			const hot = l1.get(key);
-			if (hot) return Promise.resolve({ artifact: hot, tier: 'l1' as const });
-			const stored = l2.get(key);
-			if (!stored) return Promise.resolve(undefined);
-			l1.set(key, stored);
-			return Promise.resolve({ artifact: stored, tier: 'l2' as const });
-		},
-		put: (key: string, a: Artifact) => void l1.set(key, a),
-	};
-	return { l1, l2, cache: cache as unknown as ProcessorDeps['cache'] };
-}
-
-function processorDeps(app = fakeApp()) {
-	const { l1, l2, cache } = tieredCache();
-	const seen: TexJobSpec[] = [];
-	const deps: ProcessorDeps = {
-		app,
-		settings: { ...DEFAULT_SETTINGS },
-		budgets: budgetsFor(false),
-		cache,
-		queue: { submit: () => new Promise(() => undefined), release: () => undefined } as never,
-		host,
-		svgo: null,
-		observe: () => undefined,
-		unobserve: () => undefined,
-		ensureFonts: () => undefined,
-		now: () => 0,
-		preamble: new PreambleService(app, (text) => String(text.length)),
-		onBlock: (spec) => void seen.push(spec),
-	};
-	return { deps, seen, l1, l2 };
-}
-
 /** Run the real processor over what Obsidian would hand it, and return the key it derived. */
 async function processedKey(deps: ProcessorDeps, seen: TexJobSpec[], source: string, path: string) {
-	const el = document.body.createDiv();
-	const ctx = { sourcePath: path, addChild: () => undefined } as unknown as MarkdownPostProcessorContext;
-	void createProcessor(deps)(source, el, ctx);
-	// The processor goes async only to resolve a preamble; give it the turns that takes.
-	for (let i = 0; i < 10 && seen.length === 0; i++) await Promise.resolve();
-	const spec = seen.pop();
-	if (!spec) throw new Error('the processor never produced a spec');
-	return spec.key;
+	return (await processBlock(deps, seen, source, { path, load: false })).spec.key;
 }
 
 const only = (spans: TikzBlockSpan[]): TikzBlockSpan => {
@@ -189,7 +106,7 @@ describe('renderedMarkup', () => {
 
 	it('finds it through a preamble the note walks up to', async () => {
 		const app = fakeApp({ 'tikz-preamble.tex': '\\usetikzlibrary{arrows}' });
-		const { deps, seen, l1 } = processorDeps(app);
+		const { deps, seen, l1 } = processorDeps({}, app);
 		const note = '```tikz\n\\draw[->] (0,0) -- (1,0);\n```\n';
 		const span = only(findTikzBlocks(note));
 		const key = await processedKey(deps, seen, livePreview(note, span), 'note.md');
@@ -204,8 +121,11 @@ describe('renderedMarkup', () => {
 		const span = only(findTikzBlocks(note));
 		const key = await processedKey(deps, seen, readingView(note, span), 'note.md');
 		l2.set(key, artifact());
+		const lookup = vi.spyOn(deps.cache, 'lookup');
 
 		await expect(renderedMarkup(span.source, 'note.md', deps)).resolves.not.toBeNull();
+		// Never L3: a legacy record has not been through the pipeline.
+		expect(lookup).toHaveBeenCalledWith(key, null);
 	});
 
 	it('says null for a diagram rendered nowhere on this device', async () => {

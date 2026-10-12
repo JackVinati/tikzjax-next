@@ -29,7 +29,13 @@ import type { PreambleService } from '../preamble/vault';
 
 export interface ProcessorDeps {
 	app: App;
-	settings: TikzSettings;
+	/**
+	 * Read once per block, never held. The plugin REPLACES its settings object when Sync or another
+	 * device rewrites data.json, and the settings tab writes into whichever object is current; a
+	 * processor handed the object at load went on rendering with the old one, and with nothing the
+	 * tab changed after that, until Obsidian restarted.
+	 */
+	settings: () => TikzSettings;
 	budgets: Budgets;
 	cache: DiagramCache;
 	queue: RenderQueue<TexJobSpec, TexResult>;
@@ -131,6 +137,27 @@ export async function renderedMarkup(
 	return artifact ? standaloneMarkup(artifact) : null;
 }
 
+/**
+ * Whether a block on screen would be built differently under `next` than under `previous` — so
+ * whether the open notes have to be processed again to show a settings change.
+ *
+ * Every setting the processor reads into a block's key, its presentation or its warnings. Not the
+ * time limit, the log capture or the legacy import: they only change what the NEXT compile or
+ * lookup does, and the time limit is a text field — each keystroke is a save.
+ */
+export function rendersDifferently(previous: TikzSettings, next: TikzSettings): boolean {
+	return (
+		previous.colors !== next.colors ||
+		previous.lazy !== next.lazy ||
+		previous.svgo !== next.svgo ||
+		previous.fast !== next.fast ||
+		previous.sourceHandling !== next.sourceHandling ||
+		previous.preamblePath !== next.preamblePath ||
+		previous.autoPreambleName !== next.autoPreambleName ||
+		previous.preflight !== next.preflight
+	);
+}
+
 /** Returns the spec directly when nothing has to be read from the vault, a promise when it does. */
 function prepare(
 	source: string,
@@ -138,34 +165,38 @@ function prepare(
 	notePath: string,
 	isExport: boolean,
 ): TexJobSpec | Promise<TexJobSpec> {
-	const parsed = parseDirectives(source, defaultOptions(deps.settings));
+	// Once, so a block whose preamble resolves after a settings change is still built from one
+	// set of settings rather than half of each.
+	const settings = deps.settings();
+	const parsed = parseDirectives(source, defaultOptions(settings));
 
 	const needsPreamble =
 		parsed.preamblePath !== null ||
 		parsed.inputs.length > 0 ||
-		deps.settings.preamblePath !== '' ||
-		deps.settings.autoPreambleName !== '';
+		settings.preamblePath !== '' ||
+		settings.autoPreambleName !== '';
 
-	if (!needsPreamble) return buildSpec(parsed, deps, isExport, null);
+	if (!needsPreamble) return buildSpec(parsed, settings, deps, isExport, null);
 
 	return deps.preamble
 		.resolve({
-			globalPath: deps.settings.preamblePath || null,
-			walkUpName: deps.settings.autoPreambleName,
+			globalPath: settings.preamblePath || null,
+			walkUpName: settings.autoPreambleName,
 			blockPath: parsed.preamblePath,
 			inputs: parsed.inputs,
 			notePath,
 		})
-		.then((resolved) => buildSpec(parsed, deps, isExport, resolved));
+		.then((resolved) => buildSpec(parsed, settings, deps, isExport, resolved));
 }
 
 function buildSpec(
 	parsed: ReturnType<typeof parseDirectives>,
+	settings: TikzSettings,
 	deps: KeyDeps,
 	isExport: boolean,
 	resolved: Awaited<ReturnType<PreambleService['resolve']>> | null,
 ): TexJobSpec {
-	const { settings, budgets } = deps;
+	const { budgets } = deps;
 	const options = parsed.options;
 
 	if (resolved) {

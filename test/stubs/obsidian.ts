@@ -8,7 +8,41 @@
  * No constructor parameter properties: `erasableSyntaxOnly` forbids them project-wide, and this
  * file is typechecked with everything else.
  */
+/**
+ * Obsidian's lifecycle, as far as the plugin leans on it: `load` runs `onload` and then loads the
+ * children, `unload` unloads the children, runs what was registered, then `onunload`, and a child
+ * added to a loaded parent is loaded on the spot — which is what `ctx.addChild` does to a block.
+ */
 export class Component {
+	private loaded = false;
+	private readonly children: Component[] = [];
+	private readonly cleanups: (() => void)[] = [];
+
+	load(): void {
+		if (this.loaded) return;
+		this.loaded = true;
+		this.onload();
+		for (const child of this.children) child.load();
+	}
+
+	unload(): void {
+		if (!this.loaded) return;
+		this.loaded = false;
+		for (const child of this.children.splice(0)) child.unload();
+		for (const cleanup of this.cleanups.splice(0)) cleanup();
+		this.onunload();
+	}
+
+	addChild<T extends Component>(child: T): T {
+		this.children.push(child);
+		if (this.loaded) child.load();
+		return child;
+	}
+
+	register(cleanup: () => void): void {
+		this.cleanups.push(cleanup);
+	}
+
 	onload(): void {}
 	onunload(): void {}
 }
