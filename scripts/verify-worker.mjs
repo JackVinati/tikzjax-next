@@ -17,8 +17,7 @@ import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 
 import { join, basename } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import esbuild from 'esbuild';
-import { engineAssetsPlugin, engineIsBuilt } from './engine-assets.mjs';
+import { buildWorker, engineIsBuilt } from './engine-assets.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const FIXTURES = join(root, 'test', 'fixtures', 'tex');
@@ -30,18 +29,10 @@ if (!engineIsBuilt(root)) {
 	process.exit(2);
 }
 
+// The production build's worker, minified and carrying its ENGINE_ID, from the same function the
+// build calls, so the string evaluated here is the one a release puts into main.js.
 console.log('Bundling the worker…');
-const built = await esbuild.build({
-	entryPoints: [join(root, 'engine-src', 'worker.ts')],
-	bundle: true,
-	write: false,
-	format: 'iife',
-	platform: 'browser',
-	target: 'es2022',
-	logLevel: 'warning',
-	plugins: [engineAssetsPlugin(root)],
-});
-const workerSource = built.outputFiles[0].text;
+const { source: workerSource, engineId } = await buildWorker(root);
 console.log(`  ${(workerSource.length / 1048576).toFixed(2)} MB\n`);
 
 // --- boot it ---------------------------------------------------------------------------------
@@ -64,6 +55,12 @@ const bootMs = Date.now() - t0;
 const ready = inbox.find((m) => m.type === 'ready');
 if (!ready) {
 	console.error('Worker never signalled ready. Messages:', inbox);
+	process.exit(1);
+}
+// The id is written into the bundle after it is hashed. A worker announcing anything else — the
+// placeholder, or an id from another build — would key every diagram it renders wrongly.
+if (ready.engineId !== engineId || ready.inventory.engineId !== engineId) {
+	console.error(`Worker announced ENGINE_ID ${ready.engineId}, the build computed ${engineId}.`);
 	process.exit(1);
 }
 console.log(

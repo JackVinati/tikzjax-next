@@ -3,7 +3,7 @@ import { mkdir, copyFile, writeFile, access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import process from 'node:process';
 import esbuild from 'esbuild';
-import { engineAssetsPlugin, buildEngineAssets, engineIsBuilt } from './engine-assets.mjs';
+import { buildWorker as buildEngineWorker, engineIsBuilt } from './engine-assets.mjs';
 import { buildStyles, fontsPlugin } from './gen-styles.mjs';
 import { assertMobileSafe } from './check-mobile.mjs';
 
@@ -42,8 +42,9 @@ const external = ['obsidian', 'electron', ...codemirror, ...lezer, ...builtinMod
  * because it runs as a Worker created from a Blob — Obsidian's community installer only ever
  * fetches main.js, manifest.json and styles.css, so a sibling worker file would not reach users.
  *
- * ENGINE_ID is the sha256 of exactly the bytes we ship. It is a cache-key input: change the
- * worker and every cached diagram is correctly invalidated, no more and no less.
+ * ENGINE_ID is the sha256 of the worker itself (scripts/engine-assets.mjs, buildWorker). It is a
+ * cache-key input: change anything the worker runs and every cached diagram is correctly
+ * invalidated, no more and no less.
  */
 async function buildWorker() {
 	const entry = join(root, 'engine-src', 'worker.ts');
@@ -62,22 +63,7 @@ async function buildWorker() {
 		);
 	}
 
-	const result = await esbuild.build({
-		entryPoints: [entry],
-		bundle: true,
-		write: false,
-		format: 'iife',
-		platform: 'browser',
-		target: 'es2022',
-		minify: prod,
-		sourcemap: false,
-		legalComments: 'none',
-		logLevel: 'warning',
-		plugins: [engineAssetsPlugin(root)],
-	});
-
-	const source = result.outputFiles[0].text;
-	const { engineId, stats, inventory } = buildEngineAssets(root);
+	const { source, engineId, stats, inventory } = await buildEngineWorker(root, { minify: prod });
 	const mb = (n) => `${(n / 1048576).toFixed(2)} MB`;
 	console.log(
 		`  worker ${mb(source.length)}  (wasm ${mb(stats.wasmGz)} + dump ${mb(stats.dumpGz)} gz, ` +

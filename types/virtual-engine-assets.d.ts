@@ -18,7 +18,10 @@ declare module 'virtual:engine-assets' {
 	export const CORE_DUMP_GZ: string;
 	/** TeX input filename -> gzipped contents, base64. */
 	export const TEX_FILES: Record<string, string>;
-	/** sha256 over the engine assets and engine-src/. A cache-key input. */
+	/**
+	 * sha256 of the minified worker bundle that embeds it, the id itself left out
+	 * (scripts/engine-assets.mjs `buildWorker`). A cache-key input.
+	 */
 	export const ENGINE_ID: string;
 	export const INVENTORY: import('../engine-src/protocol').EngineInventory;
 }

@@ -32,7 +32,7 @@ import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import esbuild from 'esbuild';
 import { dvi2html } from '@drgrice1/dvi2html';
-import { buildEngineAssets, engineIsBuilt } from './engine-assets.mjs';
+import { buildWorker, engineIsBuilt } from './engine-assets.mjs';
 import { readEngineFile } from './engine-files.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -482,7 +482,7 @@ export function isNativeUnicode(codepoint: number): boolean {
 `;
 }
 
-const engineId = buildEngineAssets(root).engineId;
+const { engineId } = await buildWorker(root);
 const generated = renderModule(engineId);
 
 console.log(
