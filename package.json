@@ -6,7 +6,7 @@
   "type": "module",
   "private": true,
   "engines": {
-    "node": ">=22.12"
+    "node": "^22.13.0 || ^24.0.0 || >=26.0.0"
   },
   "//": [
     "Two TypeScripts, deliberately. See internal/DECISIONS.md D5.",
@@ -44,7 +44,7 @@
   },
   "dependencies": {
     "@drgrice1/dvi2html": "0.0.7-beta4",
-    "buffer": "^6.0.3",
+    "buffer": "6.0.3",
     "idb": "8.0.4",
     "pako": "3.0.2"
   },
