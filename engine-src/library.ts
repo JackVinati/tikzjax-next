@@ -3,7 +3,7 @@
  *
  * Forked from drgrice1/tikzjax src/library.js @ 461ac15f (GPL-3.0-or-later), which is itself
  * derived from kisonecat/tikzjax. Copyright the original authors: Jim Fowler, Glenn Rice.
- * This file remains GPL-3.0-or-later. See NOTICE.
+ * Modified by JackVinati in 2026, as listed below. This file remains GPL-3.0-or-later. See NOTICE.
  *
  * CHANGES FROM UPSTREAM (see internal/DECISIONS.md D10):
  *

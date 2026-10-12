@@ -2,7 +2,8 @@
  * TeX worker.
  *
  * Forked from drgrice1/tikzjax src/run-tex.js @ 461ac15f (GPL-3.0-or-later). Copyright the
- * original authors: Jim Fowler, Glenn Rice. This file remains GPL-3.0-or-later. See NOTICE.
+ * original authors: Jim Fowler, Glenn Rice. Modified by JackVinati in 2026, as listed below.
+ * This file remains GPL-3.0-or-later. See NOTICE.
  *
  * CHANGES FROM UPSTREAM (internal/DECISIONS.md D10):
  *  - assets are injected at build time instead of fetched from a urlRoot;
