@@ -16,7 +16,7 @@ import { PreambleService } from './preamble/vault';
 import { registerCommands } from './ui/commands';
 import { DebugView, DEBUG_VIEW_TYPE, type RenderRecord } from './ui/debug-view';
 import { sha256Hex } from './cache/sha256';
-import { Component, MarkdownRenderer, MarkdownView, TFile, type WorkspaceLeaf } from 'obsidian';
+import { Component, MarkdownRenderer, TFile, type WorkspaceLeaf } from 'obsidian';
 import { TikzSettingTab } from './settings/tab';
 import { STRINGS } from './ui/strings';
 
@@ -240,12 +240,19 @@ export default class TikzjaxNextPlugin extends Plugin {
 		}
 	}
 
-	/** Nudge open markdown views so invalidated blocks are rebuilt. */
+	/**
+	 * Rebuild the blocks of every open note, in Live Preview as well as in Reading view.
+	 *
+	 * `previewMode.rerender` reaches Reading view only. Live Preview keeps a code block's widget for
+	 * as long as the block's text is unchanged, so after a preamble edit it went on showing the
+	 * diagram built from the old preamble until the note was reopened. `post-processor-change` is
+	 * the event Obsidian fires itself when a plugin registers or unregisters a code-block processor —
+	 * it is how a newly enabled plugin's blocks appear in notes already open — and both views
+	 * rebuild on it: Reading view rerenders, and the editor drops its cached widgets (read in the
+	 * 1.14.4 bundle). A block whose key did not change is an L1 hit, so this costs no compile.
+	 */
 	private rerenderOpenViews(): void {
-		for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
-			const view = leaf.view;
-			if (view instanceof MarkdownView) view.previewMode?.rerender(true);
-		}
+		this.app.workspace.trigger('post-processor-change');
 	}
 
 	override onunload(): void {
