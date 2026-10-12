@@ -4,6 +4,6 @@
       "mathrsfs": ""
     }
   },
-  "note": "upstream #55 #113. KNOWN LIMIT: TeX loads the metric (it is bundled) and the WOFF2 face exists, but dvi2html calls tfmData() itself when parsing the DVI and its built-in table covers only Computer Modern. Fixing this means extending or vendoring @drgrice1/dvi2html.",
+  "note": "upstream #55 #113. KNOWN LIMIT, and a deeper one than \\mathfrak's: TeX loads the metric (rsfs10.tfm is bundled), but dvi2html's built-in table has no rsfs metrics, and no rsfs WOFF2 face ships either. A converter fix alone would not draw it; the face has to be built too.",
   "expect": "unsupported"
 }
