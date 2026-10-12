@@ -63,8 +63,10 @@ export const DEFAULT_SETTINGS: TikzSettings = {
  * shipped plugin cannot offer that, because it bakes `currentColor` and `var(--background-primary)`
  * into the cached artifact.
  *
- * Two unit tests assert this — sensitivity to each included input, and insensitivity to theme and
- * scale — so it is a tested property rather than a hope.
+ * test/settings.test.ts asserts both halves — each setting listed here moves the revision, and
+ * every other setting leaves it alone, the colour mode included — so it is a tested property rather
+ * than a hope. A new setting does not compile there until it is put in one half or the other. Theme
+ * and scale are not settings at all; test/key.test.ts keeps presentation out of the key.
  */
 export function artifactRevision(settings: TikzSettings): string {
 	return JSON.stringify({
