@@ -14,11 +14,27 @@ import { sha256Hex } from './sha256';
 
 /**
  * Bumped ONLY when the shape of a stored `Artifact` changes — not when a pipeline stage changes
- * what goes into `template`. That belongs in `artifactRevision`, which the settings module derives
- * from the enumerated set of byte-affecting settings. Mixing the two would make every settings
- * tweak look like a format migration.
+ * what goes into `template`, which is PIPELINE_REVISION below, and not when a setting does, which
+ * is `artifactRevision` in the settings module. Mixing them would make every settings tweak or
+ * stage fix look like a format migration.
  */
 export const SCHEMA_VERSION = 1;
+
+/**
+ * Bumped when the SVG pipeline (src/svg/) can write a different template for the same inputs.
+ *
+ * The key is a function of the pipeline's inputs, and the artifact is its output, so a stage that
+ * changes what it writes moves no key: without this, the next release would serve every artifact
+ * the previous one stored, built by the code it just fixed. test/pipeline-revision.test.ts
+ * fingerprints the stage modules and fails until the revision is reconsidered.
+ *
+ * Once per release is enough — what matters is that no two RELEASED pipelines share a number.
+ *
+ *   1  everything up to 0.1.4, which had no revision in the key at all.
+ *   2  the colour pass runs for every colour mode (it used to bake preserve and invert in), and
+ *      the sanitizer became an allowlist.
+ */
+export const PIPELINE_REVISION = 2;
 
 /**
  * Fields are length-prefixed rather than joined with a separator.
@@ -36,6 +52,7 @@ function field(s: string): string {
 export function deriveKey(i: KeyInputs): string {
 	const payload =
 		field(`s${SCHEMA_VERSION}`) +
+		field(`p${PIPELINE_REVISION}`) +
 		field(i.engineId) +
 		field(i.normalizedSource) +
 		field(stableStringify(i.baked)) +
