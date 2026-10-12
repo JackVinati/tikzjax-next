@@ -1,4 +1,3 @@
-import type { ColorMode } from '../types';
 import type { Stage } from './pipeline';
 import { sanitizeSvg } from './sanitize';
 import { remapSoftHyphens } from './entities';
@@ -27,11 +26,6 @@ import { targetedTransform, type OptimizeMode } from './optimize';
  * that read it would store one block's mode and serve it to every other (see colors.ts).
  */
 export interface StageOptions {
-	/**
-	 * Accepted and ignored: the stored artifact is the same for every mode. Still in the type only
-	 * because render-child.ts passes it; drop the field when that call stops.
-	 */
-	colors?: ColorMode | undefined;
 	optimize: OptimizeMode;
 }
 

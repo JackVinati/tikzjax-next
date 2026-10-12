@@ -779,6 +779,40 @@ describe('the first measurement', () => {
 	});
 });
 
+describe('blocks in different colour modes', () => {
+	/**
+	 * The mode is not in the key, so one stored template serves every block with the same source.
+	 * The mode used to reach the stages, and whichever block compiled first decided what the others
+	 * were served (svg/colors.ts); now the block hands the pipeline no mode at all.
+	 */
+	it('store the same template', async () => {
+		const restore = measurable();
+		try {
+			const engineSvg =
+				'<svg xmlns="http://www.w3.org/2000/svg" width="100pt" height="50pt" viewBox="-72 -72 100 50">' +
+				'<rect fill="black" width="10" height="10"/><circle fill="white" r="3"/></svg>';
+			const stored: string[] = [];
+			for (const colors of ['adapt', 'preserve', 'paper', 'invert'] as const) {
+				const cache = fakeCache();
+				const put = vi.spyOn(cache, 'put');
+				const child = new TikzBlock(
+					container(),
+					spec({ options: options({ presentation: { colors } }) }),
+					deps({ cache, queue: answering({ svg: engineSvg, log: [], durationMs: 1 }) }),
+				);
+				child.onload();
+				await child.settled;
+				await vi.waitFor(() => expect(put).toHaveBeenCalled());
+				stored.push(put.mock.calls[0]?.[1].template ?? '');
+			}
+			expect(new Set(stored).size).toBe(1);
+			expect(stored[0]).toContain('currentColor');
+		} finally {
+			restore();
+		}
+	});
+});
+
 describe('a diagram TeX recovered from an error in', () => {
 	it('mounts with what TeX reported beside it', async () => {
 		// Only possible because the worker injects \nonstopmode: a diagram that renders with a

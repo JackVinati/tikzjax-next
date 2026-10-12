@@ -25,7 +25,7 @@ import { readText } from './support/read-text';
  */
 const RECORDED = {
 	revision: 2,
-	fingerprint: '90a0802dbdf764739899b04f4cd46f7910a478582330f68f99edeb7b0ea6f102',
+	fingerprint: '8521c219418b7ed838c3e392799800d3ba84b2e981cef2a19d94a42887a14726',
 };
 
 /** Read at runtime rather than at build time, so this tracks the files as they are now. */

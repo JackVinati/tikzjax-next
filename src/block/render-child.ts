@@ -496,14 +496,11 @@ export class TikzBlock extends MarkdownRenderChild {
 			}
 
 			const doc = parseSvg(markup);
-			const result = runPipeline(
-				doc,
-				buildStages({
-					colors: this.spec.options.presentation.colors ?? 'adapt',
-					optimize: mode === 'off' ? 'off' : 'targeted',
-				}),
-				{ raw: this.spec.options.raw },
-			);
+			// No colour mode: every mode mounts the same stored artifact (svg/colors.ts), and a mode
+			// handed in here would be one block's, stored and served to every other.
+			const result = runPipeline(doc, buildStages({ optimize: mode === 'off' ? 'off' : 'targeted' }), {
+				raw: this.spec.options.raw,
+			});
 
 			const template = serializeSvg(result.doc);
 			const previous = this.artifact;

@@ -4,7 +4,6 @@ import { applyColorModel, classifyColor, PAPER_FILL_CLASS, PAPER_STROKE_CLASS } 
 import { applyInkBounds, formatNumber, formatViewBox, parseViewBox } from '../src/svg/geometry';
 import { PipelineError, runPipeline, type Stage } from '../src/svg/pipeline';
 import { buildStages } from '../src/svg/stages';
-import type { ColorMode } from '../src/types';
 
 function parse(svg: string): Document {
 	return new DOMParser().parseFromString(svg, 'image/svg+xml');
@@ -225,18 +224,15 @@ describe("applyColorModel — the author's deliberate white (#15)", () => {
 	 * the pass, the artifact kept literal black and white, and whichever mode rendered a diagram
 	 * first decided what every other mode got: an adapt block served from an invert block's render
 	 * drew black ink on a dark theme, and an invert block served from an adapt block's render was
-	 * filtered from theme ink into dark ink. The modes now differ only in CSS (base.css).
+	 * filtered from theme ink into dark ink. The modes now differ only in CSS (base.css), and the
+	 * stages are not handed a mode at all; test/render-child.test.ts checks the blocks that are.
 	 */
-	it('stores one template for every colour mode', () => {
-		const modes: ColorMode[] = ['adapt', 'preserve', 'paper', 'invert'];
-		const templates = modes.map((colors) => {
-			const result = runPipeline(svgDoc(fixture), buildStages({ colors, optimize: 'targeted' }));
-			return serialize(result.doc);
-		});
+	it('stores ink and paper for the stylesheet to colour, whatever the mode', () => {
+		const template = serialize(runPipeline(svgDoc(fixture), buildStages({ optimize: 'targeted' })).doc);
 
-		expect(new Set(templates).size).toBe(1);
-		expect(templates[0]).toContain('currentColor');
-		expect(templates[0]).toContain(PAPER_FILL_CLASS);
+		expect(template).toContain('currentColor');
+		expect(template).toContain(PAPER_FILL_CLASS);
+		expect(template).not.toContain('black');
 	});
 
 	it('is idempotent, so a re-run over a cached artifact changes nothing', () => {
