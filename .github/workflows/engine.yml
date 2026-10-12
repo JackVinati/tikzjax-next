@@ -48,21 +48,21 @@ jobs:
         # The compressed engine is committed so `npm run build` works in a clean checkout with no
         # Docker (internal/DECISIONS.md D12), which is only honest if it can be checked.
         #
-        # It is checked against what the build can actually promise, and no further. The build is
-        # deterministic GIVEN THE SAME TeX LIVE: the clock is pinned, gzip is called with -n, and two
-        # runs of one image produce identical bytes. It is not deterministic across images, because
-        # `apt-get install texlive` has no version pin — three fresh images produced three different
-        # LaTeX kernels, and core.dump is a snapshot of TeX's memory after reading them.
+        # The build is meant to be deterministic across machines: the TeX clock is pinned, gzip runs
+        # with -n, and the Dockerfile regenerates language.dat with Perl's hash seed fixed. That last
+        # one was missing for a month, and every image wrote language.dat in a random order; latex.ltx
+        # reads it, so every runner produced a different core.dump. It was diagnosed at the time as
+        # "Ubuntu's TeX Live moved" — but Ubuntu 24.04's texlive never changed; this file did.
         #
-        # So the two cases are separated by the `format inputs` hash rather than lumped together:
+        # The `format inputs` hash in BUILD-MANIFEST covers the 146 files the format is built from,
+        # language.dat included, and separates the two ways this step can fail:
         #
-        #   inputs differ  -> the distribution moved. A warning. The committed engine is stale, not
-        #                     wrong, and when to rebuild it is a decision, not an emergency.
+        #   inputs differ  -> something the format reads changed: a texlive update, or a new source of
+        #                     disorder like language.dat was. A warning, with the evidence printed —
+        #                     but no longer a routine one: until the next texlive update it should not
+        #                     fire at all, and if it does, find out which input moved before rebuilding.
         #   inputs match,
-        #   engine differs -> the build stopped being deterministic. That is a real defect and fails.
-        #
-        # Failing on both would paint the badge red permanently for something no commit caused,
-        # which teaches everyone to ignore it — and then the case that matters goes unnoticed too.
+        #   engine differs -> same inputs, different bytes: the build is not deterministic. Fails.
         run: |
           committed=$(git show HEAD:engine-build/out/BUILD-MANIFEST.txt | sed -n 's/^format inputs  *\([0-9a-f]*\).*/\1/p')
           rebuilt=$(sed -n 's/^format inputs  *\([0-9a-f]*\).*/\1/p' engine-build/out/BUILD-MANIFEST.txt)
@@ -81,15 +81,16 @@ jobs:
           echo
 
           if [ -n "$committed" ] && [ -n "$rebuilt" ] && [ "$committed" != "$rebuilt" ]; then
-            echo "::warning::Ubuntu's TeX Live moved since the committed engine was built."
-            echo "Nothing is broken. To adopt it:  npm run engine:image && npm run engine:build, then commit."
+            echo "::warning::The files the TeX format is built from differ from the committed engine's."
+            echo "Do not assume texlive moved: last time it was a config file written in random order."
+            echo "Compare tex-versions.txt above, and the language.dat hash in the image build log,"
+            echo "before rebuilding with: npm run engine:image && npm run engine:build"
             exit 0
           fi
 
           echo "::error::the engine changed while its inputs did not — the build is not deterministic"
           echo "This is the case worth stopping for: same TeX Live, same sources, different bytes."
           exit 1
-          echo "engine-build/out matches a fresh build, byte for byte"
 
       - name: Report what it shipped
         run: |

@@ -42,6 +42,19 @@ RUN if [ "$TEXLIVE" = "apt" ]; then \
         && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* ; \
     fi
 
+# Regenerate the hyphenation config in a FIXED order. Debian's update-language writes
+# language.dat (and language.def, language.dat.lua) by walking a Perl hash, and Perl randomises
+# hash order per process — so every image build got a differently ordered language.dat. latex.ltx
+# reads it while building the format, which made core.dump differ on every image with identical
+# packages. That was misread for a month as "Ubuntu's TeX Live moved" (internal/DECISIONS.md D12):
+# the packages never changed; this file did. Measured in the image: three plain runs, three
+# different sha256; three runs with the seed pinned, one. The printed hash goes into the build
+# log, so the next time two images disagree the cause is one line away.
+RUN if [ "$TEXLIVE" = "apt" ]; then \
+        PERL_HASH_SEED=0 PERL_PERTURB_KEYS=0 update-language \
+        && echo "language.dat $(sha256sum "$(kpsewhich language.dat)" | cut -d' ' -f1)" ; \
+    fi
+
 # net path: current TeX Live. `tie` and `tangle` come from scheme-full, so no apt texlive is
 # installed alongside — two distributions on one PATH is how you get a build that silently
 # tangles one TeX against another's texmf tree.

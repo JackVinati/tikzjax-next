@@ -514,31 +514,37 @@ bytes are a claim CI can check rather than one it has to accept. Two things had 
 The Engine workflow rebuilds from source and then runs `git diff --exit-code -- engine-build/out`.
 A difference means the engine was rebuilt and not committed, or an upstream input moved.
 
-**The guarantee is per-image, and being exact about that took three measurements.** `pins.env` pins
-web2js and tikzjax by commit and the font archive by SHA-256, but the TeX packages come from
-`apt-get install texlive...` against Ubuntu 24.04 with no version pin — that is what `TEXLIVE=apt`
-means.
+**Across machines, and the month it took to get there.** Two runs of one image always produced
+identical bytes: 399 files and both archives, checked. Different images did not, and the reason was
+invisible until `BUILD-MANIFEST` started carrying a hash of the 146 files the format is built from —
+`latex.ltx`, the LaTeX kernel and its configuration, none of which are bundled. Every image had a
+different hash, and the hash was stable within an image.
 
-Two runs of one image produce identical bytes: 399 files and both archives, checked. Three
-different images produced three different engines, and the reason was invisible until
-`BUILD-MANIFEST` started carrying a hash of the 146 files the format is built from — `latex.ltx`
-and the LaTeX kernel, none of which are bundled and none of which appear in `tex_files` or
-`tex-versions.txt`. The three images had three different kernels. The hash is stable within an
-image (computed twice, same answer), so the build is deterministic and its inputs are not.
+That was read, on 2026-09-02, as "Ubuntu's TeX Live moves", and the Engine check was softened to a
+warning on that basis. **The reading was wrong.** Ubuntu 24.04's texlive packages never changed. What
+changed was `language.dat`, the hyphenation configuration Debian's `update-language` writes at
+install time by walking a Perl hash — and Perl randomises hash order per process. Measured in the
+image on 2026-10-12: three plain runs of `update-language`, three different sha256; three runs with
+`PERL_HASH_SEED=0 PERL_PERTURB_KEYS=0`, one. `latex.ltx` reads that file while the format is built,
+so every image produced a different `core.dump`. The Dockerfile now regenerates it with the seed
+pinned, and prints its hash in the build log. The warning had been firing on all seven Engine runs
+since, on a cause that did not exist; a check that is always yellow is read as no check.
 
-That distinction is what the Engine workflow checks, and it is the reason the check does not simply
-diff and fail:
+The engine rebuilt this way renders all 17 SVG-producing fixtures byte-identically to the one it
+replaced — `language.dat` orders hyphenation patterns, which no fixture exercises — but the dump
+bytes differ, so ENGINE_ID moves and every user's cache is recompiled once, with identical results,
+in the release that ships it. That is the price of a build anyone can reproduce.
+
+What the Engine workflow checks now:
 
 | inputs | engine | verdict |
 |---|---|---|
-| same | same | pass, byte for byte |
-| differ | differs | a warning. The distribution moved; the committed engine is stale, not wrong |
-| same | differs | an error. Same TeX Live, same sources, different bytes — a real defect |
+| same | same | pass, byte for byte — the expected result on every run |
+| differ | differs | a warning, with the evidence printed. A texlive update, or another source of disorder like `language.dat` was. Find out which before rebuilding |
+| same | differs | an error. Same inputs, same sources, different bytes — a real defect |
 
-Failing on the middle row would paint the badge red for something no commit caused, and a badge
-that is always red teaches everyone to ignore the row that matters. Pinning every apt version is the
-alternative, and it buys determinism only until the first package is withdrawn from the archive and
-the image stops building at all.
+Pinning every apt version would remove the middle row, and it buys that only until the first package
+is withdrawn from the archive and the image stops building at all.
 
 **What this does not change.** The engine is still built from pinned upstream sources, still
 verified by 21 fixtures and by `verify-fork` asserting byte-identical output against upstream's
