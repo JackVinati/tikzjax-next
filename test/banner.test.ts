@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import { describe, expect, it } from 'vitest';
 import { banners, REPOSITORY } from '../scripts/banner.mjs';
+import { readText } from './support/read-text';
 
 /*
  * main.js, styles.css and manifest.json are all the community store installs, so the repository's
@@ -59,6 +60,21 @@ describe('the banner on the built files', () => {
 			expect(banner.endsWith('*/\n')).toBe(true);
 			expect(banner.slice(2, -3)).not.toContain('*/');
 		}
+	});
+
+	/**
+	 * styles.css is committed as well as built, and its banner names the version: bumping the
+	 * manifest for a release changes what the build writes there. Nothing used to compare the two,
+	 * so the tagged commit's styles.css would have named the version before it while the release
+	 * asset built from it named the right one — and at 0.1.4 the two were the same file, byte for
+	 * byte. The release commit has to carry the rebuilt file (CONTRIBUTING.md, Releases).
+	 */
+	it('heads the committed styles.css, with base.css after it, as the build writes them', () => {
+		const expected = css + readText('src/styles/base.css');
+		expect(
+			readText('styles.css').slice(0, expected.length),
+			'run `npm run build` and commit styles.css',
+		).toBe(expected);
 	});
 
 	it('is the same on every build: no date, no hash, no path from this machine', () => {

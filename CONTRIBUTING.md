@@ -129,8 +129,9 @@ Maintainers only, and in this order, because the store reads `manifest.json` fro
 a release with that version:
 
 1. One commit bumps `version` in `manifest.json` and `package.json`, adds the version to
-   `versions.json` with the `minAppVersion` it needs, and dates its `CHANGELOG.md` section
-   (`## 0.1.5 — 2026-10-20`).
+   `versions.json` with the `minAppVersion` it needs, dates its `CHANGELOG.md` section
+   (`## 0.1.5 — 2026-10-20`), and carries the `styles.css` that `npm run build` writes after the
+   bump: its banner names the version, and `test/banner.test.ts` fails until it is rebuilt.
 2. `git tag -a <version>` on that commit, and push **the tag first**. The release workflow runs CI's
    whole gate on it, checks the tag against the manifest and `versions.json`, builds, attests the
    assets and publishes, with the changelog section at the top of the notes.
