@@ -202,6 +202,25 @@ if (names.includes('broken')) {
 		`${found === 2 ? '\x1b[32mOK  \x1b[0m' : '\x1b[31mFAIL\x1b[0m'}  an error in a three-line ` +
 			`preamble is found on the preamble's line 2: ${found}`,
 	);
+
+	// An error in something run as the document starts, behind a preamble that ends in a newline,
+	// as a saved file usually does. The worker's \begin{document} is then on a line of its own, the
+	// one just above the block, and the card names it only if that is the line TeX blames: 0.
+	const hooked = await send({
+		type: 'render',
+		id: ++id,
+		source: '\\begin{tikzpicture}\\draw (0,0) -- (1,1);\\end{tikzpicture}',
+		options: { addToPreamble: '\\AtBeginDocument{\\undefinedatbegindocument}\n', captureLog: true },
+	});
+	const begin =
+		hooked.line === undefined || hooked.bodyLine === undefined
+			? `l.${hooked.line} with bodyLine ${hooked.bodyLine}`
+			: hooked.line - hooked.bodyLine + 1;
+	if (begin !== 0) failures++;
+	console.log(
+		`${begin === 0 ? '\x1b[32mOK  \x1b[0m' : '\x1b[31mFAIL\x1b[0m'}  an \\AtBeginDocument error ` +
+			`behind a preamble ending in a newline is blamed on the \\begin{document} line, 0: ${begin}`,
+	);
 }
 
 process.exit(failures ? 1 : 0);
