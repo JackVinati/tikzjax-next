@@ -2,7 +2,7 @@
 #
 # Produces tex.wasm + core.dump (from drgrice1/web2js) and the gzipped tex_files + font set
 # (from drgrice1/tikzjax), which together are the engine this plugin ships. See
-# docs/DECISIONS.md D8 for why this is in scope rather than a black box.
+# internal/DECISIONS.md D8 for why this is in scope rather than a black box.
 #
 # Build:  docker build -t tikzjax-engine --build-arg TEXLIVE=apt engine-build
 # Run:    docker run --rm -v "$PWD/engine-build/out:/out" tikzjax-engine

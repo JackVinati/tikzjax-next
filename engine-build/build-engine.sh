@@ -160,7 +160,7 @@ ok "texk/tex.web $(stat -c%s web2js/texk/tex.web) bytes — $(grep -m1 -o "This 
 # The reason this engine can run expl3 at all. If these ever disappear upstream, siunitx v3,
 # forest, tcolorbox and modern chemfig go back to being impossible — so assert, don't assume.
 for ch in changes/expanded.ch changes/strcmp.ch changes/memory.ch; do
-    [ -f "web2js/$ch" ] || die "web2js is missing $ch — see docs/DECISIONS.md D8"
+    [ -f "web2js/$ch" ] || die "web2js is missing $ch — see internal/DECISIONS.md D8"
     ok "$ch present"
 done
 ok "TeX memory pages: $(node -p "require('./web2js/commonMemory.js').pages")"

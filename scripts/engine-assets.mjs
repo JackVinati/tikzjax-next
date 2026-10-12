@@ -11,6 +11,29 @@ import { join } from 'node:path';
 
 export const engineOutDir = (root) => join(root, 'engine-build', 'out');
 
+/**
+ * Every TypeScript file the worker can be built from, in a stable order.
+ *
+ * Found by listing, not named: the id was hashed over a fixed list of three files, so any new file
+ * under engine-src/ — a PR adding engine-src/unicode.ts, which the worker imports — changed the
+ * rendered bytes without changing the id, and every cached diagram built by the old code would have
+ * gone on being served after a fix. A list that has to be kept in step with imports is the bug.
+ *
+ * The original three come first in their original order and anything else follows sorted, so for
+ * today's tree the id is byte-for-byte what it was and no user's cache is invalidated by this change
+ * alone. engine-src/upstream/ is a directory, the pristine reference copy, and is never bundled.
+ */
+export function engineSources(root) {
+	const legacyOrder = ['library.ts', 'worker.ts', 'protocol.ts'];
+	const present = readdirSync(join(root, 'engine-src'), { withFileTypes: true })
+		.filter((e) => e.isFile() && e.name.endsWith('.ts'))
+		.map((e) => e.name);
+	return [
+		...legacyOrder.filter((f) => present.includes(f)),
+		...present.filter((f) => !legacyOrder.includes(f)).sort(),
+	];
+}
+
 export function engineIsBuilt(root) {
 	const out = engineOutDir(root);
 	return existsSync(join(out, 'tex.wasm.gz')) && existsSync(join(out, 'dist', 'tex_files'));
@@ -83,7 +106,7 @@ export function buildEngineAssets(root) {
 	hash.update(wasmGz);
 	hash.update(dumpGz);
 	hash.update(names.join('\n'));
-	for (const file of ['library.ts', 'worker.ts', 'protocol.ts']) {
+	for (const file of engineSources(root)) {
 		// Read as text with the line endings normalised, NOT as bytes. Hashing the bytes made the id
 		// a function of the checkout rather than of the source: a Windows clone gets CRLF and Linux
 		// gets LF, so the same commit produced two different engine ids — and with them two different
