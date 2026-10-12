@@ -12,7 +12,7 @@ import {
 } from './machine';
 import { renderPlaceholder, renderManualTrigger } from './placeholder';
 import { renderErrorCard, renderWarningChip } from './error-card';
-import { measureInk, mountArtifact, withMeasuredBounds } from './mount';
+import { applyBounds, applyScale, measureInk, mountArtifact, withMeasuredBounds } from './mount';
 import type { DiagramCache } from '../cache';
 import type { RenderQueue } from '../queue/queue';
 import { isQueueError } from '../queue/queue';
@@ -509,7 +509,10 @@ export class TikzBlock extends MarkdownRenderChild {
 		if (!bounds || this.state.phase === 'DISPOSED' || !this.artifact) return;
 
 		this.artifact = withMeasuredBounds(this.artifact, bounds);
-		svg.setAttribute('viewBox', this.artifact.viewBox ?? '');
+		// Exactly what every later mount of this artifact will do, so the first one matches them —
+		// and the scale, which had no width to work from until now, is applied from the real one.
+		applyBounds(svg, this.artifact.viewBox);
+		applyScale(this.body, svg, this.spec.options.presentation, this.artifact);
 		if (persist && !this.spec.options.nocache) this.deps.cache.put(this.spec.key, this.artifact);
 	}
 

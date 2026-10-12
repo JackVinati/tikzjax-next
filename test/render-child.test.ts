@@ -614,7 +614,7 @@ describe('the card for a diagram that timed out earlier', () => {
  */
 function measurable(): () => void {
 	const doc = document as unknown as { fonts?: unknown };
-	const proto = window.SVGElement.prototype as unknown as { getBBox?: unknown };
+	const proto = window.SVGSVGElement.prototype as unknown as { getBBox?: unknown };
 	const realBBox = proto.getBBox;
 	Object.defineProperty(doc, 'fonts', { value: { ready: Promise.resolve() }, configurable: true });
 	proto.getBBox = () => ({ x: 0, y: 0, width: 40, height: 20 });
@@ -695,6 +695,42 @@ describe('a pipeline that skipped an optional stage', () => {
 			expect(put).not.toHaveBeenCalled();
 		} finally {
 			pipeline.breakAStage = false;
+			restore();
+		}
+	});
+});
+
+describe('the first measurement', () => {
+	it('reframes the diagram it measured, and applies the scale it could not apply before', async () => {
+		const restore = measurable();
+		try {
+			const cache = fakeCache();
+			const put = vi.spyOn(cache, 'put');
+			const el = container();
+			const engineSvg =
+				'<svg xmlns="http://www.w3.org/2000/svg" width="100pt" height="50pt" viewBox="-72 -72 100 50"><rect width="10" height="10"/></svg>';
+			const child = new TikzBlock(
+				el,
+				spec({ options: options({ presentation: { scale: 2 } }) }),
+				deps({ cache, queue: answering({ svg: engineSvg, log: [], durationMs: 1 }) }),
+			);
+
+			child.onload();
+			await child.settled;
+			await vi.waitFor(() =>
+				expect(el.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 40 20'),
+			);
+
+			const svg = el.querySelector('svg');
+			expect(svg?.getAttribute('width')).toBe('40pt');
+			expect(svg?.getAttribute('height')).toBe('20pt');
+			// Scaled from the measured width, not the engine's.
+			expect(el.querySelector<HTMLElement>('.tikzjax-figure-wrapper')?.style.width).toBe('80px');
+			expect(put).toHaveBeenLastCalledWith(
+				'K',
+				expect.objectContaining({ viewBox: '0 0 40 20', w: 40 }),
+			);
+		} finally {
 			restore();
 		}
 	});

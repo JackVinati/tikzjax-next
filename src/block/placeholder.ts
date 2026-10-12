@@ -22,8 +22,11 @@ export function renderPlaceholder(
 	// (`--x`) and using it here was simply the wrong API. The default shape is a constant and lives
 	// in the stylesheet with the rest of the class; what cannot live there is a MEASURED ratio,
 	// which differs per diagram and is the whole reason the note does not reflow as each one lands.
+	//
+	// The width is in the diagram's user units, which are points — the svg's own `width` is written
+	// in pt — so the cap is in pt too. In px the hole was three quarters of the diagram's width.
 	if (known && known.w > 0 && known.h > 0) {
-		el.setCssStyles({ aspectRatio: `${known.w} / ${known.h}`, maxWidth: `${known.w}px` });
+		el.setCssStyles({ aspectRatio: `${known.w} / ${known.h}`, maxWidth: `${known.w}pt` });
 	}
 	return el;
 }
