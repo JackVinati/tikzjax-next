@@ -21,7 +21,11 @@ export const STRINGS = {
 
 	// Warnings shown beside a diagram that DID render.
 	warnDegraded: (stage: string) => `Rendered with the ${stage} step skipped.`,
-	warnSanitized: 'Removed active content from this diagram.',
+	/** `removed` names the first few things taken out; `more` counts the rest. */
+	warnSanitized: (removed: string, more: number) =>
+		more > 0
+			? `Removed active content from this diagram: ${removed} and ${more} more.`
+			: `Removed active content from this diagram: ${removed}.`,
 	warnRecovered: (error: string) => `TeX reported: ${error}`,
 
 	// Failures: the error card's copy is in engine/hints.ts, which words it from the failure and

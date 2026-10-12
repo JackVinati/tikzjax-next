@@ -34,9 +34,9 @@ export function buildStages(options: StageOptions): Stage[] {
 		{
 			name: 'sanitize',
 			mandatory: true,
-			run: (doc) => {
-				sanitizeSvg(doc);
-			},
+			// What it took out, for the chip under the diagram: the engine emits none of it, so it
+			// came from a raw special, and whoever wrote one should learn why their markup is gone.
+			run: (doc) => sanitizeSvg(doc).map((removal) => removal.detail),
 		},
 		{
 			name: 'entities',

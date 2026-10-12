@@ -779,6 +779,62 @@ describe('the first measurement', () => {
 	});
 });
 
+describe('a diagram the sanitizer took something out of', () => {
+	/**
+	 * `\special{dvisvgm:raw …}` puts markup in the engine's output verbatim, and the sanitizer takes
+	 * out whatever the engine itself never emits. What it took out was returned and then dropped,
+	 * so someone with a legitimate raw special saw their markup vanish and nothing say why.
+	 */
+	it('mounts with a chip naming what was removed, and keeps it on the stored artifact', async () => {
+		const restore = measurable();
+		try {
+			const cache = fakeCache();
+			const put = vi.spyOn(cache, 'put');
+			const el = container();
+			const engineSvg =
+				'<svg xmlns="http://www.w3.org/2000/svg" width="100pt" height="50pt" viewBox="-72 -72 100 50">' +
+				'<g onclick="alert(1)"><rect width="10" height="10"/></g><script>alert(2)</script></svg>';
+			const child = new TikzBlock(
+				el,
+				spec(),
+				deps({ cache, queue: answering({ svg: engineSvg, log: [], durationMs: 1 }) }),
+			);
+
+			child.onload();
+			await child.settled;
+
+			const chip = 'Removed active content from this diagram: onclick=, <script>.';
+			expect(el.querySelector('rect')).not.toBeNull();
+			expect(el.querySelector('script')).toBeNull();
+			expect(el.querySelector('.tikzjax-warning-chip')?.textContent).toBe(chip);
+			// Safe to keep — it is what the sanitizer let through — so it is stored, chip and all.
+			await vi.waitFor(() => expect(put).toHaveBeenCalled());
+			expect(put.mock.calls[0]?.[1].warn).toBe(chip);
+		} finally {
+			restore();
+		}
+	});
+
+	it('says how many more there were past the first three', async () => {
+		const el = container();
+		const engineSvg =
+			'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">' +
+			'<g onclick="a()" onmouseover="b()" onfocus="c()" onblur="d()" onkeyup="e()"/></svg>';
+		const child = new TikzBlock(
+			el,
+			spec(),
+			deps({ queue: answering({ svg: engineSvg, log: [], durationMs: 1 }) }),
+		);
+
+		child.onload();
+		await child.settled;
+
+		expect(el.querySelector('.tikzjax-warning-chip')?.textContent).toBe(
+			'Removed active content from this diagram: onclick=, onmouseover=, onfocus= and 2 more.',
+		);
+	});
+});
+
 describe('blocks in different colour modes', () => {
 	/**
 	 * The mode is not in the key, so one stored template serves every block with the same source.

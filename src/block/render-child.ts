@@ -24,6 +24,9 @@ import { explain } from '../engine/hints';
 import type { PreambleLine } from '../preamble/resolve';
 import { STRINGS } from '../ui/strings';
 
+/** How many of the sanitizer's removals a chip names before it only counts the rest. */
+const SANITIZED_NAMED = 3;
+
 /**
  * One block, from fence to pixels. See internal/DESIGN.md §3.3.
  *
@@ -504,10 +507,15 @@ export class TikzBlock extends MarkdownRenderChild {
 
 			const template = serializeSvg(result.doc);
 			const previous = this.artifact;
-			// What TeX said when it recovered from an error, then what the pipeline skipped. The
-			// first used to be dropped right here, so a diagram with a piece quietly missing showed
-			// nothing at all about it.
-			const warnings = [...(previous?.warn ? [previous.warn] : []), ...result.warnings];
+			// What TeX said when it recovered from an error, what the sanitizer took out, then what
+			// the pipeline skipped. The first used to be dropped right here, so a diagram with a
+			// piece quietly missing showed nothing at all about it, and the second was never shown.
+			const warnings = previous?.warn ? [previous.warn] : [];
+			if (result.notes.length > 0) {
+				const named = result.notes.slice(0, SANITIZED_NAMED);
+				warnings.push(STRINGS.warnSanitized(named.join(', '), result.notes.length - named.length));
+			}
+			warnings.push(...result.warnings);
 			this.artifact = {
 				v: 1,
 				template,

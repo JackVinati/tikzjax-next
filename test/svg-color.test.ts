@@ -505,6 +505,20 @@ describe('runPipeline', () => {
 		).toThrow(PipelineError);
 	});
 
+	it('passes on what a stage says it did, without calling that a degradation', () => {
+		// The sanitizer's removals: the document is safe to keep, and the user should hear why their
+		// markup is gone.
+		const result = runPipeline(svgDoc('<rect/>'), [
+			{ name: 'sanitize', mandatory: true, run: () => ['<script>', 'onclick='] },
+			mark('ids'),
+			{ name: 'quiet', run: () => [] },
+		]);
+
+		expect(result.notes).toEqual(['<script>', 'onclick=']);
+		expect(result.degraded).toBe(false);
+		expect(result.warnings).toEqual([]);
+	});
+
 	it('raw runs only the mandatory stages, and that is not a degradation', () => {
 		const result = runPipeline(svgDoc('<rect/>'), [mark('sanitize'), mark('optimize'), mark('ids')], {
 			raw: true,

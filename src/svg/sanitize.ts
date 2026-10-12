@@ -22,9 +22,10 @@ import { SVG_NS } from './serialize';
  * stored template is mounted with createContextualFragment into an HTML document: the HTML parser
  * re-reads what the XML parser accepted, and the two disagree about where some markup ends.
  *
- * Removal is deliberately not silent. The list returned here is meant for the "removed active
- * content from this diagram" chip on a MOUNTED(degraded) block, so someone with a legitimate raw
- * special learns why their markup vanished instead of filing a rendering bug.
+ * Removal is deliberately not silent. The list returned here becomes the "removed active content
+ * from this diagram" chip under the mounted block (svg/stages.ts, block/render-child.ts), so someone
+ * with a legitimate raw special learns why their markup vanished instead of filing a rendering bug.
+ * Not a degradation: what is left is safe, and is stored with the chip.
  */
 
 /** Elements and attributes we take out, in the shape the warning chip wants. */

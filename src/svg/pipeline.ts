@@ -19,7 +19,11 @@ export interface Stage {
 	readonly name: string;
 	/** `sanitize` and `ids`; see `isMandatory`. */
 	readonly mandatory?: boolean | undefined;
-	run(doc: Document): void;
+	/**
+	 * May return what it did that the user should hear about although nothing failed — the
+	 * sanitizer's removals. Collected into `PipelineResult.notes`.
+	 */
+	run(doc: Document): void | readonly string[];
 }
 
 export interface PipelineOptions {
@@ -38,6 +42,11 @@ export interface PipelineResult<D extends Document = Document> {
 	warnings: string[];
 	/** The names of the stages that threw, in order. */
 	skipped: string[];
+	/**
+	 * What the stages that ran said they did, in order. Not a degradation: the document is what
+	 * they meant it to be, and it may be stored.
+	 */
+	notes: string[];
 }
 
 /** Raised when a stage that may not be skipped fails. The document is not mountable. */
@@ -73,6 +82,7 @@ export function runPipeline<D extends Document>(
 	let current = doc;
 	const warnings: string[] = [];
 	const skipped: string[] = [];
+	const notes: string[] = [];
 
 	for (const stage of stages) {
 		const mandatory = isMandatory(stage);
@@ -81,8 +91,9 @@ export function runPipeline<D extends Document>(
 		const candidate = snapshot(current);
 		const target = candidate ?? current;
 
+		let said: void | readonly string[];
 		try {
-			stage.run(target);
+			said = stage.run(target);
 		} catch (error) {
 			if (mandatory) {
 				// No safe degraded output exists. Without `sanitize` we cannot certify the markup
@@ -102,9 +113,10 @@ export function runPipeline<D extends Document>(
 		}
 
 		if (candidate !== null) current = candidate;
+		if (said) notes.push(...said);
 	}
 
-	return { doc: current, degraded: warnings.length > 0, warnings, skipped };
+	return { doc: current, degraded: warnings.length > 0, warnings, skipped, notes };
 }
 
 /**
