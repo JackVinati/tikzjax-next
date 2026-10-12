@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # The release workflow runs this whole file on the tagged commit before it builds anything. The
+  # tag is pushed before main, so without that the commit a release is cut from would only meet
+  # these checks after it had shipped.
+  workflow_call:
 
 permissions:
   contents: read
@@ -20,6 +24,10 @@ jobs:
       # Actions are pinned by commit with the release in a comment: a tag can be moved to other code
       # after review, a commit cannot. All three run on Node 24; the v4s ran on the retired Node 20.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing after the checkout talks to GitHub, so nothing keeps the token: not npm ci's
+          # install scripts, not the dev tooling, not a test.
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
@@ -160,6 +168,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24

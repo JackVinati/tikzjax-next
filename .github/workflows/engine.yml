@@ -6,8 +6,8 @@ name: Engine
 # found before a release needs it, and on demand.
 on:
   push:
-    # Branches only. A tag push runs the release workflow, which builds and verifies the engine
-    # itself — without this filter both run, and the same fifteen minutes are spent twice.
+    # Branches only. A tag push runs the release workflow, which checks the committed engine through
+    # CI's fixtures itself — without this filter both run, and fifteen minutes are spent for nothing.
     branches:
       - '**'
     paths:
@@ -31,6 +31,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The diff below is local; nothing here pushes, so nothing keeps the token.
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
