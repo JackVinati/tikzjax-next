@@ -59,6 +59,27 @@ export interface TexJobSpec {
 	preflight: Diagnostic[];
 }
 
+/**
+ * How a block came to rest, for the diagnostics view and for "Render all diagrams in this note".
+ *
+ * Reported each time the block comes to rest, so a Retry that mounts is reported again. Both used
+ * to read the one record written when the block was processed, before anything had happened to it:
+ * the view showed every block as "rendering" for good, and the command counted no failures.
+ */
+export interface BlockOutcome {
+	/**
+	 * `ok` compiled and mounted · `cached` mounted from a cache tier · `error` an error card ·
+	 * `manual` a "Render diagram" button · `cancelled` unloaded before it came to rest at all.
+	 */
+	state: 'ok' | 'cached' | 'error' | 'manual' | 'cancelled';
+	tier?: 'l1' | 'l2' | 'l3' | undefined;
+	/** How long TeX ran, for a diagram compiled this time. */
+	durationMs?: number | undefined;
+	/** What the error card says. */
+	message?: string | undefined;
+	log?: string[] | undefined;
+}
+
 export interface BlockDeps {
 	cache: DiagramCache;
 	queue: RenderQueue<TexJobSpec, TexResult>;
@@ -69,6 +90,7 @@ export interface BlockDeps {
 	ensureFonts: (doc: Document) => void;
 	debounceMs: number;
 	now: () => number;
+	report?: ((outcome: BlockOutcome) => void) | undefined;
 }
 
 export class TikzBlock extends MarkdownRenderChild {
@@ -85,6 +107,13 @@ export class TikzBlock extends MarkdownRenderChild {
 	private debounceTimer: number | null = null;
 	private placeholder: HTMLElement | null = null;
 	private body: HTMLElement;
+
+	/** Where the artifact on screen came from: a cache tier, or a compile and how long TeX took. */
+	private origin: { tier: 'l1' | 'l2' | 'l3' } | { durationMs: number } | null = null;
+	/** What the error card on screen says, for the report. */
+	private cardMessage = '';
+	/** Has come to rest at least once, so an unload afterwards is not a cancellation. */
+	private rested = false;
 
 	constructor(containerEl: HTMLElement, spec: TexJobSpec, deps: BlockDeps) {
 		super(containerEl);
@@ -149,9 +178,12 @@ export class TikzBlock extends MarkdownRenderChild {
 		this.dispatching = true;
 		try {
 			for (let next = this.queued.shift(); next !== undefined; next = this.queued.shift()) {
+				const before = this.state.phase;
 				const [state, effects] = reduce(this.state, next);
 				this.state = state;
 				for (const effect of effects) this.run(effect);
+				// After the effects, so what is reported is what the batch put on screen.
+				if (state.phase !== before) this.reportRest();
 			}
 		} finally {
 			this.dispatching = false;
@@ -221,6 +253,7 @@ export class TikzBlock extends MarkdownRenderChild {
 			case 'submit':
 				// A new attempt: whatever failed last time is not what this one will say.
 				this.failure = null;
+				this.origin = null;
 				void this.submit(effect.priority);
 				return;
 
@@ -290,6 +323,7 @@ export class TikzBlock extends MarkdownRenderChild {
 		const hot = this.spec.options.nocache ? undefined : this.deps.cache.peek(this.spec.key);
 		if (hot) {
 			this.artifact = hot;
+			this.origin = { tier: 'l1' };
 			this.dispatch({ type: 'l1Hit' });
 			return;
 		}
@@ -309,6 +343,7 @@ export class TikzBlock extends MarkdownRenderChild {
 
 		if (found) {
 			this.artifact = found.artifact;
+			this.origin = { tier: found.tier };
 			this.dispatch({ type: 'hit', tier: found.tier === 'l1' ? 'l2' : found.tier });
 			return;
 		}
@@ -361,6 +396,7 @@ export class TikzBlock extends MarkdownRenderChild {
 				// renders with a piece quietly missing.
 				...(result.firstError ? { warn: STRINGS.warnRecovered(result.firstError) } : {}),
 			};
+			this.origin = { durationMs: result.durationMs };
 			this.dispatch({ type: 'ok' });
 		} catch (error) {
 			if (this.state.phase === 'DISPOSED') return;
@@ -540,31 +576,59 @@ export class TikzBlock extends MarkdownRenderChild {
 		this.placeholder = null;
 
 		const failure = this.failure ?? new TexError('empty-output', []);
+		const diagnostic = explain(
+			{
+				// The failures the plugin finds itself have no TexError kind of their own, and
+				// falling back to `empty-output` told the user TeX had run and drawn nothing.
+				kind:
+					reason === 'poisoned' ||
+					reason === 'empty-source' ||
+					reason === 'pipeline' ||
+					reason === 'export-budget'
+						? reason
+						: failure.kind,
+				message: failure.message,
+				firstError: failure.firstError,
+				line: failure.line,
+				// The worker's message for a TeX error is the bare `!` line: the macro it choked
+				// on is only in the log, and without it the card said TeX had not echoed one.
+				log: failure.log,
+			},
+			this.deps.host.capabilities,
+		);
+		this.cardMessage = diagnostic.message;
 		renderErrorCard(this.body, {
-			diagnostic: explain(
-				{
-					// The failures the plugin finds itself have no TexError kind of their own, and
-					// falling back to `empty-output` told the user TeX had run and drawn nothing.
-					kind:
-						reason === 'poisoned' ||
-						reason === 'empty-source' ||
-						reason === 'pipeline' ||
-						reason === 'export-budget'
-							? reason
-							: failure.kind,
-					message: failure.message,
-					firstError: failure.firstError,
-					line: failure.line,
-					// The worker's message for a TeX error is the bare `!` line: the macro it choked
-					// on is only in the log, and without it the card said TeX had not echoed one.
-					log: failure.log,
-				},
-				this.deps.host.capabilities,
-			),
+			diagnostic,
 			source: this.spec.source,
 			log: failure.log,
 			onRetry: () => this.dispatch({ type: 'retry' }),
 		});
+	}
+
+	/** Tell whoever is listening how the block came to rest, now that it has. */
+	private reportRest(): void {
+		const report = this.deps.report;
+		const phase = this.state.phase;
+		let outcome: BlockOutcome | null = null;
+
+		if (phase === 'MOUNTED' || phase === 'MOUNTED_DEGRADED') {
+			const origin = this.origin;
+			outcome =
+				origin && 'tier' in origin
+					? { state: 'cached', tier: origin.tier }
+					: { state: 'ok', ...(origin ? { durationMs: origin.durationMs } : {}) };
+		} else if (phase === 'FAILED') {
+			const log = this.failure?.log ?? [];
+			outcome = { state: 'error', message: this.cardMessage, ...(log.length ? { log } : {}) };
+		} else if (phase === 'IDLE_MANUAL') {
+			outcome = { state: 'manual' };
+		} else if (phase === 'DISPOSED' && !this.rested) {
+			outcome = { state: 'cancelled' };
+		}
+
+		if (outcome === null) return;
+		this.rested = true;
+		report?.(outcome);
 	}
 
 	// -------------------------------------------------------------------------------------------

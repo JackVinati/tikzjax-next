@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { installObsidianDom } from './stubs/obsidian-dom';
-import { TikzBlock, type BlockDeps, type TexJobSpec } from '../src/block/render-child';
+import { TikzBlock, type BlockDeps, type BlockOutcome, type TexJobSpec } from '../src/block/render-child';
 import { RenderQueue } from '../src/queue/queue';
 import type { Artifact, BlockOptions, EngineCapabilities, TexHost, TexResult } from '../src/types';
 import { InterruptedError, TexError } from '../src/types';
@@ -906,5 +906,92 @@ describe('the svgo setting and directive', () => {
 	it('fast mode turns every optimisation off, whatever svgo says', async () => {
 		const text = await mountedWith({ svgo: 'targeted', options: options({ fast: true }) });
 		expect(text?.getAttribute('alignment-baseline')).toBe('baseline');
+	});
+});
+
+describe('what a block reports when it comes to rest', () => {
+	/**
+	 * The diagnostics view listed every block as "rendering" forever, and "Render all diagrams"
+	 * counted no failures: the only record of a block was written when it was processed, before
+	 * anything had happened to it.
+	 */
+	function reporting(): { reports: BlockOutcome[]; report: (outcome: BlockOutcome) => void } {
+		const reports: BlockOutcome[] = [];
+		return { reports, report: (outcome) => void reports.push(outcome) };
+	}
+
+	it('a diagram from memory: cached, and from which tier', async () => {
+		const { reports, report } = reporting();
+		const child = new TikzBlock(container(), spec(), deps({ cache: fakeCache(artifact(SVG)), report }));
+		child.onload();
+		await child.settled;
+		expect(reports).toEqual([{ state: 'cached', tier: 'l1' }]);
+	});
+
+	it('a compiled diagram: ok, and how long TeX took', async () => {
+		const { reports, report } = reporting();
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ queue: answering({ svg: SVG, log: [], durationMs: 42 }), report }),
+		);
+		child.onload();
+		await child.settled;
+		expect(reports).toEqual([{ state: 'ok', durationMs: 42 }]);
+	});
+
+	it('a failure: what its card says, and the log', async () => {
+		const { reports, report } = reporting();
+		const { queue, runs } = realQueue();
+		const child = new TikzBlock(container(), spec(), deps({ queue, report }));
+		child.onload();
+		await vi.waitFor(() => expect(runs).toHaveLength(1));
+		runs[0]?.reject(new TexError('missing-file', ['! LaTeX Error'], undefined, undefined, 'siunitx.sty'));
+		await child.settled;
+
+		expect(reports).toEqual([
+			{
+				state: 'error',
+				message: 'siunitx.sty is not bundled with this TeX engine.',
+				log: ['! LaTeX Error'],
+			},
+		]);
+	});
+
+	it('a "Render diagram" button: manual', async () => {
+		const { reports, report } = reporting();
+		const child = new TikzBlock(
+			container(),
+			spec({ options: options({ presentation: { lazy: 'manual' } }) }),
+			deps({ report }),
+		);
+		child.onload();
+		await child.settled;
+		expect(reports).toEqual([{ state: 'manual' }]);
+	});
+
+	it('a block unloaded before it came to rest: cancelled', async () => {
+		const { reports, report } = reporting();
+		const { queue } = realQueue();
+		const child = new TikzBlock(container(), spec(), deps({ queue, report }));
+		child.onload();
+		child.onunload();
+		await child.settled;
+		expect(reports).toEqual([{ state: 'cancelled' }]);
+	});
+
+	it('again after a Retry, with the new outcome', async () => {
+		const { reports, report } = reporting();
+		const { queue, runs } = realQueue();
+		const el = container();
+		const child = new TikzBlock(el, spec({ timeoutMs: 20 }), deps({ queue, report }));
+		child.onload();
+		await child.settled;
+
+		press(el, 'Retry');
+		await vi.waitFor(() => expect(runs).toHaveLength(2));
+		runs[1]?.resolve(RESULT);
+		await vi.waitFor(() => expect(reports).toHaveLength(2));
+		expect(reports.map((r) => r.state)).toEqual(['error', 'ok']);
 	});
 });

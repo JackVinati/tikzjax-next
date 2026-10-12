@@ -17,8 +17,11 @@ export interface CommandDeps {
 	app: App;
 	/** The finished markup for a block's source, or null if it has not been rendered yet. */
 	markupFor(source: string, notePath: string): Promise<string | null>;
-	/** Render every block in a note and resolve once they have all settled. */
-	warmNote(file: TFile): Promise<{ ok: number; failed: number }>;
+	/**
+	 * Render every block in a note and resolve once they have all come to rest, or at once when
+	 * `signal` aborts. `failed` is every block that did not end up showing its diagram.
+	 */
+	warmNote(file: TFile, signal: AbortSignal): Promise<{ ok: number; failed: number }>;
 	fontCss(): string;
 	openDebugView(): Promise<void>;
 }
@@ -128,11 +131,29 @@ export function registerCommands(plugin: Plugin, deps: CommandDeps): void {
 			void (async () => {
 				const file = app.workspace.getActiveViewOfType(MarkdownView)?.file;
 				if (!file) return void new Notice('No note is open.');
-				const notice = new Notice('Rendering diagrams…', 0);
+				// The notice stays up until the run ends, so it carries the way to end it: a note
+				// of heavy diagrams can take minutes, and there was no way out but to wait.
+				const stop = new AbortController();
+				const notice = new Notice(
+					createFragment((message) => {
+						message.appendText('Rendering diagrams… ');
+						message
+							.createEl('button', { text: 'Stop' })
+							.addEventListener('click', () => stop.abort());
+					}),
+					0,
+				);
 				try {
-					const { ok, failed } = await deps.warmNote(file);
+					const { ok, failed } = await deps.warmNote(file, stop.signal);
 					notice.hide();
-					new Notice(failed ? `Rendered ${ok}, ${failed} failed.` : `Rendered ${ok} diagram(s).`);
+					const total = ok + failed;
+					new Notice(
+						stop.signal.aborted
+							? `Stopped after rendering ${ok} of ${total} diagram(s).`
+							: failed
+								? `Rendered ${ok} of ${total} diagram(s); the rest did not render.`
+								: `Rendered ${ok} diagram(s).`,
+					);
 				} catch (error) {
 					notice.hide();
 					new Notice(`Rendering failed: ${String(error)}`);

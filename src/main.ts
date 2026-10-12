@@ -9,8 +9,14 @@ import { ensureFonts } from './platform/context';
 import { DiagramCache } from './cache';
 import { RenderQueue } from './queue/queue';
 import { ViewportGate } from './block/viewport';
-import { createProcessor, renderedMarkup, rendersDifferently } from './block/processor';
-import type { TexJobSpec } from './block/render-child';
+import {
+	BlockTally,
+	createProcessor,
+	OFFSCREEN_CLASS,
+	renderedMarkup,
+	rendersDifferently,
+} from './block/processor';
+import type { BlockOutcome, TexJobSpec } from './block/render-child';
 import { DEFAULT_SETTINGS, migrateSettings, type TikzSettings } from './settings/schema';
 import { PreambleService } from './preamble/vault';
 import { registerCommands } from './ui/commands';
@@ -45,6 +51,8 @@ export default class TikzjaxNextPlugin extends Plugin {
 
 	/** A bounded ring for the diagnostics view. Never persisted. */
 	private readonly records: RenderRecord[] = [];
+	/** The "Render all diagrams in this note" runs under way, each counting its own blocks. */
+	private readonly tallies = new Set<BlockTally>();
 
 	get engineInventory(): EngineInventory | null {
 		return this.host?.engineInventory ?? null;
@@ -128,17 +136,33 @@ export default class TikzjaxNextPlugin extends Plugin {
 				now: () => Date.now(),
 				timers,
 				preamble: this.preamble,
-				onBlock: (spec) => {
+				onBlock: (spec, el) => {
 					this.preamble?.track(
 						spec.key,
 						spec.options.baked.depHashes.map((d) => d.split(':')[0] ?? ''),
 					);
-					this.remember({
+					const record: RenderRecord = {
 						key: spec.key,
 						sourcePreview: spec.source.replace(/\s+/g, ' ').slice(0, 80),
 						state: 'rendering',
 						at: Date.now(),
-					});
+					};
+					this.remember(record);
+					const watchers: ((outcome: BlockOutcome) => void)[] = [];
+					for (const tally of this.tallies) {
+						const watch = tally.watch(el);
+						if (watch) watchers.push(watch);
+					}
+					// The record is updated in place: the view reads the ring every second, and a
+					// record already pushed out of it is simply no longer shown.
+					return (outcome) => {
+						record.state = outcome.state;
+						record.tier = outcome.tier;
+						record.durationMs = outcome.durationMs;
+						record.message = outcome.message;
+						record.log = outcome.log;
+						for (const watch of watchers) watch(outcome);
+					};
 				},
 			}),
 		);
@@ -168,7 +192,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 					preamble,
 					cache,
 				}),
-			warmNote: (file) => this.warmNote(file),
+			warmNote: (file, signal) => this.warmNote(file, signal),
 			fontCss: () => COLD_FONT_CSS,
 			openDebugView: () => this.openDebugView(),
 		});
@@ -216,9 +240,11 @@ export default class TikzjaxNextPlugin extends Plugin {
 	 * warming cannot silently disagree with what a reader will get. It is also what makes an export
 	 * predictable — a warmed note exports from cache instead of racing the print snapshot.
 	 */
-	private async warmNote(file: TFile): Promise<{ ok: number; failed: number }> {
+	private async warmNote(file: TFile, signal: AbortSignal): Promise<{ ok: number; failed: number }> {
 		const text = await this.app.vault.cachedRead(file);
-		const holder = createDiv({ cls: 'tikzjax-offscreen' });
+		// The processor renders whatever is in here eagerly, whatever its lazy mode: no viewport
+		// will ever see it.
+		const holder = createDiv({ cls: OFFSCREEN_CLASS });
 		document.body.appendChild(holder);
 
 		// A throwaway Component, NOT `this`.
@@ -231,15 +257,21 @@ export default class TikzjaxNextPlugin extends Plugin {
 		const owner = new Component();
 		owner.load();
 
-		const before = this.records.length;
+		// This run's own count, of the blocks in its own holder — not a slice of the diagnostics ring.
+		const tally = new BlockTally(holder);
+		this.tallies.add(tally);
 		try {
-			await MarkdownRenderer.render(this.app, text, holder, file.path, owner);
-			const produced = this.records.slice(before);
-			return {
-				ok: produced.filter((r) => r.state !== 'error').length,
-				failed: produced.filter((r) => r.state === 'error').length,
-			};
+			// Stopping does not wait for the run to wind down: unloading the owner below settles
+			// every block at once, except one compiling, which finishes under its own timeout and
+			// still caches its diagram.
+			const stopped = new Promise<void>((resolve) => {
+				if (signal.aborted) resolve();
+				else signal.addEventListener('abort', () => resolve(), { once: true });
+			});
+			await Promise.race([MarkdownRenderer.render(this.app, text, holder, file.path, owner), stopped]);
+			return tally.counts();
 		} finally {
+			this.tallies.delete(tally);
 			owner.unload();
 			holder.remove();
 		}

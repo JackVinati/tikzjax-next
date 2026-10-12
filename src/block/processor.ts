@@ -7,7 +7,7 @@ import { preflight } from '../source/preflight';
 import { deriveKey } from '../cache/key';
 import { isExportContext } from '../platform/context';
 import { artifactRevision, type TikzSettings } from '../settings/schema';
-import { TikzBlock, type BlockDeps, type TexJobSpec } from './render-child';
+import { TikzBlock, type BlockDeps, type BlockOutcome, type TexJobSpec } from './render-child';
 import { standaloneMarkup } from './mount';
 import { asProcessorSource } from '../note/finalize';
 import type { QueueTimers, RenderQueue } from '../queue/queue';
@@ -48,15 +48,64 @@ export interface ProcessorDeps {
 	/** For the deadline of a PDF export's total budget. */
 	timers: QueueTimers;
 	preamble: PreambleService;
-	/** Notified so the debug view can list what happened without the child knowing about it. */
-	onBlock?: ((spec: TexJobSpec) => void) | undefined;
+	/**
+	 * Notified of every block, so the debug view can list what happened without the child knowing
+	 * about it. What it returns, if anything, is told how the block comes to rest.
+	 */
+	onBlock?:
+		((spec: TexJobSpec, el: HTMLElement) => ((outcome: BlockOutcome) => void) | undefined) | undefined;
 }
+
+/**
+ * The off-screen container "Render all diagrams in this note" renders a note into. A block inside
+ * it is there to be rendered, now: no viewport will ever see it.
+ */
+export const OFFSCREEN_CLASS = 'tikzjax-offscreen';
 
 /** Where a block is on the page, as far as its spec is concerned. */
 interface Place {
 	isExport: boolean;
 	/** Inside a PDF export, and so under its total budget. */
 	budgeted: boolean;
+	/** Inside the off-screen container: rendered eagerly, whatever its lazy mode. */
+	offscreen: boolean;
+}
+
+/**
+ * How the blocks rendered inside one container came to rest. "Render all diagrams in this note"
+ * counts its own run with one.
+ *
+ * It used to count the diagnostics ring instead: entries written when each block was processed,
+ * before anything had happened to it, so always "rendering" and never a failure — and once the
+ * ring was full at a hundred, the slice it counted was empty and every run "rendered 0".
+ */
+export class BlockTally {
+	private readonly container: HTMLElement;
+	/** The last word from each block, by the order they were seen; null until it comes to rest. */
+	private readonly last: (BlockOutcome['state'] | null)[] = [];
+
+	constructor(container: HTMLElement) {
+		this.container = container;
+	}
+
+	/** A listener for one block's outcomes, if the block is inside this container. */
+	watch(el: HTMLElement): ((outcome: BlockOutcome) => void) | undefined {
+		if (!this.container.contains(el)) return undefined;
+		const index = this.last.push(null) - 1;
+		return (outcome) => {
+			this.last[index] = outcome.state;
+		};
+	}
+
+	/**
+	 * Rendered: on screen, compiled or from a cache. Everything else did not — a card, a button,
+	 * and a block cancelled before it came to rest.
+	 */
+	counts(): { ok: number; failed: number } {
+		let ok = 0;
+		for (const state of this.last) if (state === 'ok' || state === 'cached') ok++;
+		return { ok, failed: this.last.length - ok };
+	}
 }
 
 export function createProcessor(deps: ProcessorDeps) {
@@ -83,7 +132,11 @@ export function createProcessor(deps: ProcessorDeps) {
 			}
 		}
 
-		const place: Place = { isExport: isExportContext(deps.app, el), budgeted: print !== null };
+		const place: Place = {
+			isExport: isExportContext(deps.app, el),
+			budgeted: print !== null,
+			offscreen: el.closest(`.${OFFSCREEN_CLASS}`) !== null,
+		};
 		const prepared = prepare(source, deps, ctx.sourcePath, place);
 
 		// The common case — no preamble configured anywhere — stays SYNCHRONOUS, and that is not an
@@ -105,7 +158,7 @@ function attach(
 	deps: ProcessorDeps,
 	deadline: number | undefined,
 ): Promise<void> {
-	deps.onBlock?.(spec);
+	const report = deps.onBlock?.(spec, el);
 	{
 		const child = new TikzBlock(el, spec, {
 			cache: deps.cache,
@@ -117,6 +170,7 @@ function attach(
 			ensureFonts: deps.ensureFonts,
 			debounceMs: deps.budgets.debounceMs,
 			now: deps.now,
+			report,
 		});
 
 		// Obsidian owns load()/unload() from here, which is what ties cancellation to the block's
@@ -156,7 +210,11 @@ export type KeyDeps = Pick<ProcessorDeps, 'settings' | 'budgets' | 'host' | 'pre
  * processor, because it is the processor.
  */
 export function keyFor(source: string, notePath: string, deps: KeyDeps): string | Promise<string> {
-	const prepared = prepare(source, deps, notePath, { isExport: false, budgeted: false });
+	const prepared = prepare(source, deps, notePath, {
+		isExport: false,
+		budgeted: false,
+		offscreen: false,
+	});
 	return prepared instanceof Promise ? prepared.then((spec) => spec.key) : prepared.key;
 }
 
@@ -252,6 +310,13 @@ function buildSpec(
 		options.baked.preamble = resolved.text;
 		options.baked.depHashes = resolved.depHashes;
 	}
+
+	// Rendered into the off-screen container to be waited for, so not lazily: in there, a block
+	// waiting to be scrolled into view waits for good. The real IntersectionObserver reports the
+	// container as not intersecting, which also cancels the zero-record escape hatch, so the
+	// command's wait never ended. `manual` too — running the command is the user asking. Lazy mode
+	// is presentation, not in the key, so this costs nothing in the cache.
+	if (place.offscreen) options.presentation.lazy = 'off';
 
 	const normalized =
 		settings.sourceHandling === 'legacy'

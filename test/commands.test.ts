@@ -8,7 +8,7 @@ import { artifact, processBlock, processorDeps } from './stubs/processor';
 import { asProcessorSource, findTikzBlocks, type TikzBlockSpan } from '../src/note/finalize';
 import { renderedMarkup, type ProcessorDeps } from '../src/block/processor';
 import type { TexJobSpec } from '../src/block/render-child';
-import { registerCommands } from '../src/ui/commands';
+import { registerCommands, type CommandDeps } from '../src/ui/commands';
 
 beforeAll(() => {
 	installObsidianDom(window as unknown as Window & typeof globalThis);
@@ -166,13 +166,17 @@ describe('renderedMarkup', () => {
 // The commands, end to end: a note, the processor's render, and the command at the cursor
 
 /** A note, its rendered blocks in the cache, and the commands registered against both. */
-function workspace(note: string) {
+function workspace(
+	note: string,
+	warmNote: CommandDeps['warmNote'] = () => Promise.resolve({ ok: 0, failed: 0 }),
+) {
 	const { deps, seen, l1 } = processorDeps();
 	const file = new TFile('folder/note.md');
 	const vault = new Map<string, string>([[file.path, note]]);
 	const created: string[] = [];
 	const app = {
 		...deps.app,
+		workspace: { getActiveViewOfType: () => ({ file }) },
 		vault: {
 			read: () => Promise.resolve(vault.get(file.path) ?? ''),
 			create: (path: string, data: string) => {
@@ -203,7 +207,7 @@ function workspace(note: string) {
 		app,
 		// Exactly what main.ts wires.
 		markupFor: (source, notePath) => renderedMarkup(source, notePath, deps),
-		warmNote: () => Promise.resolve({ ok: 0, failed: 0 }),
+		warmNote,
 		fontCss: () => '',
 		openDebugView: () => Promise.resolve(),
 	});
@@ -228,7 +232,14 @@ function workspace(note: string) {
 		void command.editorCallback(editor, { file } as unknown as MarkdownView);
 	};
 
-	return { vault, created, file, render, run };
+	/** Run a command that takes no editor. */
+	const call = (id: string): void => {
+		const command = commands.get(id);
+		if (!command?.callback) throw new Error(`no command ${id}`);
+		void command.callback();
+	};
+
+	return { vault, created, file, render, run, call };
 }
 
 const lastNotice = (): string => String(shownNotices[shownNotices.length - 1]?.message ?? '');
@@ -296,5 +307,49 @@ describe('the commands at the cursor', () => {
 			[false, false],
 			[true, true],
 		]);
+	});
+});
+
+describe('"Render all diagrams in this note"', () => {
+	beforeEach(() => {
+		shownNotices.length = 0;
+	});
+
+	/** The notice the run is showing, and its Stop button. */
+	const progress = () => {
+		const notice = shownNotices.find((n) => typeof n.message !== 'string');
+		const message = notice?.message as DocumentFragment | undefined;
+		const stop = Array.from(message?.querySelectorAll('button') ?? []).find(
+			(b) => b.textContent === 'Stop',
+		);
+		return { notice, stop };
+	};
+
+	it('says how many rendered, out of how many', async () => {
+		const w = workspace('', () => Promise.resolve({ ok: 2, failed: 1 }));
+		w.call('render-note');
+		await vi.waitFor(() =>
+			expect(lastNotice()).toBe('Rendered 2 of 3 diagram(s); the rest did not render.'),
+		);
+		expect(progress().notice?.hidden).toBe(true);
+	});
+
+	it('can be stopped from its notice', async () => {
+		// A note of heavy diagrams can take minutes, and there was no way out but to wait.
+		let signal: AbortSignal | undefined;
+		const w = workspace(
+			'',
+			(_file, s) =>
+				new Promise((resolve) => {
+					signal = s;
+					s.addEventListener('abort', () => resolve({ ok: 1, failed: 4 }));
+				}),
+		);
+		w.call('render-note');
+		await vi.waitFor(() => expect(signal).toBeDefined());
+
+		progress().stop?.click();
+		await vi.waitFor(() => expect(lastNotice()).toBe('Stopped after rendering 1 of 5 diagram(s).'));
+		expect(signal?.aborted).toBe(true);
 	});
 });

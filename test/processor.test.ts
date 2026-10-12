@@ -2,7 +2,8 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { installObsidianDom } from './stubs/obsidian-dom';
 import { artifact, processBlock, processorDeps } from './stubs/processor';
-import { rendersDifferently } from '../src/block/processor';
+import { BlockTally, OFFSCREEN_CLASS, rendersDifferently } from '../src/block/processor';
+import type { BlockOutcome } from '../src/block/render-child';
 import { budgetsFor } from '../src/platform/budgets';
 import { DEFAULT_SETTINGS, type TikzSettings } from '../src/settings/schema';
 
@@ -200,5 +201,75 @@ describe('the optimisation a block asks for', () => {
 		expect(fromSetting.spec.svgo).toBe('targeted');
 		expect(fromBlock.spec.svgo).toBe('off');
 		expect(fromBlock.spec.key).not.toBe(fromSetting.spec.key);
+	});
+});
+
+describe('"Render all diagrams in this note"', () => {
+	/**
+	 * It renders the note into an off-screen holder and waits for every block. With lazy rendering
+	 * on — the default — each block there waited for the viewport, and the holder is never in it:
+	 * a real IntersectionObserver reports it as not intersecting, which also cancels the 2 s escape
+	 * hatch. Nothing was submitted, the wait never ended, and the "Rendering diagrams…" notice
+	 * stayed up for good.
+	 */
+	const holder = (): HTMLElement => document.body.createDiv({ cls: OFFSCREEN_CLASS });
+
+	it('renders its blocks without waiting to be seen', async () => {
+		const { deps, seen } = processorDeps();
+		const { spec } = await processBlock(deps, seen, SOURCE, { el: holder().createDiv(), load: false });
+		expect(spec.options.presentation.lazy).toBe('off');
+	});
+
+	it('renders a lazy=manual block too: the command is the user asking for it', async () => {
+		const { deps, seen } = processorDeps();
+		const { spec } = await processBlock(deps, seen, `%!tikz lazy=manual\n${SOURCE}`, {
+			el: holder().createDiv(),
+			load: false,
+		});
+		expect(spec.options.presentation.lazy).toBe('off');
+	});
+
+	it('leaves a block on the page as lazy as it was', async () => {
+		const { deps, seen } = processorDeps();
+		const { spec } = await processBlock(deps, seen, SOURCE, { load: false });
+		expect(spec.options.presentation.lazy).toBe('on');
+	});
+
+	it('submits a block in the holder even though nothing ever reports it visible', async () => {
+		const submit = vi.fn(() => new Promise(() => undefined));
+		const { deps, seen } = processorDeps({
+			queue: { submit, release: () => undefined } as never,
+			budgets: { ...budgetsFor(false), debounceMs: 0 },
+		});
+		await processBlock(deps, seen, SOURCE, { el: holder().createDiv() });
+		await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+	});
+});
+
+describe('BlockTally', () => {
+	it('counts the blocks inside its container by how they came to rest, and nothing outside it', () => {
+		const container = document.body.createDiv();
+		const tally = new BlockTally(container);
+		const report = (state: BlockOutcome['state'], inside = true): void =>
+			tally.watch(inside ? container.createDiv() : document.body.createDiv())?.({ state });
+
+		report('ok');
+		report('cached');
+		report('error');
+		report('manual');
+		report('ok', false);
+		// A block that never came to rest — cancelled with the run — counts as not rendered.
+		tally.watch(container.createDiv());
+
+		expect(tally.counts()).toEqual({ ok: 2, failed: 3 });
+	});
+
+	it('goes by the last word from each block, so a retried failure that mounts is not counted twice', () => {
+		const container = document.body.createDiv();
+		const tally = new BlockTally(container);
+		const report = tally.watch(container.createDiv());
+		report?.({ state: 'error', message: 'x' });
+		report?.({ state: 'ok' });
+		expect(tally.counts()).toEqual({ ok: 1, failed: 0 });
 	});
 });
