@@ -160,3 +160,74 @@ describe('ArtifactStore — upgrading a 0.1.4 store', () => {
 		expect(await store.stats()).toEqual({ entries: 1, bytes: 100 });
 	});
 });
+
+/**
+ * iOS is the case this exists for. WebKit can drop the connection behind a suspended app
+ * ("Connection to Indexed Database server lost"), and backgrounding also clears L1, so a store that
+ * kept its dead handle, or switched itself off on the first failed write, sent every diagram on
+ * screen back to the engine on return — at concurrency 1 and ~156 MiB per worker.
+ */
+describe('ArtifactStore — a connection lost under it', () => {
+	it('reopens when the connection was closed without a word', async () => {
+		store = new ArtifactStore(APP, 10_000);
+		await store.put('a', artifact(100));
+
+		fake.closeConnections(DB, false);
+		expect((await store.get('a'))?.bytes).toBe(100);
+		await store.put('b', artifact(50));
+		expect(await store.stats()).toEqual({ entries: 2, bytes: 150 });
+	});
+
+	it('reopens when the browser reports the connection closed', async () => {
+		store = new ArtifactStore(APP, 10_000);
+		await store.put('a', artifact(100));
+
+		fake.closeConnections(DB, true);
+		expect((await store.get('a'))?.bytes).toBe(100);
+	});
+
+	it('reopens after WebKit loses the connection, instead of switching L2 off', async () => {
+		store = new ArtifactStore(APP, 10_000);
+		await store.put('a', artifact(100));
+
+		fake.loseConnections(DB);
+		// Fails on the lost connection, and is retried on a new one.
+		await store.put('b', artifact(50));
+		expect((await store.get('b'))?.bytes).toBe(50);
+		expect((await store.get('a'))?.bytes).toBe(100);
+		expect(await store.stats()).toEqual({ entries: 2, bytes: 150 });
+	});
+
+	it('retries once rather than forever, and works again once storage is back', async () => {
+		store = new ArtifactStore(APP, 10_000);
+		await store.put('a', artifact(100));
+
+		fake.loseConnections(DB, true);
+		let opens = fake.opens.get(DB) ?? 0;
+		await expect(store.put('b', artifact(50))).resolves.toBeUndefined();
+		expect((fake.opens.get(DB) ?? 0) - opens).toBe(1);
+		opens = fake.opens.get(DB) ?? 0;
+		await expect(store.get('a')).resolves.toBeUndefined();
+		expect((fake.opens.get(DB) ?? 0) - opens).toBe(1);
+
+		// The storage process is back; the next connection works.
+		fake.loseConnections(DB, false);
+		expect((await store.get('a'))?.bytes).toBe(100);
+	});
+
+	it('opens one connection for overlapping first calls', async () => {
+		store = new ArtifactStore(APP, 10_000);
+		await Promise.all([store.get('a'), store.get('b'), store.stats(), store.put('c', artifact(10))]);
+		expect(fake.opens.get(DB)).toBe(1);
+	});
+
+	it('goes memory-only for the session only when the database cannot be opened at all', async () => {
+		fake.failOpens(DB);
+		store = new ArtifactStore(APP, 10_000);
+
+		await expect(store.put('a', artifact(100))).resolves.toBeUndefined();
+		expect(await store.get('a')).toBeUndefined();
+		expect(await store.stats()).toEqual({ entries: 0, bytes: 0 });
+		expect(fake.opens.get(DB)).toBe(1);
+	});
+});

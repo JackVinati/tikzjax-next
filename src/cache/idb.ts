@@ -10,8 +10,8 @@ import type { Artifact } from '../types';
  *
  * Every open and every write is guarded. WebKit evicts IndexedDB under storage pressure and after
  * prolonged non-use, so an empty store is NORMAL and must never be reported as corruption; and a
- * QuotaExceededError on write must degrade to "memory only for this session", never to a failed
- * render and never to an unhandled rejection inside the settle path.
+ * QuotaExceededError on write must degrade to eviction, never to a failed render and never to an
+ * unhandled rejection inside the settle path.
  *
  * Three stores:
  *   renders  the artifacts, keyed by cache key. Written when a diagram is stored, never on a hit.
@@ -25,6 +25,13 @@ import type { Artifact } from '../types';
  * fresh render is put twice, once rendered and once measured — in a separate read-modify-write
  * that overlapping puts raced, and never lowered by a delete. It only grew: once its excess passed
  * the cap, every write evicted everything, the write included.
+ *
+ * A connection is not forever. WebKit can drop it behind a suspended app ("Connection to Indexed
+ * Database server lost"), and the browser can close it under us. So the handle is held only until
+ * it fails, and an operation that finds it dead runs once more on a fresh one (`run`). Only a
+ * database that cannot be opened at all turns L2 off for the session; it used to be switched off
+ * by the first write that failed for any reason, which on iOS — where backgrounding also clears
+ * L1 — sent every diagram on screen back to the engine when the app came back.
  */
 
 const SCHEMA = 3;
@@ -56,10 +63,14 @@ interface Settling {
 
 export class ArtifactStore {
 	private db: IDBPDatabase | null = null;
+	/** The open in flight, shared, so overlapping calls make one connection rather than one each. */
+	private opening: Promise<IDBPDatabase | null> | null = null;
 	private readonly name: string;
 	private readonly byteCap: number;
-	/** Set when the store has failed in a way that will not get better this session. */
+	/** Set when the database cannot be opened; that will not get better this session. */
 	private disabled = false;
+	/** Set by `close()`: the plugin is unloading, and nothing may open a connection after it. */
+	private closed = false;
 
 	constructor(appId: string, byteCap: number) {
 		// The appId is not decoration. Every vault on a desktop install shares one origin, so an
@@ -69,11 +80,21 @@ export class ArtifactStore {
 		this.byteCap = byteCap;
 	}
 
-	private async open(): Promise<IDBPDatabase | null> {
-		if (this.disabled) return null;
-		if (this.db) return this.db;
+	private open(): Promise<IDBPDatabase | null> {
+		if (this.disabled || this.closed) return Promise.resolve(null);
+		if (this.db) return Promise.resolve(this.db);
+		if (!this.opening) {
+			this.opening = this.connect().finally(() => {
+				this.opening = null;
+			});
+		}
+		return this.opening;
+	}
+
+	private async connect(): Promise<IDBPDatabase | null> {
+		let connection: IDBPDatabase | null = null;
 		try {
-			this.db = await openDB(this.name, SCHEMA, {
+			connection = await openDB(this.name, SCHEMA, {
 				upgrade(db, oldVersion, _newVersion, transaction) {
 					if (oldVersion < 1) {
 						db.createObjectStore('renders', { keyPath: 'key' });
@@ -98,39 +119,73 @@ export class ArtifactStore {
 				blocked: () => {
 					/* another tab holds an old version; we simply run memory-only */
 				},
+				// Another window wants to upgrade the schema, and an open connection would block it.
+				blocking: () => this.drop(connection),
+				// The browser closed the connection abnormally; the next operation opens a new one.
+				terminated: () => this.drop(connection),
 			});
-			return this.db;
 		} catch {
 			this.disabled = true;
 			return null;
 		}
+		if (this.closed) {
+			connection.close();
+			return null;
+		}
+		this.db = connection;
+		return connection;
+	}
+
+	/** Let go of a connection that has died, so the next operation opens a new one. */
+	private drop(connection: IDBPDatabase | null): void {
+		if (connection === null) return;
+		if (this.db === connection) this.db = null;
+		try {
+			connection.close();
+		} catch {
+			/* already closed */
+		}
+	}
+
+	/**
+	 * Run one operation, and run it once more on a fresh connection if the first one turns out to
+	 * be dead. Once, not in a loop: a storage process that is gone for good costs each operation
+	 * one extra open, and the operation then fails the way it always could. Resolves to undefined
+	 * when there is no database to run on; any other failure is the caller's.
+	 */
+	private async run<T>(operation: (db: IDBPDatabase) => Promise<T>): Promise<T | undefined> {
+		for (let attempt = 0; ; attempt++) {
+			const db = await this.open();
+			if (!db) return undefined;
+			try {
+				return await operation(db);
+			} catch (error) {
+				if (attempt > 0 || !isConnectionLost(error)) throw error;
+				this.drop(db);
+			}
+		}
 	}
 
 	async get(key: string): Promise<Artifact | undefined> {
-		const db = await this.open();
-		if (!db) return undefined;
 		try {
-			const tx = db.transaction('renders', 'readonly');
-			tx.done.catch(ignore);
-			return (await tx.store.get(key)) as (Artifact & { key: string }) | undefined;
+			return await this.run(async (db) => {
+				const tx = db.transaction('renders', 'readonly');
+				tx.done.catch(ignore);
+				return (await tx.store.get(key)) as (Artifact & { key: string }) | undefined;
+			});
 		} catch {
 			return undefined;
 		}
 	}
 
 	async put(key: string, artifact: Artifact): Promise<void> {
-		const db = await this.open();
-		if (!db) return;
 		try {
-			const total = await this.write(db, key, artifact);
-			if (total > this.byteCap) await this.evictTo(0.9);
+			const total = await this.run((db) => this.write(db, key, artifact));
+			if (total !== undefined && total > this.byteCap) await this.evictTo(0.9);
 		} catch (error) {
-			// QuotaExceededError is the expected one. Degrade rather than fail the render.
-			if (isQuotaError(error)) {
-				await this.evictTo(0.7).catch(ignore);
-			} else {
-				this.disabled = true;
-			}
+			// QuotaExceededError is the expected one: make room rather than fail the render. Anything
+			// else costs this one write, and nothing more.
+			if (isQuotaError(error)) await this.evictTo(0.7);
 		}
 	}
 
@@ -162,14 +217,15 @@ export class ArtifactStore {
 	 * reads, for each diagram of a note opened after an iOS background had dropped L1.
 	 */
 	async touch(key: string, at: number): Promise<void> {
-		const db = await this.open();
-		if (!db) return;
 		try {
-			const tx = db.transaction('usage', 'readwrite');
-			await settle(tx, async () => {
-				const usage = (await tx.objectStore('usage').get(key)) as Usage | undefined;
-				if (usage && usage.lastUsed < at)
-					await tx.objectStore('usage').put({ ...usage, lastUsed: at });
+			await this.run(async (db) => {
+				const tx = db.transaction('usage', 'readwrite');
+				await settle(tx, async () => {
+					const usage = (await tx.objectStore('usage').get(key)) as Usage | undefined;
+					if (usage && usage.lastUsed < at) {
+						await tx.objectStore('usage').put({ ...usage, lastUsed: at } satisfies Usage);
+					}
+				});
 			});
 		} catch {
 			/* a failed LRU touch costs eviction accuracy, never correctness */
@@ -177,22 +233,24 @@ export class ArtifactStore {
 	}
 
 	async delete(key: string): Promise<void> {
-		const db = await this.open();
-		if (!db) return;
 		try {
-			const tx = db.transaction(STORES, 'readwrite');
-			await settle(tx, async () => {
-				const [previous, meta] = await Promise.all([
-					tx.objectStore('usage').get(key) as Promise<Usage | undefined>,
-					tx.objectStore('meta').get('total') as Promise<Meta | undefined>,
-				]);
-				if (!previous) return;
-				const totalBytes = Math.max(0, (meta?.totalBytes ?? 0) - previous.bytes);
-				await Promise.all([
-					tx.objectStore('renders').delete(key),
-					tx.objectStore('usage').delete(key),
-					tx.objectStore('meta').put({ key: 'total', totalBytes, schema: SCHEMA } satisfies Meta),
-				]);
+			await this.run(async (db) => {
+				const tx = db.transaction(STORES, 'readwrite');
+				await settle(tx, async () => {
+					const [previous, meta] = await Promise.all([
+						tx.objectStore('usage').get(key) as Promise<Usage | undefined>,
+						tx.objectStore('meta').get('total') as Promise<Meta | undefined>,
+					]);
+					if (!previous) return;
+					const totalBytes = Math.max(0, (meta?.totalBytes ?? 0) - previous.bytes);
+					await Promise.all([
+						tx.objectStore('renders').delete(key),
+						tx.objectStore('usage').delete(key),
+						tx
+							.objectStore('meta')
+							.put({ key: 'total', totalBytes, schema: SCHEMA } satisfies Meta),
+					]);
+				});
 			});
 		} catch {
 			/* ignore */
@@ -200,18 +258,17 @@ export class ArtifactStore {
 	}
 
 	async clear(): Promise<void> {
-		const db = await this.open();
-		if (!db) return;
 		try {
-			const tx = db.transaction(STORES, 'readwrite');
-			await settle(tx, async () => {
-				await Promise.all([
-					tx.objectStore('renders').clear(),
-					tx.objectStore('usage').clear(),
-					tx
-						.objectStore('meta')
-						.put({ key: 'total', totalBytes: 0, schema: SCHEMA } satisfies Meta),
-				]);
+			await this.run(async (db) => {
+				const tx = db.transaction(STORES, 'readwrite');
+				await settle(tx, async () => {
+					const empty: Meta = { key: 'total', totalBytes: 0, schema: SCHEMA };
+					await Promise.all([
+						tx.objectStore('renders').clear(),
+						tx.objectStore('usage').clear(),
+						tx.objectStore('meta').put(empty),
+					]);
+				});
 			});
 		} catch {
 			/* ignore */
@@ -219,16 +276,17 @@ export class ArtifactStore {
 	}
 
 	async stats(): Promise<CacheStats> {
-		const db = await this.open();
-		if (!db) return { entries: 0, bytes: 0 };
 		try {
-			const tx = db.transaction(['renders', 'meta'], 'readonly');
-			tx.done.catch(ignore);
-			const [entries, meta] = await Promise.all([
-				tx.objectStore('renders').count(),
-				tx.objectStore('meta').get('total') as Promise<Meta | undefined>,
-			]);
-			return { entries, bytes: meta?.totalBytes ?? 0 };
+			const stats = await this.run(async (db) => {
+				const tx = db.transaction(['renders', 'meta'], 'readonly');
+				tx.done.catch(ignore);
+				const [entries, meta] = await Promise.all([
+					tx.objectStore('renders').count(),
+					tx.objectStore('meta').get('total') as Promise<Meta | undefined>,
+				]);
+				return { entries, bytes: meta?.totalBytes ?? 0 };
+			});
+			return stats ?? { entries: 0, bytes: 0 };
 		} catch {
 			return { entries: 0, bytes: 0 };
 		}
@@ -236,33 +294,36 @@ export class ArtifactStore {
 
 	/** Evict least-recently-used down to `fraction` of the cap. Debounced by the caller, on idle. */
 	async evictTo(fraction: number): Promise<void> {
-		const db = await this.open();
-		if (!db) return;
 		try {
-			const tx = db.transaction(STORES, 'readwrite');
-			await settle(tx, async () => {
-				const target = this.byteCap * fraction;
-				const meta = (await tx.objectStore('meta').get('total')) as Meta | undefined;
-				let totalBytes = meta?.totalBytes ?? 0;
-				if (totalBytes <= target) return;
+			await this.run(async (db) => {
+				const tx = db.transaction(STORES, 'readwrite');
+				await settle(tx, async () => {
+					const target = this.byteCap * fraction;
+					const meta = (await tx.objectStore('meta').get('total')) as Meta | undefined;
+					let totalBytes = meta?.totalBytes ?? 0;
+					if (totalBytes <= target) return;
 
-				let cursor = await tx.objectStore('usage').index('lastUsed').openCursor();
-				while (cursor && totalBytes > target) {
-					const usage = cursor.value as Usage;
-					totalBytes = Math.max(0, totalBytes - usage.bytes);
-					await Promise.all([tx.objectStore('renders').delete(usage.key), cursor.delete()]);
-					cursor = await cursor.continue();
-				}
-				await tx.objectStore('meta').put({ key: 'total', totalBytes, schema: SCHEMA } satisfies Meta);
+					let cursor = await tx.objectStore('usage').index('lastUsed').openCursor();
+					while (cursor && totalBytes > target) {
+						const usage = cursor.value as Usage;
+						totalBytes = Math.max(0, totalBytes - usage.bytes);
+						await Promise.all([tx.objectStore('renders').delete(usage.key), cursor.delete()]);
+						cursor = await cursor.continue();
+					}
+					await tx
+						.objectStore('meta')
+						.put({ key: 'total', totalBytes, schema: SCHEMA } satisfies Meta);
+				});
 			});
 		} catch {
 			/* eviction is best-effort; the browser will evict the whole store if it must */
 		}
 	}
 
+	/** Teardown, on unload. Final: a late fire-and-forget write must not open a new connection. */
 	close(): void {
-		this.db?.close();
-		this.db = null;
+		this.closed = true;
+		this.drop(this.db);
 	}
 }
 
@@ -299,5 +360,19 @@ function isQuotaError(error: unknown): boolean {
 	return (
 		error instanceof DOMException &&
 		(error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED')
+	);
+}
+
+/**
+ * The failures that mean the connection, not the operation, is broken. InvalidStateError is what
+ * `transaction()` throws on a closed connection; UnknownError is WebKit's lost connection; an
+ * AbortError with no reason of its own is a transaction the browser aborted because it closed the
+ * connection under it. Retrying an operation on a fresh connection after any of these is safe,
+ * because an aborted transaction wrote nothing.
+ */
+export function isConnectionLost(error: unknown): boolean {
+	return (
+		error instanceof DOMException &&
+		(error.name === 'InvalidStateError' || error.name === 'UnknownError' || error.name === 'AbortError')
 	);
 }

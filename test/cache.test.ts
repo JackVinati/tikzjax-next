@@ -122,6 +122,19 @@ describe('DiagramCache', () => {
 		expect(fake.records(LEGACY_DB, LEGACY_STORE).get(legacyKey(SOURCE))).toBe(LEGACY_SVG);
 	});
 
+	it("reopens the previous plugin's store when the connection to it is lost", async () => {
+		// The same dead-handle hazard as L2, and right after an upgrade L3 is where every diagram
+		// the previous plugin rendered is found.
+		await seedLegacy();
+		open();
+		expect((await cache.lookup('k1', SOURCE))?.tier).toBe('l3');
+
+		fake.loseConnections(LEGACY_DB);
+		expect((await cache.lookup('k2', SOURCE))?.tier).toBe('l3');
+		fake.closeConnections(LEGACY_DB, true);
+		expect((await cache.lookup('k3', SOURCE))?.tier).toBe('l3');
+	});
+
 	it("does not create the previous plugin's database in a vault that never had it", async () => {
 		open();
 		expect(await cache.lookup('k', SOURCE)).toBeUndefined();

@@ -1,7 +1,7 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import type { Artifact } from '../types';
 import { MemoryCache } from './memory';
-import { ArtifactStore } from './idb';
+import { ArtifactStore, isConnectionLost } from './idb';
 import { legacyKey } from './legacy-key';
 
 /**
@@ -131,16 +131,28 @@ export class DiagramCache {
 	 *
 	 * localForage's IndexedDB driver creates the object store WITHOUT a keyPath and writes with
 	 * `put(value, key)`, so `get(key)` returns the stored string directly rather than a wrapper.
+	 *
+	 * A dead connection is let go and opened once more, as L2 does (cache/idb.ts): the handle used
+	 * to be kept for the session, so after WebKit lost it behind a suspended app every legacy
+	 * diagram went back to the engine.
 	 */
 	private async readLegacy(source: string): Promise<string | undefined> {
-		const db = await this.openLegacy();
-		if (!db) return undefined;
-		try {
-			const value: unknown = await db.get(LEGACY_STORE, legacyKey(source));
-			return typeof value === 'string' && value.length > 0 ? value : undefined;
-		} catch {
-			return undefined;
+		for (let attempt = 0; attempt < 2; attempt++) {
+			const db = await this.openLegacy();
+			if (!db) return undefined;
+			try {
+				const tx = db.transaction(LEGACY_STORE, 'readonly');
+				// Rejects when the read does, and the read's failure is the one handled below.
+				tx.done.catch(() => undefined);
+				const value: unknown = await tx.store.get(legacyKey(source));
+				return typeof value === 'string' && value.length > 0 ? value : undefined;
+			} catch (error) {
+				if (!isConnectionLost(error)) return undefined;
+				this.closeLegacy();
+				this.legacyChecked = false;
+			}
 		}
+		return undefined;
 	}
 
 	private async openLegacy(): Promise<IDBPDatabase | null> {
@@ -162,6 +174,11 @@ export class DiagramCache {
 			this.legacyDb = await openDB(LEGACY_DB, undefined, {
 				blocked: () => undefined,
 				blocking: () => this.closeLegacy(),
+				// Closed abnormally by the browser: forget the handle, and look again next time.
+				terminated: () => {
+					this.closeLegacy();
+					this.legacyChecked = false;
+				},
 			});
 
 			if (!this.legacyDb.objectStoreNames.contains(LEGACY_STORE)) {
