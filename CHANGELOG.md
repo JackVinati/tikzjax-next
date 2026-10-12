@@ -5,6 +5,11 @@ top of its notes on GitHub, and will not publish a version that has none.
 
 ## 0.1.5 — unreleased
 
+- The licence notices are corrected. The fonts are Basil K. Malyshev's BaKoMa Type 1 conversions of
+  the Computer Modern, AMS, Euler and LaTeX designs, and `NOTICE` now says so, with the BaKoMa
+  licence in `vendor/LICENSES/` and the CTAN location it requires. `NOTICE` also lists every TeX
+  package the engine bundles, and the two npm packages `buffer` brings in, `base64-js` and
+  `ieee754`; their licence texts are in `vendor/LICENSES/npm/`.
 - Releases run CI's whole gate on the tagged commit before publishing, and publish from a separate
   job that is the only one allowed to write. Their notes start with the section from this file.
 - CI renders every test fixture through the engine and reports test coverage. Dependabot proposes

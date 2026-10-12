@@ -25,7 +25,7 @@ drgrice1/tikzjax                                              GPL-3.0-or-later
   Copyright Jim Fowler, Glenn Rice.
   engine-src/library.ts and engine-src/worker.ts are modified forks of
   src/library.js and src/run-tex.js. Changes are listed in the header of each
-  file and in docs/DECISIONS.md D10.
+  file and in internal/DECISIONS.md D10.
   Itself derived from kisonecat/tikzjax (https://github.com/kisonecat/tikzjax).
 
 drgrice1/web2js                                               GPL-3.0
@@ -45,40 +45,97 @@ TeX                                                           Knuth licence
   through the .ch mechanism the licence provides for.
 
 
-TeX PACKAGES  (embedded in main.js as gzipped sources)
+TeX PACKAGES  (embedded in main.js: in the core dump, or as gzipped sources)
 --------------------------------------------------------------------------------
 
-PGF / TikZ                        LPPL-1.3c or GPL-2.0-or-later, and GFDL for docs
-pgfplots, pgfplotstable                                       GPL-3.0-or-later
-circuitikz                                                    GPL and LPPL
-tikz-feynhand                                                 GPL-3.0-or-later
-chemfig                                                       LPPL-1.3c
-mathtools                                                     LPPL-1.3c
-siunitx                                                       LPPL-1.3c
-tikz-cd                                                       LPPL-1.3
-forest                                                        LPPL-1.3
-standalone                                                    LPPL-1.3
-amsmath, amsfonts and the LaTeX kernel                        LPPL-1.3c
+Every package and class file the engine ships, by the CTAN package it comes
+from. Licences are as each package states them; "or later" is implied where
+the package says so. The support files that belong to a package (pgf's and
+pgfplots' .code.tex libraries, circuitikz's pgfcirc*.tex, .fd and .def files)
+come with it under the same terms.
+
+The LaTeX kernel, in the format                               LPPL-1.3c
+  latex.ltx and the files it reads, loaded before the core dump is taken.
+graphics, tools, base: color.sty keyval.sty array.sty calc.sty ifthen.sty
+                                                              LPPL-1.3c
+xcolor, in the format                                         LPPL-1.3c
+PGF / TikZ: pgf.sty tikz.sty pgfcalendar.sty, in the format and as libraries
+                                  LPPL-1.3c or GPL-2.0-or-later, and GFDL for docs
+pgfplots: pgfplots.sty pgfplotstable.sty                      GPL-3.0-or-later
+circuitikz: circuitikz.sty                                    GPL and LPPL
+tikz-feynhand: tikz-feynhand.sty                              GPL-3.0-or-later
+tikz-cd: tikz-cd.sty                                          LPPL-1.3
+tikz-3dplot: tikz-3dplot.sty                                  LPPL-1.3
+hf-tikz: hf-tikz.sty                                          LPPL-1.3c
+forest: forest.sty                                            LPPL-1.3
+  and what it loads:
+  pgfopts: pgfopts.sty                                        LPPL-1.3c
+  inlinedef: inlinedef.sty                                    LPPL-1.3
+  environ: environ.sty                                        LPPL-1.3c
+  trimspaces: trimspaces.sty                                  LPPL
+  elocalloc: elocalloc.sty                                    LPPL
+chemfig: chemfig.sty, with simplekv                           LPPL-1.3c
+siunitx: siunitx.sty                                          LPPL-1.3c
+translations: translations.sty                                LPPL-1.3c
+mathtools: mathtools.sty                                      LPPL-1.3c
+mh: mhsetup.sty                                               LPPL-1.3c
+amsmath: amsmath.sty amsbsy.sty amsgen.sty amsopn.sty amstext.sty
+                                                              LPPL-1.3c
+amsfonts: amsfonts.sty amssymb.sty eufrak.sty, and its .fd files
+                                                              LPPL-1.3c
+  and the metrics of its fonts (eufm, cmex7)                  OFL-1.1
+  Copyright (C) American Mathematical Society.
+l3kernel, l3backend, l3packages: expl3.sty xparse.sty         LPPL-1.3c
+etoolbox: etoolbox.sty                                        LPPL-1.3c
+Oberdiek bundle: atveryend.sty atveryend-ltx.sty infwarerr.sty ltxcmds.sty
+  pdftexcmds.sty                                              LPPL-1.3c
+standalone: standalone.cls, in the format                     LPPL-1.3
+preview: preview.sty                                          GPL-3.0
+jknappen: mathrsfs.sty and ursfs.fd                           GPL-2.0
+  As the files themselves state it: "GNU licence version 2".
+Font metrics only, with no face shipped for them:
+  rsfs (Ralph Smith's Formal Script): rsfs5 rsfs7 rsfs10      free licence
+  ec (TS1 text companion): tcrm0500 tcrm0700 tcrm1000         free licence
+  Both are classified "other-free" on CTAN: https://ctan.org/pkg/rsfs and
+  https://ctan.org/pkg/ec.
 
 The exact file list and the version of each package are generated from the build
-image rather than maintained by hand: see engine-build/build-engine.sh, and the
-"Bundled TeX engine" entry in the plugin's settings, which reports what the
-installed build actually contains.
+image rather than maintained by hand: see engine-build/build-engine.sh,
+engine-build/out/tex-versions.txt, and the "Bundled TeX engine" entry in the
+plugin's settings, which reports what the installed build actually contains.
+test/notice.test.ts fails if a package file the engine ships is missing above.
 
 
 FONTS  (embedded in styles.css and main.js as WOFF2)
 --------------------------------------------------------------------------------
 
-Computer Modern                                               Knuth licence
-  Copyright (C) Donald E. Knuth. Converted from the BaKoMa Type 1 distribution
-  (https://ctan.org/pkg/cm-ps-type1) to WOFF2 by the build. Conversion is a
-  modification; the fonts are redistributed under their original terms and are
-  not renamed.
+BaKoMa Fonts Collection                                       BaKoMa licence
+  Copyright (C) 1994, 1995, Basil K. Malyshev. All Rights Reserved.
 
-AMS fonts (msam, msbm, eufm, eufb, eusm, eusb, euex, eurm, eurb)   OFL-1.1
-  Copyright (C) American Mathematical Society.
+  Every face the plugin ships is one of Basil K. Malyshev's Type 1 conversions
+  of the METAFONT originals, from two packs: BaKoMa-CM (1.1/12-Nov-94) and
+  BaKoMa-AMS (1.2/19-Jan-95). The build converts them to WOFF2, which is a
+  modification. The BaKoMa licence permits that provided its copyright notice,
+  author statement and permission notice, and the location of the original
+  fonts, appear in all copies of modified fonts and related documentation. The
+  notice is in vendor/LICENSES/BaKoMa.txt and in each face's own name table;
+  the original fonts are at
 
-LaTeX symbol fonts (lasy, lcmss)                              LPPL-1.3c
+    http://www.ctan.org/tex-archive/fonts/cm/ps-type1/bakoma
+
+  (today https://ctan.org/tex-archive/fonts/cm/ps-type1/bakoma). The build
+  takes bakoma.zip from there, pinned by SHA-256 in engine-build/Dockerfile.
+
+  The designs those faces convert, and whose they are:
+
+  Computer Modern, by Donald E. Knuth: cmb cmbsy cmbx cmbxsl cmbxti cmcsc cmdunh
+    cmex cmff cmfi cmfib cminch cmitt cmmi cmmib cmr cmsl cmsltt cmss cmssbx
+    cmssdc cmssi cmssq cmssqi cmsy cmtcsc cmtex cmti cmtt cmu cmvtt
+  The AMS symbol fonts, by the American Mathematical Society: msam msbm
+  Euler, designed by Hermann Zapf for the American Mathematical Society: euex
+    eufb eufm eurb eurm eusb eusm
+  The LaTeX symbol and sans serif fonts, from the LaTeX Project: lasy lasyb
+    lcmss lcmssb lcmssi
 
 
 JAVASCRIPT DEPENDENCIES  (bundled into main.js)
@@ -87,6 +144,13 @@ JAVASCRIPT DEPENDENCIES  (bundled into main.js)
 pako          https://github.com/nodeca/pako                  MIT AND Zlib
 idb           https://github.com/jakearchibald/idb            ISC
 buffer        https://github.com/feross/buffer                MIT
+base64-js     https://github.com/beatgammit/base64-js         MIT
+              (required by buffer)
+ieee754       https://github.com/feross/ieee754               BSD-3-Clause
+              (required by buffer)
+
+Each one's licence, with its copyright line, is in vendor/LICENSES/npm/.
+@drgrice1/dvi2html, listed under ENGINE, is GPL-3.0.
 
 
 --------------------------------------------------------------------------------

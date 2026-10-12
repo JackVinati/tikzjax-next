@@ -1,6 +1,6 @@
 # Decisions that supersede DESIGN.md
 
-`docs/DESIGN.md` is the output of a 19-agent recon + design panel. It was written **before**
+`internal/DESIGN.md` is the output of a recon + design panel. It was written **before**
 four project decisions were made and before three facts were verified. Where this file and
 `DESIGN.md` disagree, **this file wins**. Everything in `DESIGN.md` not contradicted here stands.
 
