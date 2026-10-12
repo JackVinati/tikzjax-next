@@ -19,7 +19,7 @@ on:
 
 permissions:
   contents: write
-  # For actions/attest-build-provenance: `id-token` mints the OIDC token that proves the build ran
+  # For actions/attest: `id-token` mints the OIDC token that proves the build ran
   # in this workflow, `attestations` records the result. Without them a user downloading main.js
   # has only a filename and 11 MB of minified code to go on.
   id-token: write
@@ -30,11 +30,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-          cache: npm
+          # No dependency cache in the one job that can publish a release and mint an OIDC token —
+          # setup-node's own advice for privileged workflows. It costs one uncached npm ci.
+          package-manager-cache: false
 
       - run: npm ci
 
@@ -76,7 +78,9 @@ jobs:
         run: npm run build
 
       - name: Attest that these assets came from this repository
-        uses: actions/attest-build-provenance@v2
+        # actions/attest itself: since v4, attest-build-provenance is only a wrapper around it, with the
+        # same SLSA build-provenance default.
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
             main.js
