@@ -1,4 +1,9 @@
 /*
+TikZJax Next 0.1.4, GPL-3.0-or-later. Source: https://github.com/JackVinati/tikzjax-next
+The @font-face rules below embed TeX fonts as WOFF2, under the licences listed in
+  https://github.com/JackVinati/tikzjax-next/blob/0.1.4/NOTICE
+*/
+/*
  * TikZJax Next — layout, colour model, and the states a diagram can be in.
  *
  * The colour model is the point of this file. The shipped plugin string-replaces "black" and
