@@ -51,9 +51,9 @@ export interface TexJobSpec {
 	timeoutMs: number;
 	isExport: boolean;
 	/**
-	 * Part of a PDF export, whose total budget bounds how long the block waits (processor.ts). Not
-	 * every `isExport` block: that one fails open, and also takes in a pop-out window's blocks,
-	 * which no export budget bounds and the queue's depth cap still has to.
+	 * Part of a PDF export, whose total budget bounds how long the block waits (processor.ts).
+	 * Narrower than `isExport`, which fails open and so also takes in a pop-out window's blocks:
+	 * no export budget bounds those, and the queue's depth cap still has to.
 	 */
 	budgeted: boolean;
 	preflight: Diagnostic[];
