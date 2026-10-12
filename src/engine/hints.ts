@@ -14,9 +14,18 @@ import type { Diagnostic, EngineCapabilities, TexErrorKind } from '../types';
  * Pure: no DOM, no clock, no `obsidian`. The error card is a rendering of what this returns.
  */
 
-/** The failure as the worker reports it; matches `ErrorMessage` minus the transport fields. */
+/**
+ * The failure as the worker reports it; matches `ErrorMessage` minus the transport fields.
+ *
+ * Plus the ones the plugin finds itself, which need copy of their own because the engine's would
+ * be false: `poisoned` (refused because the same diagram timed out earlier this session) and
+ * `empty-source` (nothing between the fences) — both used to fall through to `empty-output`, "TeX
+ * ran successfully but produced no diagram", when TeX had not run at all — `pipeline` (TeX's
+ * output could not be put through sanitize and ids, so it is not shown), and `export-budget` (a
+ * PDF export stopped waiting for the diagram).
+ */
 export interface TexFailure {
-	kind: TexErrorKind;
+	kind: TexErrorKind | 'poisoned' | 'empty-source' | 'pipeline' | 'export-budget';
 	message: string;
 	/** The first `! …` line, when there was one. */
 	firstError?: string | undefined;
@@ -417,12 +426,51 @@ export function explain(error: TexFailure, caps: EngineCapabilities): Diagnostic
 				hint: 'Nothing was drawn, so the block is most likely empty or entirely commented out. Check that a \\begin{tikzpicture} exists and that no % comments it out.',
 			};
 
+		case 'empty-source':
+			return {
+				kind: 'empty-output',
+				message: 'This block is empty.',
+				hint: 'There is no TeX in it to compile, only blank lines or %!tikz options. Write the diagram between the fences, e.g. a \\begin{tikzpicture} … \\end{tikzpicture}.',
+			};
+
+		case 'pipeline': {
+			const detail = withoutTrailingStop(error.message.trim());
+			return {
+				kind: 'empty-output',
+				message: 'The diagram could not be made safe to show, so it is not shown.',
+				hint: `${detail ? `${detail}. ` : ''}TeX produced output, but it did not get through the sanitizer, and markup that has not is never put on the page or cached. If the diagram writes raw SVG with \\special{dvisvgm:raw …}, check that it is well-formed; if it does not, please report this.`,
+			};
+		}
+
+		// The budget counts only the time TeX itself ran: the engine's boot is not charged to the
+		// diagram, so "it took too long" is a statement about the diagram. Raising the timeout
+		// SETTING is not offered as the fix — it is read when a block is processed, so it does
+		// nothing for the card already on screen; the block's own directive does, once the edited
+		// block renders again.
 		case 'timeout':
 			return {
 				kind: 'timeout',
 				message: 'The diagram took longer than its time budget.',
 				line: error.line,
-				hint: 'The engine was terminated and restarted, so nothing is stuck. Simplify the diagram — fewer samples, fewer plots, less \\foreach nesting — or raise the timeout in settings if you know it just needs longer.',
+				hint: 'The engine was terminated and restarted, so nothing is stuck. Simplify the diagram — fewer samples, fewer plots, less \\foreach nesting — or, if it just needs longer, add a line like %!tikz timeout=30 (seconds) to the block. Retry runs it again.',
+			};
+
+		// A timeout poisons the key for the session, so every other copy of the diagram is refused
+		// without being run. Retry clears that and runs it.
+		case 'poisoned':
+			return {
+				kind: 'timeout',
+				message: 'This diagram timed out earlier in this session, so it was not run again.',
+				hint: 'Press Retry to run it once more. If it needs longer, add a line like %!tikz timeout=30 (seconds) to the block first; if it keeps timing out, simplify it.',
+			};
+
+		// Printed into the PDF in the diagram's place, so it speaks to whoever reads the PDF as much
+		// as to whoever made it. Nothing went wrong with the diagram, so no `timeout` kind.
+		case 'export-budget':
+			return {
+				kind: 'empty-output',
+				message: 'This diagram was not ready in time for the export.',
+				hint: 'An export waits only so long, in all, for diagrams that are not cached yet. Run "Render all diagrams in this note" first, or open the note and let its diagrams render, then export again: cached diagrams go into the PDF at once.',
 			};
 
 		case 'engine-unavailable':

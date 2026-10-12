@@ -1,7 +1,7 @@
 import { Notice, Platform, Plugin } from 'obsidian';
 import { COLD_FONT_CSS } from 'virtual:fonts';
 
-import type { Budgets, TexResult } from './types';
+import { TexError, type Budgets, type TexResult } from './types';
 import type { EngineInventory } from '../engine-src/protocol';
 import { WorkerHost } from './engine/worker-host';
 import { budgetsFor } from './platform/budgets';
@@ -9,14 +9,20 @@ import { ensureFonts } from './platform/context';
 import { DiagramCache } from './cache';
 import { RenderQueue } from './queue/queue';
 import { ViewportGate } from './block/viewport';
-import { createProcessor } from './block/processor';
-import type { TexJobSpec } from './block/render-child';
+import {
+	BlockTally,
+	createProcessor,
+	OFFSCREEN_CLASS,
+	renderedMarkup,
+	rendersDifferently,
+} from './block/processor';
+import type { BlockOutcome, TexJobSpec } from './block/render-child';
 import { DEFAULT_SETTINGS, migrateSettings, type TikzSettings } from './settings/schema';
 import { PreambleService } from './preamble/vault';
 import { registerCommands } from './ui/commands';
 import { DebugView, DEBUG_VIEW_TYPE, type RenderRecord } from './ui/debug-view';
 import { sha256Hex } from './cache/sha256';
-import { Component, MarkdownRenderer, MarkdownView, TFile, type WorkspaceLeaf } from 'obsidian';
+import { Component, MarkdownRenderer, TFile, type WorkspaceLeaf } from 'obsidian';
 import { TikzSettingTab } from './settings/tab';
 import { STRINGS } from './ui/strings';
 
@@ -31,20 +37,22 @@ export default class TikzjaxNextPlugin extends Plugin {
 	 * anyone gets.
 	 */
 	override settings: TikzSettings = { ...DEFAULT_SETTINGS };
+	/** A copy of the settings the open notes were last processed with. */
+	private shownSettings: TikzSettings = { ...DEFAULT_SETTINGS };
 
 	cache: DiagramCache | null = null;
 
 	private host: WorkerHost | null = null;
 	private queue: RenderQueue<TexJobSpec, TexResult> | null = null;
 	private viewport: ViewportGate | null = null;
-	private budgets: Budgets = budgetsFor(false, 4);
+	private budgets: Budgets = budgetsFor(false);
 	private readonly touchedDocuments = new Set<Document>();
 	private preamble: PreambleService | null = null;
 
-	/** raw block source -> cache key, filled as blocks are processed. See TexJobSpec.rawSource. */
-	private readonly keysBySource = new Map<string, string>();
 	/** A bounded ring for the diagnostics view. Never persisted. */
 	private readonly records: RenderRecord[] = [];
+	/** The "Render all diagrams in this note" runs under way, each counting its own blocks. */
+	private readonly tallies = new Set<BlockTally>();
 
 	get engineInventory(): EngineInventory | null {
 		return this.host?.engineInventory ?? null;
@@ -52,6 +60,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 
 	override async onload(): Promise<void> {
 		this.settings = migrateSettings(await this.loadData());
+		this.shownSettings = { ...this.settings };
 
 		if (this.legacyPluginEnabled()) {
 			// Registering anyway would render every diagram in the vault twice. Refusing loudly is
@@ -60,15 +69,21 @@ export default class TikzjaxNextPlugin extends Plugin {
 			return;
 		}
 
-		this.budgets = budgetsFor(Platform.isMobile, navigator.hardwareConcurrency || 4);
-		if (this.settings.concurrency > 0 && !Platform.isMobile) {
-			this.budgets = { ...this.budgets, concurrency: this.settings.concurrency };
-		}
-		if (this.settings.timeoutSeconds > 0) {
-			this.budgets = { ...this.budgets, timeoutMs: this.settings.timeoutSeconds * 1000 };
-		}
+		// `settings.concurrency` is deliberately not read: there is one worker, and it runs one job at
+		// a time, so a second slot would only queue a job inside the worker with its clock running.
+		// See DESKTOP.concurrency in platform/budgets.ts.
+		//
+		// Nor is the time limit folded in here any more. The processor reads it per block, so a
+		// change applies to the next diagram rather than after a restart, and a limit set back to 0
+		// falls back to this budget rather than to the value it had at load.
+		this.budgets = budgetsFor(Platform.isMobile);
 
-		this.host = new WorkerHost();
+		const timers = {
+			setTimeout: (fn: () => void, ms: number) => window.setTimeout(fn, ms),
+			clearTimeout: (id: number) => window.clearTimeout(id),
+		};
+
+		this.host = new WorkerHost({ idleTeardownMs: this.budgets.idleTeardownMs, timers });
 		this.preamble = new PreambleService(this.app, sha256Hex);
 		this.cache = new DiagramCache({
 			// `appId` is real but undocumented, so it is not on the public App type. It is what
@@ -84,11 +99,11 @@ export default class TikzjaxNextPlugin extends Plugin {
 		this.queue = new RenderQueue<TexJobSpec, TexResult>({
 			concurrency: this.budgets.concurrency,
 			depthCap: this.budgets.queueDepthCap,
-			run: (job, signal) => this.runJob(job, signal),
-			timers: {
-				setTimeout: (fn, ms) => window.setTimeout(fn, ms),
-				clearTimeout: (id) => window.clearTimeout(id),
-			},
+			run: (job, signal, running) => this.runJob(job, signal, running),
+			timers,
+			// A job's own timeout starts when the worker takes it; until then it is waiting on the
+			// boot, which gets this long.
+			startupMs: this.budgets.firstJobGraceMs,
 		});
 
 		this.viewport = new ViewportGate({
@@ -102,7 +117,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 			'tikz',
 			createProcessor({
 				app: this.app,
-				settings: this.settings,
+				settings: () => this.settings,
 				budgets: this.budgets,
 				cache: this.cache,
 				queue: this.queue,
@@ -115,23 +130,42 @@ export default class TikzjaxNextPlugin extends Plugin {
 				observe: (el, onChange) => this.viewport?.observe(el, onChange),
 				unobserve: (el) => this.viewport?.unobserve(el),
 				ensureFonts: (doc) => {
+					// Only the documents still open are worth keeping for the unload sweep. Every PDF
+					// export's popup used to stay here, with the fonts injected into it, until the
+					// plugin unloaded — the one thing platform/context.ts says this must not do.
+					for (const touched of this.touchedDocuments) {
+						const view = touched.defaultView;
+						if (!view || view.closed) this.touchedDocuments.delete(touched);
+					}
 					this.touchedDocuments.add(doc);
 					ensureFonts(doc, COLD_FONT_CSS);
 				},
 				now: () => Date.now(),
+				timers,
 				preamble: this.preamble,
-				onBlock: (spec) => {
-					this.keysBySource.set(spec.rawSource, spec.key);
-					this.preamble?.track(
-						spec.key,
-						spec.options.baked.depHashes.map((d) => d.split(':')[0] ?? ''),
-					);
-					this.remember({
+				onBlock: (spec, el) => {
+					const record: RenderRecord = {
 						key: spec.key,
 						sourcePreview: spec.source.replace(/\s+/g, ' ').slice(0, 80),
 						state: 'rendering',
 						at: Date.now(),
-					});
+					};
+					this.remember(record);
+					const watchers: ((outcome: BlockOutcome) => void)[] = [];
+					for (const tally of this.tallies) {
+						const watch = tally.watch(el);
+						if (watch) watchers.push(watch);
+					}
+					// The record is updated in place: the view reads the ring every second, and a
+					// record already pushed out of it is simply no longer shown.
+					return (outcome) => {
+						record.state = outcome.state;
+						record.tier = outcome.tier;
+						record.durationMs = outcome.durationMs;
+						record.message = outcome.message;
+						record.log = outcome.log;
+						for (const watch of watchers) watch(outcome);
+					};
 				},
 			}),
 		);
@@ -148,14 +182,20 @@ export default class TikzjaxNextPlugin extends Plugin {
 				}),
 		);
 
+		const preamble = this.preamble;
+		const cache = this.cache;
+		const host = this.host;
 		registerCommands(this, {
 			app: this.app,
-			markupFor: (source, _notePath) => {
-				const key = this.keysBySource.get(source);
-				const artifact = key === undefined ? undefined : this.cache?.peek(key);
-				return Promise.resolve(artifact?.template ?? null);
-			},
-			warmNote: (file) => this.warmNote(file),
+			markupFor: (source, notePath) =>
+				renderedMarkup(source, notePath, {
+					settings: () => this.settings,
+					budgets: this.budgets,
+					host,
+					preamble,
+					cache,
+				}),
+			warmNote: (file, signal) => this.warmNote(file, signal),
 			fontCss: () => COLD_FONT_CSS,
 			openDebugView: () => this.openDebugView(),
 		});
@@ -203,9 +243,11 @@ export default class TikzjaxNextPlugin extends Plugin {
 	 * warming cannot silently disagree with what a reader will get. It is also what makes an export
 	 * predictable — a warmed note exports from cache instead of racing the print snapshot.
 	 */
-	private async warmNote(file: TFile): Promise<{ ok: number; failed: number }> {
+	private async warmNote(file: TFile, signal: AbortSignal): Promise<{ ok: number; failed: number }> {
 		const text = await this.app.vault.cachedRead(file);
-		const holder = createDiv({ cls: 'tikzjax-offscreen' });
+		// The processor renders whatever is in here eagerly, whatever its lazy mode: no viewport
+		// will ever see it.
+		const holder = createDiv({ cls: OFFSCREEN_CLASS });
 		document.body.appendChild(holder);
 
 		// A throwaway Component, NOT `this`.
@@ -218,73 +260,119 @@ export default class TikzjaxNextPlugin extends Plugin {
 		const owner = new Component();
 		owner.load();
 
-		const before = this.records.length;
+		// This run's own count, of the blocks in its own holder — not a slice of the diagnostics ring.
+		const tally = new BlockTally(holder);
+		this.tallies.add(tally);
 		try {
-			await MarkdownRenderer.render(this.app, text, holder, file.path, owner);
-			const produced = this.records.slice(before);
-			return {
-				ok: produced.filter((r) => r.state !== 'error').length,
-				failed: produced.filter((r) => r.state === 'error').length,
-			};
+			// Stopping does not wait for the run to wind down: unloading the owner below settles
+			// every block at once, except one compiling, which finishes under its own timeout and
+			// still caches its diagram.
+			const stopped = new Promise<void>((resolve) => {
+				if (signal.aborted) resolve();
+				else signal.addEventListener('abort', () => resolve(), { once: true });
+			});
+			await Promise.race([MarkdownRenderer.render(this.app, text, holder, file.path, owner), stopped]);
+			return tally.counts();
 		} finally {
+			this.tallies.delete(tally);
 			owner.unload();
 			holder.remove();
 		}
 	}
 
-	/** Nudge open markdown views so invalidated blocks are rebuilt. */
+	/**
+	 * Rebuild the blocks of every open note, in Live Preview as well as in Reading view.
+	 *
+	 * `previewMode.rerender` reaches Reading view only. Live Preview keeps a code block's widget for
+	 * as long as the block's text is unchanged, so after a preamble edit it went on showing the
+	 * diagram built from the old preamble until the note was reopened. `post-processor-change` is
+	 * the event Obsidian fires itself when a plugin registers or unregisters a code-block processor —
+	 * it is how a newly enabled plugin's blocks appear in notes already open — and both views
+	 * rebuild on it: Reading view rerenders, and the editor drops its cached widgets (read in the
+	 * 1.14.4 bundle). A block whose key did not change is an L1 hit, so this costs no compile.
+	 */
 	private rerenderOpenViews(): void {
-		for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
-			const view = leaf.view;
-			if (view instanceof MarkdownView) view.previewMode?.rerender(true);
-		}
+		this.app.workspace.trigger('post-processor-change');
 	}
 
 	override onunload(): void {
 		this.preamble?.clear();
-		this.keysBySource.clear();
 		this.viewport?.disconnect();
+		// The queue is closed BEFORE the host goes. Disposing interrupts the running job, its slot
+		// is freed in a `finally` that starts the next one, and a host still reachable from
+		// `runJob` would boot a worker for it that nothing would ever terminate. Obsidian rebuilds
+		// Live Preview widgets ~10 ms after the processor is unregistered, so there is usually a
+		// next one.
+		this.queue?.close();
 		this.queue?.clearPoison();
-		this.host?.dispose();
+		const host = this.host;
+		this.host = null;
+		host?.dispose();
 		this.cache?.dispose();
 		for (const doc of this.touchedDocuments) doc.getElementById('tikzjax-fonts')?.remove();
 		this.touchedDocuments.clear();
 	}
 
+	/**
+	 * Every change in the settings tab comes through here, and each one gives the diagrams that
+	 * timed out this session another chance: a longer timeout is exactly what one may have needed,
+	 * and it applies to every block rendered from now on. The poison set is what kept refusing them.
+	 */
 	async saveSettings(): Promise<void> {
+		this.queue?.clearPoison();
+		this.showSettings();
 		await this.saveData(this.settings);
 	}
 
-	/** A Sync-delivered settings change must not serve artifacts built under the old settings. */
+	/**
+	 * Sync, iCloud, Syncthing or git rewrote data.json. Obsidian calls this when the file is newer
+	 * than what the plugin last loaded.
+	 *
+	 * L1 is not dropped, as it used to be: every setting that changes a stored artifact is in its
+	 * key (settings/schema.ts `artifactRevision`, the preamble text), so an artifact built under
+	 * the old settings cannot be served for the new ones, and the rest are applied at mount.
+	 */
 	override onExternalSettingsChange(): void {
 		void this.loadData().then((raw) => {
 			this.settings = migrateSettings(raw);
-			this.cache?.dropMemory();
+			this.queue?.clearPoison();
+			this.showSettings();
 		});
+	}
+
+	/**
+	 * Process the open notes again if the settings now in force would build their blocks
+	 * differently. Neither a change in the tab nor one from Sync used to show until a note was
+	 * reopened: a mounted diagram keeps the colours, the lazy mode and the key it was built with.
+	 */
+	private showSettings(): void {
+		if (!rendersDifferently(this.shownSettings, this.settings)) return;
+		this.shownSettings = { ...this.settings };
+		this.rerenderOpenViews();
 	}
 
 	// -------------------------------------------------------------------------------------------
 
 	/**
-	 * One TeX job. The queue owns the slot, the timeout and the abort; this owns the engine call.
+	 * One TeX job. The queue owns the slot, the clock and the abort; the host owns the worker.
 	 *
-	 * A timeout terminates the worker rather than merely abandoning the wait, because that is the
-	 * only thing that actually stops a TeX run: an asyncify continuation that has suspended cannot
-	 * be resumed. \nonstopmode makes the case far rarer — it is why a broken diagram now reports a
-	 * line number instead of hanging — but it is the optimisation; this is the guarantee.
+	 * A timeout still terminates the worker rather than merely abandoning the wait, because that is
+	 * the only thing that actually stops a TeX run: an asyncify continuation that has suspended
+	 * cannot be resumed. The host does it, on the abort, and only to the worker that job is in —
+	 * this used to kill whichever worker was current, interrupting jobs that had nothing to do with
+	 * the timeout and, after a kill during boot, the next job's fresh worker.
 	 */
-	private async runJob(job: TexJobSpec, signal: AbortSignal): Promise<TexResult> {
-		job.onStart?.();
+	private runJob(job: TexJobSpec, signal: AbortSignal, running: () => void): Promise<TexResult> {
 		const host = this.host;
-		if (!host) throw new Error('engine unavailable');
-
-		signal.addEventListener('abort', () => host.kill(STRINGS.errTimeout(job.timeoutMs / 1000)), {
-			once: true,
-		});
-
+		if (!host) {
+			return Promise.reject(
+				new TexError('engine-unavailable', [], undefined, undefined, 'the plugin was unloaded'),
+			);
+		}
 		return host.render(
 			{ key: job.key, source: job.source, options: job.texOptions, timeoutMs: job.timeoutMs },
 			signal,
+			running,
 		);
 	}
 
@@ -320,11 +408,19 @@ export default class TikzjaxNextPlugin extends Plugin {
 	 * zero while backgrounded is the difference between surviving and being jetsam-killed. A worker
 	 * holding the full core dump is 156 MiB; giving it back the moment the app is hidden is the
 	 * cheapest insurance available (#111, #91).
+	 *
+	 * A diagram compiling at that moment is interrupted, not failed: its block puts it back in the
+	 * queue. The queue is paused first so that nothing — that job above all — boots a new worker
+	 * while the app is still in the background, and resumed when it comes back.
 	 */
 	private registerTeardown(): void {
 		if (!Platform.isMobile) return;
 		this.registerDomEvent(document, 'visibilitychange', () => {
-			if (document.visibilityState !== 'hidden') return;
+			if (document.visibilityState !== 'hidden') {
+				this.queue?.resume();
+				return;
+			}
+			this.queue?.pause();
 			this.host?.kill('the app was backgrounded');
 			this.cache?.dropMemory();
 		});

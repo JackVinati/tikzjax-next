@@ -1,10 +1,18 @@
 import { MarkdownRenderChild } from 'obsidian';
-import type { Artifact, BlockOptions, Diagnostic, TexHost, TexResult } from '../types';
-import { TexError } from '../types';
-import { initialState, reduce, type Effect, type Event, type Priority, type State } from './machine';
+import type { Artifact, BlockOptions, Diagnostic, SvgoMode, TexHost, TexResult } from '../types';
+import { InterruptedError, TexError } from '../types';
+import {
+	initialState,
+	reduce,
+	type Effect,
+	type Event,
+	type FailureReason,
+	type Priority,
+	type State,
+} from './machine';
 import { renderPlaceholder, renderManualTrigger } from './placeholder';
 import { renderErrorCard, renderWarningChip } from './error-card';
-import { measureInk, mountArtifact, withMeasuredBounds } from './mount';
+import { applyBounds, applyScale, measureInk, mountArtifact, withMeasuredBounds } from './mount';
 import type { DiagramCache } from '../cache';
 import type { RenderQueue } from '../queue/queue';
 import { isQueueError } from '../queue/queue';
@@ -28,15 +36,9 @@ import { STRINGS } from '../ui/strings';
 export interface TexJobSpec {
 	key: string;
 	source: string;
-	/**
-	 * The block exactly as written, directives and all.
-	 *
-	 * The commands find a diagram by scanning the note's markdown, which gives them this — not the
-	 * normalized, directive-stripped source. Carrying it means "which cache key is this block?" is
-	 * a lookup rather than a second, drifting copy of the key derivation.
-	 */
-	rawSource: string;
 	options: BlockOptions;
+	/** The optimisation the block asked for: its `%!tikz svgo=`, else the setting. In the key too. */
+	svgo: SvgoMode;
 	texOptions: {
 		texPackages?: Record<string, string>;
 		tikzLibraries?: string;
@@ -48,17 +50,35 @@ export interface TexJobSpec {
 	legacySource: string | null;
 	timeoutMs: number;
 	isExport: boolean;
-	preflight: Diagnostic[];
 	/**
-	 * Called by the queue's runner the moment this job actually starts.
-	 *
-	 * The machine needs `slot` to leave SCHEDULING, and it must NOT be emitted at submit time:
-	 * the queue settles three of its four ways before `run` is ever called (depth-cap, poisoned,
-	 * cancelled), and those arrive as `rejected`, which SCHEDULING handles and COMPILING does not.
-	 * Guessing the start would send a pre-start rejection to a state with no route out of it —
-	 * the never-settling class again.
+	 * Not subject to the queue's depth cap: a block of a PDF export, or of "Render all diagrams in
+	 * this note". Past the cap a block rests on a "Render diagram" button, which is what the PDF
+	 * printed and what the command left behind. Narrower than `isExport`, which fails open and so
+	 * also takes in a pop-out window's blocks — and those only the cap bounds.
 	 */
-	onStart?: (() => void) | undefined;
+	uncapped: boolean;
+	preflight: Diagnostic[];
+}
+
+/**
+ * How a block came to rest, for the diagnostics view and for "Render all diagrams in this note".
+ *
+ * Reported each time the block comes to rest, so a Retry that mounts is reported again. Both used
+ * to read the one record written when the block was processed, before anything had happened to it:
+ * the view showed every block as "rendering" for good, and the command counted no failures.
+ */
+export interface BlockOutcome {
+	/**
+	 * `ok` compiled and mounted · `cached` mounted from a cache tier · `error` an error card ·
+	 * `manual` a "Render diagram" button · `cancelled` unloaded before it came to rest at all.
+	 */
+	state: 'ok' | 'cached' | 'error' | 'manual' | 'cancelled';
+	tier?: 'l1' | 'l2' | 'l3' | undefined;
+	/** How long TeX ran, for a diagram compiled this time. */
+	durationMs?: number | undefined;
+	/** What the error card says. */
+	message?: string | undefined;
+	log?: string[] | undefined;
 }
 
 export interface BlockDeps {
@@ -66,11 +86,13 @@ export interface BlockDeps {
 	queue: RenderQueue<TexJobSpec, TexResult>;
 	host: TexHost;
 	svgo: SvgoLike | null;
-	observe: (el: HTMLElement, onChange: (visible: boolean) => void) => void;
+	/** `escaped`: no record ever came and the gate gave up waiting (block/viewport.ts). */
+	observe: (el: HTMLElement, onChange: (visible: boolean, escaped?: boolean) => void) => void;
 	unobserve: (el: HTMLElement) => void;
 	ensureFonts: (doc: Document) => void;
 	debounceMs: number;
 	now: () => number;
+	report?: ((outcome: BlockOutcome) => void) | undefined;
 }
 
 export class TikzBlock extends MarkdownRenderChild {
@@ -87,6 +109,13 @@ export class TikzBlock extends MarkdownRenderChild {
 	private debounceTimer: number | null = null;
 	private placeholder: HTMLElement | null = null;
 	private body: HTMLElement;
+
+	/** Where the artifact on screen came from: a cache tier, or a compile and how long TeX took. */
+	private origin: { tier: 'l1' | 'l2' | 'l3' } | { durationMs: number } | null = null;
+	/** What the error card on screen says, for the report. */
+	private cardMessage = '';
+	/** Has come to rest at least once, so an unload afterwards is not a cancellation. */
+	private rested = false;
 
 	constructor(containerEl: HTMLElement, spec: TexJobSpec, deps: BlockDeps) {
 		super(containerEl);
@@ -117,6 +146,15 @@ export class TikzBlock extends MarkdownRenderChild {
 		this.dispatch({ type: 'unload' });
 	}
 
+	/**
+	 * The PDF export this block is part of has spent its total budget: stop waiting, and rest on a
+	 * card. Does nothing to a block that is already at rest. Called by the processor, which is
+	 * what knows which blocks make up one export.
+	 */
+	expire(): void {
+		this.dispatch({ type: 'expired' });
+	}
+
 	// -------------------------------------------------------------------------------------------
 
 	/**
@@ -142,9 +180,12 @@ export class TikzBlock extends MarkdownRenderChild {
 		this.dispatching = true;
 		try {
 			for (let next = this.queued.shift(); next !== undefined; next = this.queued.shift()) {
+				const before = this.state.phase;
 				const [state, effects] = reduce(this.state, next);
 				this.state = state;
 				for (const effect of effects) this.run(effect);
+				// After the effects, so what is reported is what the batch put on screen.
+				if (state.phase !== before) this.reportRest();
 			}
 		} finally {
 			this.dispatching = false;
@@ -164,6 +205,9 @@ export class TikzBlock extends MarkdownRenderChild {
 				// Defence in depth against the reordering the dispatch queue now prevents: a
 				// placeholder painted after the diagram is already up is a spinner nobody removes.
 				if (this.body.querySelector('svg') || this.placeholder) return;
+				// The wrapper shows one thing at a time. On a Retry or a "Render diagram" press it
+				// still holds the card or the button, and those give way to the spinner.
+				this.body.empty();
 				this.placeholder = renderPlaceholder(this.body, this.deps.cache.peekSize(this.spec.key));
 				return;
 
@@ -186,7 +230,13 @@ export class TikzBlock extends MarkdownRenderChild {
 				return;
 
 			case 'observe':
-				this.deps.observe(this.body, (visible) => {
+				this.deps.observe(this.body, (visible, escaped) => {
+					// The gate gave up waiting for a record: the lowest band, no debounce. Taken for
+					// plain visibility, it went in with the diagrams the reader was looking at.
+					if (escaped) {
+						this.dispatch({ type: 'noRecordsAfter2s' });
+						return;
+					}
 					this.visible = visible;
 					if (visible) this.dispatch({ type: 'intersect' });
 				});
@@ -209,6 +259,9 @@ export class TikzBlock extends MarkdownRenderChild {
 				return;
 
 			case 'submit':
+				// A new attempt: whatever failed last time is not what this one will say.
+				this.failure = null;
+				this.origin = null;
 				void this.submit(effect.priority);
 				return;
 
@@ -216,29 +269,39 @@ export class TikzBlock extends MarkdownRenderChild {
 				this.deps.queue.release(this.spec.key, this);
 				return;
 
+			case 'unpoison':
+				// The user pressed Retry. A timeout poisons the key for the session; this was listed
+				// below as "owned by the queue" and did nothing, so the queue refused the key again
+				// at the door and Retry never re-ran anything.
+				this.deps.queue.clearPoison(this.spec.key);
+				return;
+
 			case 'startRender':
 			case 'abort':
 			case 'terminateWorker':
 			case 'poison':
-			case 'unpoison':
-				// Owned by the queue: it holds the AbortController, the poison set and the host.
-				// Listed explicitly so a new effect cannot be silently ignored by a default branch.
+				// Owned by the queue and the host: they hold the AbortController, the poison set and
+				// the worker. Listed explicitly so a new effect cannot be silently ignored by a
+				// default branch.
 				return;
 
 			case 'mount':
-				this.mount(effect.degraded);
+				// Degraded or not, the artifact has passed sanitize and ids, and its warning — the
+				// only difference on screen — travels with it.
+				this.mount();
 				return;
 
 			case 'measure':
-				void this.measure();
+				void this.measure(effect.persist);
 				return;
 
 			case 'mountErrorCard':
-				this.mountError();
+				this.mountError(effect.reason);
 				return;
 
 			case 'mountManualButton':
-				this.placeholder?.remove();
+				this.placeholder = null;
+				this.body.empty();
 				renderManualTrigger(this.body, () => this.dispatch({ type: 'retry' }), STRINGS.renderDiagram);
 				return;
 
@@ -268,6 +331,7 @@ export class TikzBlock extends MarkdownRenderChild {
 		const hot = this.spec.options.nocache ? undefined : this.deps.cache.peek(this.spec.key);
 		if (hot) {
 			this.artifact = hot;
+			this.origin = { tier: 'l1' };
 			this.dispatch({ type: 'l1Hit' });
 			return;
 		}
@@ -287,6 +351,7 @@ export class TikzBlock extends MarkdownRenderChild {
 
 		if (found) {
 			this.artifact = found.artifact;
+			this.origin = { tier: found.tier };
 			this.dispatch({ type: 'hit', tier: found.tier === 'l1' ? 'l2' : found.tier });
 			return;
 		}
@@ -299,15 +364,23 @@ export class TikzBlock extends MarkdownRenderChild {
 	}
 
 	private async submit(priority: Priority): Promise<void> {
-		this.spec.onStart = () => this.dispatch({ type: 'slot' });
+		// Fast mode is a preset, and one band up is part of it (internal/DESIGN.md §7.11): a fast
+		// diagram is the cheapest work in the queue, so it goes ahead of the full renders around it.
+		// Here rather than in the machine, which decides the band from where the block is and
+		// would otherwise have to know about fast mode at every one of its submits.
+		const band = this.spec.options.fast && priority > 0 ? ((priority - 1) as Priority) : priority;
 		try {
-			const result = await this.deps.queue.submit(
-				this.spec.key,
-				this.spec,
-				priority,
-				this.spec.timeoutMs,
-				{ owner: this, ...(this.spec.isExport ? { ignorePoison: true } : {}) },
-			);
+			const result = await this.deps.queue.submit(this.spec.key, this.spec, band, this.spec.timeoutMs, {
+				owner: this,
+				// `slot` is what leaves SCHEDULING, and it must NOT be guessed at submit time: the
+				// queue settles three of its four ways before the job starts (depth-cap, poisoned,
+				// cancelled), and those arrive as `rejected`, which SCHEDULING handles and
+				// COMPILING does not. So the queue says when — to this block, not to whichever
+				// block submitted the key first.
+				onStart: () => this.dispatch({ type: 'slot' }),
+				...(this.spec.isExport ? { ignorePoison: true } : {}),
+				...(this.spec.uncapped ? { uncapped: true } : {}),
+			});
 
 			// The RAW engine output, not a finished artifact: the pipeline is a separate phase, and
 			// running it here would put the sanitize stage inside the queue's slot.
@@ -328,13 +401,20 @@ export class TikzBlock extends MarkdownRenderChild {
 				// renders with a piece quietly missing.
 				...(result.firstError ? { warn: STRINGS.warnRecovered(result.firstError) } : {}),
 			};
+			this.origin = { durationMs: result.durationMs };
 			this.dispatch({ type: 'ok' });
 		} catch (error) {
 			if (this.state.phase === 'DISPOSED') return;
 
-			// The queue settles submit() four ways and only `timeout` happens after the job has
-			// started. The other three are PRE-START, which the machine has a distinct event for —
-			// without it an over-cap note leaves every evicted block in SCHEDULING forever.
+			// Not this diagram's doing: the engine was stopped under it. Back in line, no card.
+			if (error instanceof InterruptedError) {
+				this.dispatch({ type: 'interrupted' });
+				return;
+			}
+
+			// Of the queue's own refusals, `timeout` and `stalled` happen after the job has started.
+			// The other three are PRE-START, which the machine has a distinct event for — without it
+			// an over-cap note leaves every evicted block in SCHEDULING forever.
 			if (isQueueError(error, 'depth-cap') || isQueueError(error, 'cancelled')) {
 				this.dispatch({ type: 'rejected', reason: 'depthCap' });
 				return;
@@ -348,18 +428,18 @@ export class TikzBlock extends MarkdownRenderChild {
 				this.dispatch({ type: 'timeout' });
 				return;
 			}
-
-			this.failure = error instanceof TexError ? error : new TexError('tex-error', [], String(error));
-
-			// `err` is a COMPILING event. If the job never started — the runner threw before
-			// calling onStart, or the queue failed for a reason of its own — we are still in
-			// SCHEDULING, where `err` is a no-op and the block would sit unsettled forever.
-			// Route it through `rejected`, which SCHEDULING does handle. Found by a test that
-			// stubbed a queue rejecting without ever starting the job.
-			if (this.state.phase === 'SCHEDULING') {
-				this.dispatch({ type: 'rejected', reason: this.failure.kind });
+			if (isQueueError(error, 'stalled')) {
+				// The engine never came up to take the job. That is what the card says; it is not a
+				// timeout, and the diagram is not poisoned for it.
+				this.failure = new TexError('engine-unavailable', [], undefined, undefined, error.message);
+				this.dispatch({ type: 'err', reason: 'engine-unavailable' });
 				return;
 			}
+
+			this.failure = error instanceof TexError ? error : new TexError('tex-error', [], String(error));
+			// Valid in SCHEDULING too: a job can fail without this block ever hearing that it
+			// started — the queue failed for a reason of its own — and the machine takes any
+			// settlement as the end of the wait.
 			this.dispatch({ type: 'err', reason: this.failure.kind });
 		}
 	}
@@ -375,6 +455,13 @@ export class TikzBlock extends MarkdownRenderChild {
 	private transform(origin: 'l3' | 'render'): void {
 		const raw = this.artifact?.template;
 		if (raw === undefined) {
+			this.failure = new TexError(
+				'empty-output',
+				[],
+				undefined,
+				undefined,
+				'there was no output to prepare',
+			);
 			this.dispatch({ type: 'stageThrew' });
 			return;
 		}
@@ -382,9 +469,16 @@ export class TikzBlock extends MarkdownRenderChild {
 		try {
 			let markup = raw;
 
+			// What the block asked for, and fast mode switches all of it off. The setting and the
+			// directive used to reach the cache key and nothing else — this asked only whether the
+			// block was fast — so `%!tikz svgo=off` recompiled a diagram and changed nothing in it.
+			//
+			// `preset` is SVGO's preset and then the targeted transform. SVGO is not bundled (see
+			// main.ts), so today `preset` is the targeted transform alone, as it always has been.
+			const mode: SvgoMode = this.spec.options.fast ? 'off' : this.spec.svgo;
+
 			// SVGO works on a string, not a document, so it wraps the DOM stages rather than being
 			// one of them.
-			const mode = this.spec.options.fast ? 'off' : 'preset';
 			if (mode === 'preset' && this.deps.svgo) {
 				try {
 					markup = optimizeString(this.deps.svgo, markup);
@@ -400,13 +494,17 @@ export class TikzBlock extends MarkdownRenderChild {
 				doc,
 				buildStages({
 					colors: this.spec.options.presentation.colors ?? 'adapt',
-					optimize: this.spec.options.fast ? 'off' : 'targeted',
+					optimize: mode === 'off' ? 'off' : 'targeted',
 				}),
 				{ raw: this.spec.options.raw },
 			);
 
 			const template = serializeSvg(result.doc);
 			const previous = this.artifact;
+			// What TeX said when it recovered from an error, then what the pipeline skipped. The
+			// first used to be dropped right here, so a diagram with a piece quietly missing showed
+			// nothing at all about it.
+			const warnings = [...(previous?.warn ? [previous.warn] : []), ...result.warnings];
 			this.artifact = {
 				v: 1,
 				template,
@@ -419,23 +517,31 @@ export class TikzBlock extends MarkdownRenderChild {
 				origin: origin === 'l3' ? 'legacy-import' : 'render',
 				createdAt: previous?.createdAt ?? this.deps.now(),
 				lastUsed: this.deps.now(),
-				...(result.warnings.length ? { warn: result.warnings.join('; ') } : {}),
+				...(warnings.length ? { warn: warnings.join('; ') } : {}),
 			};
 
-			this.dispatch({ type: 'ok' });
+			this.dispatch({ type: result.degraded ? 'degraded' : 'ok' });
 		} catch (error) {
+			// Nothing came out that passed sanitize and ids. The raw engine output is dropped here
+			// rather than left lying in `artifact`, where a mount or a measurement could reach it:
+			// that is how it used to be shown, and cached, past the sanitizer.
+			this.artifact = null;
 			this.failure =
-				error instanceof TexError ? error : new TexError('empty-output', [], String(error));
+				error instanceof TexError
+					? error
+					: new TexError('empty-output', [], undefined, undefined, String(error));
 			this.dispatch({ type: 'stageThrew' });
 		}
 	}
 
-	private mount(degraded: boolean): void {
+	private mount(): void {
 		if (this.state.unloaded || !this.artifact) return;
 
 		this.deps.ensureFonts(this.body.doc);
-		this.placeholder?.remove();
+		// Replaces whatever the wrapper held — the spinner, and before this, on a Retry or a
+		// "Render diagram" press, the card or the button, which stayed up under the diagram.
 		this.placeholder = null;
+		this.body.empty();
 
 		const mounted = mountArtifact(this.body, this.artifact, this.spec.options.presentation);
 		if (!mounted) {
@@ -444,7 +550,9 @@ export class TikzBlock extends MarkdownRenderChild {
 			return;
 		}
 
-		if (degraded && this.artifact.warn) renderWarningChip(this.body, this.artifact.warn);
+		// Whenever there is one, and not only for a degraded mount: what TeX reported while it
+		// recovered is stored with the artifact, and is just as true on a cache hit.
+		if (this.artifact.warn) renderWarningChip(this.body, this.artifact.warn);
 		for (const warning of this.spec.preflight) {
 			if (warning.kind === 'warning') renderWarningChip(this.body, warning.message);
 		}
@@ -452,7 +560,8 @@ export class TikzBlock extends MarkdownRenderChild {
 		this.dispatch({ type: 'mounted' });
 	}
 
-	private async measure(): Promise<void> {
+	/** `persist` is the machine's call: false for a degraded mount, which must never be cached. */
+	private async measure(persist: boolean): Promise<void> {
 		const svg = this.body.querySelector('svg');
 		if (!svg || !this.artifact || this.artifact.viewBox !== null) return;
 
@@ -460,29 +569,71 @@ export class TikzBlock extends MarkdownRenderChild {
 		if (!bounds || this.state.phase === 'DISPOSED' || !this.artifact) return;
 
 		this.artifact = withMeasuredBounds(this.artifact, bounds);
-		svg.setAttribute('viewBox', this.artifact.viewBox ?? '');
-		if (!this.spec.options.nocache) this.deps.cache.put(this.spec.key, this.artifact);
+		// Exactly what every later mount of this artifact will do, so the first one matches them —
+		// and the scale, which had no width to work from until now, is applied from the real one.
+		applyBounds(svg, this.artifact.viewBox);
+		applyScale(this.body, svg, this.spec.options.presentation, this.artifact);
+		if (persist && !this.spec.options.nocache) this.deps.cache.put(this.spec.key, this.artifact);
 	}
 
-	private mountError(): void {
+	private mountError(reason: FailureReason): void {
 		this.placeholder?.remove();
 		this.placeholder = null;
 
 		const failure = this.failure ?? new TexError('empty-output', []);
+		const diagnostic = explain(
+			{
+				// The failures the plugin finds itself have no TexError kind of their own, and
+				// falling back to `empty-output` told the user TeX had run and drawn nothing.
+				kind:
+					reason === 'poisoned' ||
+					reason === 'empty-source' ||
+					reason === 'pipeline' ||
+					reason === 'export-budget'
+						? reason
+						: failure.kind,
+				message: failure.message,
+				firstError: failure.firstError,
+				line: failure.line,
+				// The worker's message for a TeX error is the bare `!` line: the macro it choked
+				// on is only in the log, and without it the card said TeX had not echoed one.
+				log: failure.log,
+			},
+			this.deps.host.capabilities,
+		);
+		this.cardMessage = diagnostic.message;
 		renderErrorCard(this.body, {
-			diagnostic: explain(
-				{
-					kind: failure.kind,
-					message: failure.message,
-					firstError: failure.firstError,
-					line: failure.line,
-				},
-				this.deps.host.capabilities,
-			),
+			diagnostic,
 			source: this.spec.source,
 			log: failure.log,
 			onRetry: () => this.dispatch({ type: 'retry' }),
 		});
+	}
+
+	/** Tell whoever is listening how the block came to rest, now that it has. */
+	private reportRest(): void {
+		const report = this.deps.report;
+		const phase = this.state.phase;
+		let outcome: BlockOutcome | null = null;
+
+		if (phase === 'MOUNTED' || phase === 'MOUNTED_DEGRADED') {
+			const origin = this.origin;
+			outcome =
+				origin && 'tier' in origin
+					? { state: 'cached', tier: origin.tier }
+					: { state: 'ok', ...(origin ? { durationMs: origin.durationMs } : {}) };
+		} else if (phase === 'FAILED') {
+			const log = this.failure?.log ?? [];
+			outcome = { state: 'error', message: this.cardMessage, ...(log.length ? { log } : {}) };
+		} else if (phase === 'IDLE_MANUAL') {
+			outcome = { state: 'manual' };
+		} else if (phase === 'DISPOSED' && !this.rested) {
+			outcome = { state: 'cancelled' };
+		}
+
+		if (outcome === null) return;
+		this.rested = true;
+		report?.(outcome);
 	}
 
 	// -------------------------------------------------------------------------------------------

@@ -8,9 +8,25 @@ import type { Budgets } from '../types';
  */
 
 const DESKTOP: Budgets = {
-	concurrency: 2,
+	/**
+	 * One, because there is one worker and it runs one TeX job at a time: a job runs to completion
+	 * inside a single message task. This used to be 2, which bought no parallelism at all — the
+	 * second job sat in the worker's queue while its timeout ran, so a heavy diagram could time out
+	 * an innocent neighbour, and that timeout's terminate took the neighbour down with it. A second
+	 * worker WOULD run in parallel, but costs a second ~156 MiB core dump and a second boot, for a
+	 * path that only matters until the diagrams are cached.
+	 */
+	concurrency: 1,
 	timeoutMs: 10_000,
-	/** The first job also pays for engine boot: base64 decode + inflate + wasm compile, ~600 ms. */
+	timeoutSettingCapMs: null,
+	/**
+	 * How long a job may wait for the engine to come up before its own `timeoutMs` starts.
+	 *
+	 * Booting is base64 decode + inflate + wasm compile, ~600 ms here and seconds on a phone, and it
+	 * is not the diagram's work, so it is not counted against the diagram's budget (queue.ts,
+	 * `startupMs`). A boot slower than this is presumed wedged: the job fails as "the engine could
+	 * not start", never as a timeout, and its key is not poisoned.
+	 */
 	firstJobGraceMs: 20_000,
 	exportBlockTimeoutMs: 30_000,
 	/**
@@ -22,15 +38,20 @@ const DESKTOP: Budgets = {
 	queueDepthCap: 64,
 	rootMarginPx: 200,
 	/**
-	 * A block inside a collapsed callout, a hidden tab or a `display:none` ancestor never receives
-	 * an IntersectionObserver record at all. Without this escape hatch it would sit behind a
-	 * permanent placeholder — a new class of blank-diagram bug introduced by lazy rendering itself.
+	 * A block detached from the document never receives an IntersectionObserver record at all.
+	 * Without this escape hatch it would sit behind a permanent placeholder — a new class of
+	 * blank-diagram bug introduced by lazy rendering itself. (A collapsed callout or a background
+	 * tab does get a record, and renders when shown: block/viewport.ts.)
 	 */
 	zeroRecordEscapeMs: 2_000,
 	debounceMs: 300,
 	l1Entries: 256,
 	l1Bytes: 24 * 1024 * 1024,
 	l2Bytes: 64 * 1024 * 1024,
+	/**
+	 * A worker with nothing to do is terminated after this long (engine/worker-host.ts), giving its
+	 * core dump back. Long enough that reading through a note does not pay a boot per diagram.
+	 */
 	idleTeardownMs: 5 * 60_000,
 };
 
@@ -43,6 +64,14 @@ const MOBILE: Budgets = {
 	 */
 	concurrency: 1,
 	timeoutMs: 20_000,
+	/**
+	 * The time limit setting may lower the limit on a phone, not raise it. The setting syncs between
+	 * devices, and a limit chosen for a desktop's heavy diagrams would let one diagram hold the
+	 * phone's only engine — and its ~156 MiB — for that long, with every other diagram waiting. A
+	 * block's own `%!tikz timeout=` is not capped: it is a decision about that one diagram, and the
+	 * timeout card is what tells the user to write it.
+	 */
+	timeoutSettingCapMs: 20_000,
 	firstJobGraceMs: 30_000,
 	exportBlockTimeoutMs: 30_000,
 	exportTotalBudgetMs: 60_000,
@@ -61,12 +90,6 @@ const MOBILE: Budgets = {
 	idleTeardownMs: 30_000,
 };
 
-export function budgetsFor(isMobile: boolean, hardwareConcurrency: number): Budgets {
-	if (isMobile) return { ...MOBILE };
-	return { ...DESKTOP, concurrency: Math.max(1, Math.min(DESKTOP.concurrency, hardwareConcurrency - 1)) };
-}
-
-/** Applied when the user opts a block into fast mode, or the whole plugin into it. */
-export function applyFastMode(budgets: Budgets): Budgets {
-	return budgets;
+export function budgetsFor(isMobile: boolean): Budgets {
+	return isMobile ? { ...MOBILE } : { ...DESKTOP };
 }

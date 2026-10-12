@@ -9,21 +9,39 @@
 export interface ViewportGateOptions {
 	rootMarginPx: number;
 	/**
-	 * A block inside a collapsed callout, a hidden tab, a `display:none` ancestor, or a reading-view
-	 * section Obsidian has detached receives NO IntersectionObserver record at all — not even a
-	 * non-intersecting one. Without a timeout it would sit behind a placeholder forever: a new class
-	 * of blank-diagram bug introduced by lazy rendering itself. So after this long with zero records
-	 * we give up waiting and schedule it at the lowest priority.
+	 * A block that is not in the document — a reading-view section Obsidian has detached — receives
+	 * NO IntersectionObserver record at all, not even a non-intersecting one. Without a timeout it
+	 * would sit behind a placeholder forever: a new class of blank-diagram bug introduced by lazy
+	 * rendering itself. So after this long with zero records we give up waiting, and the block is
+	 * scheduled at the lowest priority.
+	 *
+	 * A block under a `display:none` ancestor — a collapsed callout, a background tab — is a
+	 * different case, though it was long listed with this one: it DOES get a record, not
+	 * intersecting (measured in Chromium), and renders when it is shown. That is lazy rendering
+	 * doing its job, and the escape hatch leaves it alone.
 	 */
 	zeroRecordEscapeMs: number;
 	setTimeout: (fn: () => void, ms: number) => number;
 	clearTimeout: (id: number) => void;
 }
 
-type Callback = (visible: boolean) => void;
+/** `escaped`: no record ever came, and the gate gave up waiting (see `zeroRecordEscapeMs`). */
+type Callback = (visible: boolean, escaped?: boolean) => void;
 
 export class ViewportGate {
-	private readonly observers = new Map<Element | Document, IntersectionObserver>();
+	/**
+	 * One observer per scroll root, with the number of blocks it is watching, and given up at zero.
+	 *
+	 * They used to be dropped only when the plugin unloaded. An observer keeps its root alive, so
+	 * every closed tab and every hover preview that ever held an uncached diagram kept its whole
+	 * detached view in memory for the rest of the session.
+	 */
+	private readonly roots = new Map<
+		Element | Document,
+		{ observer: IntersectionObserver; blocks: number }
+	>();
+	/** The root each observed block is counted under, so that letting it go finds the same one. */
+	private readonly rootOf = new WeakMap<Element, Element | Document>();
 	private readonly callbacks = new WeakMap<Element, Callback>();
 	private readonly sawRecord = new WeakSet<Element>();
 	private readonly escapeTimers = new WeakMap<Element, number>();
@@ -36,21 +54,29 @@ export class ViewportGate {
 	observe(el: HTMLElement, onChange: Callback): void {
 		this.callbacks.set(el, onChange);
 
-		const root = this.scrollRootFor(el);
-		let observer = this.observers.get(root ?? el.doc);
-		if (!observer) {
-			observer = new IntersectionObserver((entries) => this.handle(entries), {
-				root: root ?? null,
-				rootMargin: `${this.options.rootMarginPx}px`,
-			});
-			this.observers.set(root ?? el.doc, observer);
+		if (!this.rootOf.has(el)) {
+			const root = this.scrollRootFor(el);
+			const key = root ?? el.doc;
+			let entry = this.roots.get(key);
+			if (!entry) {
+				const observer = new IntersectionObserver((entries) => this.handle(entries), {
+					root: root ?? null,
+					rootMargin: `${this.options.rootMarginPx}px`,
+				});
+				entry = { observer, blocks: 0 };
+				this.roots.set(key, entry);
+			}
+			entry.blocks++;
+			entry.observer.observe(el);
+			this.rootOf.set(el, key);
 		}
-		observer.observe(el);
 
+		this.clearEscape(el);
 		const timer = this.options.setTimeout(() => {
 			if (this.sawRecord.has(el)) return;
-			// Never observed at all. Treat as "render it anyway, at the back of the queue".
-			this.callbacks.get(el)?.(true);
+			// Never observed at all: "render it anyway, at the back of the queue". Said as an escape
+			// rather than as plain visibility, which put the block in with the diagrams on screen.
+			this.callbacks.get(el)?.(true, true);
 		}, this.options.zeroRecordEscapeMs);
 		this.escapeTimers.set(el, timer);
 	}
@@ -59,28 +85,40 @@ export class ViewportGate {
 		for (const entry of entries) {
 			const el = entry.target as HTMLElement;
 			this.sawRecord.add(el);
-			const timer = this.escapeTimers.get(el);
-			if (timer !== undefined) {
-				this.options.clearTimeout(timer);
-				this.escapeTimers.delete(el);
-			}
+			this.clearEscape(el);
 			this.callbacks.get(el)?.(entry.isIntersecting);
 		}
 	}
 
 	unobserve(el: HTMLElement): void {
-		for (const observer of this.observers.values()) observer.unobserve(el);
+		const key = this.rootOf.get(el);
+		if (key !== undefined) {
+			this.rootOf.delete(el);
+			const entry = this.roots.get(key);
+			if (entry) {
+				entry.observer.unobserve(el);
+				entry.blocks--;
+				if (entry.blocks <= 0) {
+					entry.observer.disconnect();
+					this.roots.delete(key);
+				}
+			}
+		}
 		this.callbacks.delete(el);
+		this.clearEscape(el);
+	}
+
+	disconnect(): void {
+		for (const { observer } of this.roots.values()) observer.disconnect();
+		this.roots.clear();
+	}
+
+	private clearEscape(el: Element): void {
 		const timer = this.escapeTimers.get(el);
 		if (timer !== undefined) {
 			this.options.clearTimeout(timer);
 			this.escapeTimers.delete(el);
 		}
-	}
-
-	disconnect(): void {
-		for (const observer of this.observers.values()) observer.disconnect();
-		this.observers.clear();
 	}
 
 	/**

@@ -99,9 +99,13 @@ class Runs {
 	live = 0;
 	maxLive = 0;
 
-	readonly run = (job: Job, signal: AbortSignal): Promise<string> => {
+	/** How to say "this job has reached the engine", per job, for queues with a startup allowance. */
+	readonly running = new Map<string, () => void>();
+
+	readonly run = (job: Job, signal: AbortSignal, running?: () => void): Promise<string> => {
 		this.started.push(job.id);
 		this.signals.set(job.id, signal);
+		if (running) this.running.set(job.id, running);
 		if (this.throwSync.has(job.id)) throw new Error(`sync boom: ${job.id}`);
 		this.live += 1;
 		this.maxLive = Math.max(this.maxLive, this.live);
@@ -131,7 +135,7 @@ class Runs {
 	}
 }
 
-function harness(opts: { concurrency: number; depthCap: number }) {
+function harness(opts: { concurrency: number; depthCap: number; startupMs?: number }) {
 	const timers = new FakeTimers();
 	const runs = new Runs();
 	const queue = new RenderQueue<Job, string>({
@@ -139,6 +143,7 @@ function harness(opts: { concurrency: number; depthCap: number }) {
 		depthCap: opts.depthCap,
 		run: runs.run,
 		timers,
+		...(opts.startupMs === undefined ? {} : { startupMs: opts.startupMs }),
 	});
 	const submit = (key: string, priority: Priority, timeoutMs = 1000): Tracked<string> =>
 		track(queue.submit(key, { id: key }, priority, timeoutMs));
@@ -236,8 +241,9 @@ describe('concurrency', () => {
 	});
 
 	it('still makes progress when handed a concurrency below one', async () => {
-		// `min(2, hardwareConcurrency - 1)` is 0 on a single-core device, and a queue with zero slots
-		// would never start anything and never settle anything — a silent, total stall.
+		// The desktop budget was once `min(2, hardwareConcurrency - 1)`, which is 0 on a single-core
+		// device, and a queue with zero slots would never start anything and never settle anything —
+		// a silent, total stall.
 		const h = harness({ concurrency: 0, depthCap: 64 });
 		const a = h.submit('a', 1);
 		await tick();
@@ -294,6 +300,73 @@ describe('dedup by key', () => {
 		h.submit('k', 1);
 		await tick();
 		expect(h.runs.countOf('k')).toBe(2);
+	});
+});
+
+describe('start notification is per owner', () => {
+	/**
+	 * Dedup hands every caller of a key the same job, so "your job has started" has to reach every
+	 * one of them. It used to ride on the job object, which is the FIRST caller's: the second block
+	 * never heard, stayed in SCHEDULING, and never settled.
+	 */
+	it('tells every owner of a shared job, including one who joins after the start', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		h.submit('blocker', 1);
+		await tick();
+
+		const started: string[] = [];
+		track(h.queue.submit('k', { id: 'k' }, 1, 1000, { owner: 'a', onStart: () => started.push('a') }));
+		track(h.queue.submit('k', { id: 'k' }, 2, 1000, { owner: 'b', onStart: () => started.push('b') }));
+		expect(started).toEqual([]);
+
+		h.runs.finish('blocker');
+		await tick();
+		expect(started).toEqual(['a', 'b']);
+
+		// Joining a job that is already running: told at once, not never.
+		track(h.queue.submit('k', { id: 'k' }, 1, 1000, { owner: 'c', onStart: () => started.push('c') }));
+		expect(started).toEqual(['a', 'b', 'c']);
+		expect(h.runs.countOf('k')).toBe(1);
+	});
+
+	it('does not tell an owner who released before the job started', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		h.submit('blocker', 1);
+		await tick();
+
+		const started: string[] = [];
+		track(h.queue.submit('k', { id: 'k' }, 1, 1000, { owner: 'a', onStart: () => started.push('a') }));
+		track(h.queue.submit('k', { id: 'k' }, 1, 1000, { owner: 'b', onStart: () => started.push('b') }));
+		h.queue.release('k', 'a');
+
+		h.runs.finish('blocker');
+		await tick();
+		expect(started).toEqual(['b']);
+	});
+
+	it('keeps the job going when one owner’s notification throws', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		const started: string[] = [];
+		const a = track(
+			h.queue.submit('k', { id: 'k' }, 1, 1000, {
+				owner: 'a',
+				onStart: () => {
+					throw new Error('a broken listener');
+				},
+			}),
+		);
+		const b = track(
+			h.queue.submit('k', { id: 'k' }, 1, 1000, { owner: 'b', onStart: () => started.push('b') }),
+		);
+		await tick();
+
+		expect(started).toEqual(['b']);
+
+		h.runs.finish('k', 'shared');
+		await tick();
+		expect(a.value).toBe('shared');
+		expect(b.value).toBe('shared');
+		expect(h.queue.inflightCount()).toBe(0);
 	});
 });
 
@@ -711,6 +784,131 @@ describe('timeout and poison', () => {
 	});
 });
 
+describe('the clock starts when the job reaches the engine', () => {
+	/**
+	 * A job's `timeoutMs` is the diagram's budget. Booting the engine is not the diagram's work,
+	 * and on a phone it is seconds of it — so a queue given a startup allowance holds the job's
+	 * clock until the runner says the engine has it.
+	 */
+	it('does not count the startup against the timeout', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		const job = h.submit('k', 1, 100);
+		await tick();
+
+		// A slow boot: far longer than the job's own budget, well inside the allowance.
+		h.timers.advance(3000);
+		await tick();
+		expect(job.status).toBe('pending');
+
+		h.runs.running.get('k')?.();
+		h.timers.advance(99);
+		await tick();
+		expect(job.status).toBe('pending');
+
+		h.timers.advance(1);
+		await tick();
+		expect(isQueueError(job.error, 'timeout')).toBe(true);
+		expect(h.queue.isPoisoned('k')).toBe(true);
+	});
+
+	it('gives up on a job that never reaches the engine, without blaming the diagram', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		const job = h.submit('k', 1, 100);
+		const next = h.submit('next', 1, 100);
+		await tick();
+
+		h.timers.advance(5000);
+		await tick();
+
+		expect(isQueueError(job.error, 'stalled')).toBe(true);
+		// The signal is how the runner learns to stop the boot it is waiting on.
+		expect(h.runs.signals.get('k')?.aborted).toBe(true);
+		// The diagram never ran, so nothing is known against it.
+		expect(h.queue.isPoisoned('k')).toBe(false);
+		expect(h.runs.started).toEqual(['k', 'next']);
+		expect(next.status).toBe('pending');
+	});
+
+	it('ignores a `running` that arrives after the job settled', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		h.submit('k', 1, 100);
+		await tick();
+		h.runs.finish('k');
+		await tick();
+
+		h.runs.running.get('k')?.();
+		expect(h.timers.outstanding).toBe(0);
+	});
+
+	it('honours a deadline raised by a caller who joined during the startup', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		const visible = h.submit('k', 1, 100);
+		await tick();
+		track(h.queue.submit('k', { id: 'k' }, 0, 1000));
+
+		h.runs.running.get('k')?.();
+		h.timers.advance(999);
+		await tick();
+		expect(visible.status).toBe('pending');
+		h.timers.advance(1);
+		await tick();
+		expect(isQueueError(visible.error, 'timeout')).toBe(true);
+	});
+});
+
+describe('pause and close', () => {
+	it('starts nothing while paused, and picks up where it left off', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		h.queue.pause();
+		const job = h.submit('k', 1);
+		await tick();
+		expect(h.runs.started).toEqual([]);
+		expect(h.queue.size()).toBe(1);
+
+		h.queue.resume();
+		await tick();
+		expect(h.runs.started).toEqual(['k']);
+		h.runs.finish('k');
+		await tick();
+		expect(job.status).toBe('fulfilled');
+	});
+
+	it('lets a job already running finish while paused, and starts nothing after it', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		const running = h.submit('a', 1);
+		h.submit('b', 1);
+		await tick();
+		h.queue.pause();
+
+		h.runs.finish('a');
+		await tick();
+		expect(running.status).toBe('fulfilled');
+		expect(h.runs.started).toEqual(['a']);
+	});
+
+	it('close() drops everything waiting and refuses everything after, so nothing is left to start', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		h.submit('a', 1);
+		const waiting = h.submit('b', 1);
+		await tick();
+
+		h.queue.close();
+		await tick();
+		expect(isQueueError(waiting.error, 'cancelled')).toBe(true);
+		expect(h.queue.size()).toBe(0);
+
+		const late = h.submit('c', 1);
+		await tick();
+		expect(isQueueError(late.error, 'cancelled')).toBe(true);
+
+		// The job that was running settles, and its `finally` must not start anything.
+		h.runs.finish('a');
+		await tick();
+		expect(h.runs.started).toEqual(['a']);
+		expect(h.queue.inflightCount()).toBe(0);
+	});
+});
+
 describe('depth cap', () => {
 	it('rejects the least urgent overflow with a distinguishable reason', async () => {
 		const h = harness({ concurrency: 1, depthCap: 2 });
@@ -767,6 +965,46 @@ describe('depth cap', () => {
 		h.runs.finish('evicted');
 		await tick();
 		expect(retried.status).toBe('fulfilled');
+	});
+
+	it('never turns away an uncapped job, nor counts it against the cap', async () => {
+		// A PDF export of a note with more uncached diagrams than the cap — 16 on a phone — printed
+		// a "Render diagram" button for each one over it: the cap evicted export jobs like any other.
+		const h = harness({ concurrency: 1, depthCap: 2 });
+		h.submit('blocker', 1);
+		await tick();
+		const exports = ['e1', 'e2', 'e3', 'e4'].map((key) =>
+			track(h.queue.submit(key, { id: key }, 0, 1000, { uncapped: true })),
+		);
+		await tick();
+		expect(exports.map((e) => e.status)).toEqual(['pending', 'pending', 'pending', 'pending']);
+
+		// Ordinary work still has the whole cap to itself.
+		const a = h.submit('a', 1);
+		const b = h.submit('b', 1);
+		const c = h.submit('c', 2);
+		await tick();
+		expect(isQueueError(c.error, 'depth-cap')).toBe(true);
+		expect(a.status).toBe('pending');
+		expect(b.status).toBe('pending');
+		expect(exports.map((e) => e.status)).toEqual(['pending', 'pending', 'pending', 'pending']);
+	});
+
+	it('protects a waiting job once an uncapped caller joins it', async () => {
+		const h = harness({ concurrency: 1, depthCap: 1 });
+		h.submit('blocker', 1);
+		await tick();
+		const shared = h.submit('k', 3);
+		const joined = track(h.queue.submit('k', { id: 'k' }, 3, 1000, { uncapped: true }));
+		const first = h.submit('o1', 1);
+		const second = h.submit('o2', 1);
+		await tick();
+
+		// `k` is the least urgent job waiting, and would have been the one to go.
+		expect(shared.status).toBe('pending');
+		expect(joined.status).toBe('pending');
+		expect(first.status).toBe('pending');
+		expect(isQueueError(second.error, 'depth-cap')).toBe(true);
 	});
 
 	it('does not evict a job that a free slot can take immediately', async () => {

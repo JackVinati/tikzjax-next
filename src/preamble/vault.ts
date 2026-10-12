@@ -17,8 +17,11 @@ export class PreambleService {
 	private readonly app: App;
 	private readonly hash: (text: string) => string;
 
-	/** file path -> the block cache keys whose artifact was built from it. */
-	private readonly dependents = new Map<string, Set<string>>();
+	/**
+	 * file path -> the block cache keys on the page that were built from it, each with the number
+	 * of blocks showing it (the same diagram in two panes is one key and two blocks).
+	 */
+	private readonly dependents = new Map<string, Map<string, number>>();
 	/** Resolutions are memoised per note+options; cleared wholesale when any dependency changes. */
 	private readonly cache = new Map<string, ResolvedPreamble>();
 
@@ -99,12 +102,31 @@ export class PreambleService {
 	/** Record that a block's artifact depends on these files, so a change can invalidate it. */
 	track(blockKey: string, deps: readonly string[]): void {
 		for (const dep of deps) {
-			let set = this.dependents.get(dep);
-			if (!set) {
-				set = new Set();
-				this.dependents.set(dep, set);
+			let keys = this.dependents.get(dep);
+			if (!keys) {
+				keys = new Map();
+				this.dependents.set(dep, keys);
 			}
-			set.add(blockKey);
+			keys.set(blockKey, (keys.get(blockKey) ?? 0) + 1);
+		}
+	}
+
+	/**
+	 * The block is gone. Called with what `track` was given, when the block unloads.
+	 *
+	 * Without it, only a change to the file ever removed a key, so a session spent editing a diagram
+	 * that uses a preamble kept one for every version of it. A block nobody can see needs no
+	 * invalidating: should it come back, it is processed again against the file as it is then.
+	 */
+	untrack(blockKey: string, deps: readonly string[]): void {
+		for (const dep of deps) {
+			const keys = this.dependents.get(dep);
+			const count = keys?.get(blockKey);
+			// Already gone: the file changed while the block was up, and `invalidate` took the lot.
+			if (!keys || count === undefined) continue;
+			if (count > 1) keys.set(blockKey, count - 1);
+			else keys.delete(blockKey);
+			if (keys.size === 0) this.dependents.delete(dep);
 		}
 	}
 
@@ -121,10 +143,10 @@ export class PreambleService {
 		const affected = this.dependents.get(path);
 		if (!affected) return [];
 		this.dependents.delete(path);
-		return [...affected];
+		return [...affected.keys()];
 	}
 
-	/** Every file any block currently depends on. */
+	/** Every file a block on the page depends on. */
 	trackedFiles(): string[] {
 		return [...this.dependents.keys()];
 	}

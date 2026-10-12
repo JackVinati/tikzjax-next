@@ -1,13 +1,15 @@
 import { ItemView, type WorkspaceLeaf } from 'obsidian';
 import type { EngineInventory } from '../../engine-src/protocol';
+import type { BlockOutcome } from '../block/render-child';
 
 export const DEBUG_VIEW_TYPE = 'tikzjax-debug';
 
+/** One block, from when it was processed: `rendering` until it reports how it came to rest. */
 export interface RenderRecord {
 	key: string;
 	sourcePreview: string;
-	state: 'rendering' | 'ok' | 'error' | 'cached';
-	tier?: 'l1' | 'l2' | 'l3' | undefined;
+	state: 'rendering' | BlockOutcome['state'];
+	tier?: BlockOutcome['tier'];
 	durationMs?: number | undefined;
 	message?: string | undefined;
 	log?: string[] | undefined;

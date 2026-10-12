@@ -24,11 +24,8 @@ export const STRINGS = {
 	warnSanitized: 'Removed active content from this diagram.',
 	warnRecovered: (error: string) => `TeX reported: ${error}`,
 
-	// Failures.
-	errTimeout: (seconds: number) => `Timed out after ${seconds} s. The engine was restarted.`,
-	errPoisoned: 'This diagram timed out earlier. Reload Obsidian to try it again.',
-	errEmptyOutput: 'TeX produced no output.',
-	errEngineUnavailable: 'The TeX engine could not start.',
+	// Failures: the error card's copy is in engine/hints.ts, which words it from the failure and
+	// the engine's inventory.
 
 	// Coexistence with the plugin this one forks from.
 	legacyPluginTitle: 'Two TikZ plugins are enabled',

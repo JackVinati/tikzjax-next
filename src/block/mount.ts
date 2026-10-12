@@ -1,6 +1,7 @@
 import type { Artifact, Presentation } from '../types';
 import { stampIds } from '../svg/ids';
-import { parseViewBox, formatViewBox, type InkBounds } from '../svg/geometry';
+import { parseSvg, serializeSvg } from '../svg/serialize';
+import { parseViewBox, formatViewBox, formatNumber, parseLength, type InkBounds } from '../svg/geometry';
 
 /**
  * Putting a finished artifact into the document. See internal/DESIGN.md §7.2 steps 7-9.
@@ -43,10 +44,84 @@ export function mountArtifact(
 	const svg = fragment.querySelector('svg');
 	if (!svg) return null;
 
+	applyBounds(svg, artifact.viewBox);
 	applyPresentation(container, svg, presentation, artifact);
 	container.appendChild(fragment);
 
 	return { svg: svg, nonce };
+}
+
+/**
+ * What one more mount of this artifact would show, as a standalone string: its own id nonce and
+ * the measured frame.
+ *
+ * For the commands that take a diagram out of the note — Copy and Save SVG, Finalize, the zoom
+ * view. They used to be handed the stored template itself, which still carries the `__TZ__`
+ * placeholders where its ids belong (svg/freeze.ts calls freezing one the caller's bug) and the
+ * engine's frame, an inch short of the drawing.
+ */
+export function standaloneMarkup(artifact: Artifact): string {
+	const markup = stampIds(artifact.template, String(++instanceCounter));
+	if (artifact.viewBox === null) return markup;
+	try {
+		const doc = parseSvg(markup);
+		applyBounds(doc.documentElement, artifact.viewBox);
+		return serializeSvg(doc);
+	} catch {
+		// The template parsed once already, on its way through the pipeline. Should it not now, the
+		// engine's frame is still a diagram, and a better answer than none.
+		return markup;
+	}
+}
+
+/**
+ * Put the measured ink box on a mounted <svg>.
+ *
+ * The template keeps the engine's frame, and the corrected box is stored beside it
+ * (`Artifact.viewBox`) precisely so that every later mount is arithmetic — but it was only ever
+ * written onto the svg that had just been measured. Nothing applied it on a mount, so a diagram
+ * was framed right the first time and clipped again on every cache hit after (#66 #71 #29).
+ *
+ * `width`/`height` are rescaled with it, as svg/geometry.ts's applyInkBounds does for a document:
+ * one user unit stays one point, so only the frame moves, not the size of the drawing. A
+ * percentage extent is resolved against the container, not in user units, and is left alone.
+ */
+export function applyBounds(svg: Element, viewBox: string | null): void {
+	const box = parseViewBox(viewBox);
+	if (box === null || box.width <= 0 || box.height <= 0) return;
+
+	const current = parseViewBox(svg.getAttribute('viewBox'));
+	rescaleExtent(svg, 'width', box.width, current?.width);
+	rescaleExtent(svg, 'height', box.height, current?.height);
+	svg.setAttribute('viewBox', formatViewBox(box));
+}
+
+function rescaleExtent(
+	svg: Element,
+	attribute: 'width' | 'height',
+	extent: number,
+	previous: number | undefined,
+): void {
+	const length = parseLength(svg.getAttribute(attribute));
+	if (length === null || length.unit === '%') return;
+	const ratio = previous !== undefined && previous > 0 ? length.value / previous : 1;
+	svg.setAttribute(attribute, formatNumber(extent * ratio) + length.unit);
+}
+
+/**
+ * `scale` sizes the wrapper from the diagram's width: the measured one when there is one, and
+ * until then the frame the engine drew, which is what is on screen. Waiting for the measurement
+ * meant `scale=` did nothing at all the first time a diagram rendered.
+ */
+export function applyScale(
+	container: HTMLElement,
+	svg: SVGSVGElement,
+	presentation: Presentation,
+	artifact: Artifact,
+): void {
+	if (!presentation.scale || presentation.scale === 1) return;
+	const width = artifact.w > 0 ? artifact.w : (parseViewBox(svg.getAttribute('viewBox'))?.width ?? 0);
+	if (width > 0) container.setCssStyles({ width: `${formatNumber(width * presentation.scale)}px` });
 }
 
 /**
@@ -72,9 +147,7 @@ function applyPresentation(
 	// property from code, and every value here comes from the block's own options.
 	if (presentation.width) container.setCssStyles({ width: presentation.width });
 	if (presentation.maxWidth) container.setCssStyles({ maxWidth: presentation.maxWidth });
-	if (presentation.scale && presentation.scale !== 1 && artifact.w > 0) {
-		container.setCssStyles({ width: `${artifact.w * presentation.scale}px` });
-	}
+	applyScale(container, svg, presentation, artifact);
 
 	// Accessibility: an unlabelled <svg> is invisible to a screen reader, and today every diagram
 	// is one. `alt=""` is a deliberate "this is decorative", not a missing value.

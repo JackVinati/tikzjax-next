@@ -7,8 +7,10 @@ import { preflight } from '../source/preflight';
 import { deriveKey } from '../cache/key';
 import { isExportContext } from '../platform/context';
 import { artifactRevision, type TikzSettings } from '../settings/schema';
-import { TikzBlock, type BlockDeps, type TexJobSpec } from './render-child';
-import type { RenderQueue } from '../queue/queue';
+import { TikzBlock, type BlockDeps, type BlockOutcome, type TexJobSpec } from './render-child';
+import { standaloneMarkup } from './mount';
+import { asProcessorSource } from '../note/finalize';
+import type { QueueTimers, RenderQueue } from '../queue/queue';
 import type { DiagramCache } from '../cache';
 import type { Budgets } from '../types';
 import type { PreambleService } from '../preamble/vault';
@@ -27,7 +29,13 @@ import type { PreambleService } from '../preamble/vault';
 
 export interface ProcessorDeps {
 	app: App;
-	settings: TikzSettings;
+	/**
+	 * Read once per block, never held. The plugin REPLACES its settings object when Sync or another
+	 * device rewrites data.json, and the settings tab writes into whichever object is current; a
+	 * processor handed the object at load went on rendering with the old one, and with nothing the
+	 * tab changed after that, until Obsidian restarted.
+	 */
+	settings: () => TikzSettings;
 	budgets: Budgets;
 	cache: DiagramCache;
 	queue: RenderQueue<TexJobSpec, TexResult>;
@@ -37,14 +45,99 @@ export interface ProcessorDeps {
 	unobserve: BlockDeps['unobserve'];
 	ensureFonts: BlockDeps['ensureFonts'];
 	now: () => number;
+	/** For the deadline of a PDF export's total budget. */
+	timers: QueueTimers;
 	preamble: PreambleService;
-	/** Notified so the debug view can list what happened without the child knowing about it. */
-	onBlock?: ((spec: TexJobSpec) => void) | undefined;
+	/**
+	 * Notified of every block, so the debug view can list what happened without the child knowing
+	 * about it. What it returns, if anything, is told how the block comes to rest.
+	 */
+	onBlock?:
+		((spec: TexJobSpec, el: HTMLElement) => ((outcome: BlockOutcome) => void) | undefined) | undefined;
+}
+
+/**
+ * The off-screen container "Render all diagrams in this note" renders a note into. A block inside
+ * it is there to be rendered, now: no viewport will ever see it.
+ */
+export const OFFSCREEN_CLASS = 'tikzjax-offscreen';
+
+/** Where a block is on the page, as far as its spec is concerned. */
+interface Place {
+	isExport: boolean;
+	/** Inside a PDF export, and so under its total budget. */
+	budgeted: boolean;
+	/** Inside the off-screen container: rendered eagerly, whatever its lazy mode. */
+	offscreen: boolean;
+}
+
+/**
+ * How the blocks rendered inside one container came to rest. "Render all diagrams in this note"
+ * counts its own run with one.
+ *
+ * It used to count the diagnostics ring instead: entries written when each block was processed,
+ * before anything had happened to it, so always "rendering" and never a failure — and once the
+ * ring was full at a hundred, the slice it counted was empty and every run "rendered 0".
+ */
+export class BlockTally {
+	private readonly container: HTMLElement;
+	/** The last word from each block, by the order they were seen; null until it comes to rest. */
+	private readonly last: (BlockOutcome['state'] | null)[] = [];
+
+	constructor(container: HTMLElement) {
+		this.container = container;
+	}
+
+	/** A listener for one block's outcomes, if the block is inside this container. */
+	watch(el: HTMLElement): ((outcome: BlockOutcome) => void) | undefined {
+		if (!this.container.contains(el)) return undefined;
+		const index = this.last.push(null) - 1;
+		return (outcome) => {
+			this.last[index] = outcome.state;
+		};
+	}
+
+	/**
+	 * Rendered: on screen, compiled or from a cache. Everything else did not — a card, a button,
+	 * and a block cancelled before it came to rest.
+	 */
+	counts(): { ok: number; failed: number } {
+		let ok = 0;
+		for (const state of this.last) if (state === 'ok' || state === 'cached') ok++;
+		return { ok, failed: this.last.length - ok };
+	}
 }
 
 export function createProcessor(deps: ProcessorDeps) {
+	/**
+	 * When each PDF export stops waiting, keyed by the export's `.print` container: every block of
+	 * one export is rendered into it, and the budget is for the export as a whole.
+	 *
+	 * Weak, so a finished export's popup is not kept alive by its entry here. Keyed by the
+	 * container rather than by the document, which would also catch a pop-out window — open for
+	 * hours, and no export at all.
+	 */
+	const exportDeadlines = new WeakMap<Element, number>();
+
 	return (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext): Promise<void> => {
-		const prepared = prepare(source, el, deps, ctx.sourcePath);
+		// printToPdf builds its `.print` container and puts the note in it before it runs any
+		// processor (read in the 1.14.4 bundle), so this finds it.
+		const print = el.closest('.print');
+		let deadline: number | undefined;
+		if (print) {
+			deadline = exportDeadlines.get(print);
+			if (deadline === undefined) {
+				deadline = deps.now() + deps.budgets.exportTotalBudgetMs;
+				exportDeadlines.set(print, deadline);
+			}
+		}
+
+		const place: Place = {
+			isExport: isExportContext(deps.app, el),
+			budgeted: print !== null,
+			offscreen: el.closest(`.${OFFSCREEN_CLASS}`) !== null,
+		};
+		const prepared = prepare(source, deps, ctx.sourcePath, place);
 
 		// The common case — no preamble configured anywhere — stays SYNCHRONOUS, and that is not an
 		// optimisation. A cached diagram is only painted in the same frame as the text around it if
@@ -52,9 +145,9 @@ export function createProcessor(deps: ProcessorDeps) {
 		// nothing to resolve would put every cache hit a microtask late and bring the placeholder
 		// back. A vault that does configure a preamble opts into the async path.
 		if (prepared instanceof Promise) {
-			return prepared.then((spec) => attach(spec, el, ctx, deps));
+			return prepared.then((spec) => attach(spec, el, ctx, deps, deadline));
 		}
-		return attach(prepared, el, ctx, deps);
+		return attach(prepared, el, ctx, deps, deadline);
 	};
 }
 
@@ -63,8 +156,9 @@ function attach(
 	el: HTMLElement,
 	ctx: MarkdownPostProcessorContext,
 	deps: ProcessorDeps,
+	deadline: number | undefined,
 ): Promise<void> {
-	deps.onBlock?.(spec);
+	const report = deps.onBlock?.(spec, el);
 	{
 		const child = new TikzBlock(el, spec, {
 			cache: deps.cache,
@@ -76,52 +170,149 @@ function attach(
 			ensureFonts: deps.ensureFonts,
 			debounceMs: deps.budgets.debounceMs,
 			now: deps.now,
+			report,
 		});
+
+		// A change to a preamble file has to reach the blocks built from it — for as long as they
+		// are on the page, and no longer. Each entry is `path:hash`, and a path may itself hold a
+		// colon, so the hash is what follows the last one.
+		const files = spec.options.baked.depHashes.map((d) => d.slice(0, d.lastIndexOf(':')));
+		if (files.length > 0) {
+			deps.preamble.track(spec.key, files);
+			child.register(() => deps.preamble.untrack(spec.key, files));
+		}
 
 		// Obsidian owns load()/unload() from here, which is what ties cancellation to the block's
 		// real lifetime instead of to a guess about when a section went away.
 		ctx.addChild(child);
+		if (deadline !== undefined) expireAt(child, deadline, deps);
 		return child.settled;
 	}
+}
+
+/**
+ * Hold one block of a PDF export to the export's deadline (budgets.ts `exportTotalBudgetMs`).
+ *
+ * Obsidian's export waits on every block's promise and has no timeout of its own, and each block
+ * was bounded only by its own 30 s, one after another in the one engine: forty uncached diagrams
+ * held "Preparing PDF" for up to twenty minutes. At the deadline every block still waiting rests
+ * on a card that says it was not ready in time — the PDF prints that in its place — and the export
+ * goes ahead. A block that comes to rest first takes its timer with it.
+ */
+function expireAt(child: TikzBlock, deadline: number, deps: ProcessorDeps): void {
+	const id = deps.timers.setTimeout(() => child.expire(), Math.max(0, deadline - deps.now()));
+	void child.settled.then(() => deps.timers.clearTimeout(id));
+}
+
+/** What deriving a block's key needs — everything but the block's place on the page. */
+export type KeyDeps = Pick<ProcessorDeps, 'settings' | 'budgets' | 'host' | 'preamble'>;
+
+/**
+ * The cache key a block with this source has in this note: the processor's own derivation, run
+ * without a block.
+ *
+ * For the commands, which find a diagram by scanning the note's markdown. They used to look the
+ * key up in a map the processor filled, keyed on the source text — which only knew blocks a view
+ * had already processed this session (never one in Source mode, nor one the cursor was resting in
+ * when the note opened), grew with every edit, and was keyed on a form of the text the scanner does
+ * not produce. Deriving it here, from `asProcessorSource` of the scanned text, cannot drift from the
+ * processor, because it is the processor.
+ */
+export function keyFor(source: string, notePath: string, deps: KeyDeps): string | Promise<string> {
+	const prepared = prepare(source, deps, notePath, {
+		isExport: false,
+		budgeted: false,
+		offscreen: false,
+	});
+	return prepared instanceof Promise ? prepared.then((spec) => spec.key) : prepared.key;
+}
+
+/**
+ * The finished markup of a block found by scanning a note, or null when it has not been rendered on
+ * this device.
+ *
+ * L1 first, then L2: memory is empty after a restart, after the phone was backgrounded, and for any
+ * diagram it evicted, and the commands used to say such a diagram had never been rendered. Never
+ * L3 — a legacy record has not been through the pipeline, so it is not something to hand out.
+ */
+export async function renderedMarkup(
+	scanned: string,
+	notePath: string,
+	deps: KeyDeps & { cache: DiagramCache },
+): Promise<string | null> {
+	const key = await keyFor(asProcessorSource(scanned), notePath, deps);
+	let artifact = deps.cache.peek(key);
+	if (!artifact) {
+		try {
+			artifact = (await deps.cache.lookup(key, null))?.artifact;
+		} catch {
+			artifact = undefined;
+		}
+	}
+	return artifact ? standaloneMarkup(artifact) : null;
+}
+
+/**
+ * Whether a block on screen would be built differently under `next` than under `previous` — so
+ * whether the open notes have to be processed again to show a settings change.
+ *
+ * Every setting the processor reads into a block's key, its presentation or its warnings. Not the
+ * time limit, the log capture or the legacy import: they only change what the NEXT compile or
+ * lookup does, and the time limit is a text field — each keystroke is a save.
+ */
+export function rendersDifferently(previous: TikzSettings, next: TikzSettings): boolean {
+	return (
+		previous.colors !== next.colors ||
+		previous.lazy !== next.lazy ||
+		previous.svgo !== next.svgo ||
+		previous.fast !== next.fast ||
+		previous.sourceHandling !== next.sourceHandling ||
+		previous.preamblePath !== next.preamblePath ||
+		previous.autoPreambleName !== next.autoPreambleName ||
+		previous.preflight !== next.preflight
+	);
 }
 
 /** Returns the spec directly when nothing has to be read from the vault, a promise when it does. */
 function prepare(
 	source: string,
-	el: HTMLElement,
-	deps: ProcessorDeps,
+	deps: KeyDeps,
 	notePath: string,
+	place: Place,
 ): TexJobSpec | Promise<TexJobSpec> {
-	const parsed = parseDirectives(source, defaultOptions(deps.settings));
+	// Once, so a block whose preamble resolves after a settings change is still built from one
+	// set of settings rather than half of each.
+	const settings = deps.settings();
+	const parsed = parseDirectives(source, defaultOptions(settings, deps.budgets));
 
 	const needsPreamble =
 		parsed.preamblePath !== null ||
 		parsed.inputs.length > 0 ||
-		deps.settings.preamblePath !== '' ||
-		deps.settings.autoPreambleName !== '';
+		settings.preamblePath !== '' ||
+		settings.autoPreambleName !== '';
 
-	if (!needsPreamble) return buildSpec(parsed, source, el, deps, notePath, null);
+	if (!needsPreamble) return buildSpec(parsed, settings, deps, place, null);
 
 	return deps.preamble
 		.resolve({
-			globalPath: deps.settings.preamblePath || null,
-			walkUpName: deps.settings.autoPreambleName,
+			globalPath: settings.preamblePath || null,
+			walkUpName: settings.autoPreambleName,
 			blockPath: parsed.preamblePath,
 			inputs: parsed.inputs,
 			notePath,
 		})
-		.then((resolved) => buildSpec(parsed, source, el, deps, notePath, resolved));
+		.then((resolved) => buildSpec(parsed, settings, deps, place, resolved));
 }
 
 function buildSpec(
 	parsed: ReturnType<typeof parseDirectives>,
-	rawSource: string,
-	el: HTMLElement,
-	deps: ProcessorDeps,
-	notePath: string,
+	settings: TikzSettings,
+	deps: KeyDeps,
+	place: Place,
 	resolved: Awaited<ReturnType<PreambleService['resolve']>> | null,
 ): TexJobSpec {
-	const { settings, budgets } = deps;
+	const { budgets } = deps;
+	const { isExport } = place;
 	const options = parsed.options;
 
 	if (resolved) {
@@ -129,14 +320,19 @@ function buildSpec(
 		options.baked.depHashes = resolved.depHashes;
 	}
 
+	// Rendered into the off-screen container to be waited for, so not lazily: in there, a block
+	// waiting to be scrolled into view waits for good. The real IntersectionObserver reports the
+	// container as not intersecting, which also cancels the zero-record escape hatch, so the
+	// command's wait never ended. `manual` too — running the command is the user asking. Lazy mode
+	// is presentation, not in the key, so this costs nothing in the cache.
+	if (place.offscreen) options.presentation.lazy = 'off';
+
 	const normalized =
 		settings.sourceHandling === 'legacy'
 			? legacyTidyTikzSource(parsed.body)
 			: normalizeSource(parsed.body);
 
-	const isExport = isExportContext(deps.app, el);
-	void notePath;
-
+	const svgo = parsed.svgo ?? settings.svgo;
 	const key = deriveKey({
 		normalizedSource: normalized,
 		baked: options.baked,
@@ -145,7 +341,7 @@ function buildSpec(
 		pipeline: {
 			raw: options.raw,
 			fast: options.fast,
-			svgo: parsed.svgo ?? settings.svgo,
+			svgo,
 		},
 	});
 
@@ -156,8 +352,8 @@ function buildSpec(
 	return {
 		key,
 		source: normalized,
-		rawSource,
 		options,
+		svgo,
 		texOptions: {
 			...(Object.keys(options.baked.packages).length ? { texPackages: options.baked.packages } : {}),
 			...(options.baked.libraries ? { tikzLibraries: options.baked.libraries } : {}),
@@ -169,6 +365,8 @@ function buildSpec(
 		legacySource: legacySourceFor(parsed.body, options.baked, settings),
 		timeoutMs,
 		isExport,
+		// Each is bounded some other way: an export by its total budget, a warm run by its Stop.
+		uncapped: place.budgeted || place.offscreen,
 		preflight: [
 			// A missing preamble file or an include cycle is a diagnostic in its own right, shown
 			// beside the diagram. PR #77's author conceded that theirs spliced an empty string and
@@ -210,7 +408,9 @@ function legacySourceFor(body: string, baked: BakedOptions, settings: TikzSettin
 	return body;
 }
 
-function defaultOptions(settings: TikzSettings): BlockOptions {
+/** What a block gets before its own `%!tikz` lines are read: the settings, under the budgets. */
+function defaultOptions(settings: TikzSettings, budgets: Budgets): BlockOptions {
+	const timeoutMs = settingTimeoutMs(settings, budgets);
 	return {
 		baked: {
 			border: null,
@@ -224,11 +424,18 @@ function defaultOptions(settings: TikzSettings): BlockOptions {
 		presentation: {
 			colors: settings.colors,
 			lazy: settings.lazy,
-			...(settings.timeoutSeconds > 0 ? { timeoutMs: settings.timeoutSeconds * 1000 } : {}),
+			...(timeoutMs === undefined ? {} : { timeoutMs }),
 		},
 		raw: false,
 		nocache: false,
 		fast: settings.fast,
 		warnings: [],
 	};
+}
+
+/** The time limit setting in ms, capped where the platform caps it; undefined for the budget's own. */
+function settingTimeoutMs(settings: TikzSettings, budgets: Budgets): number | undefined {
+	if (!(settings.timeoutSeconds > 0)) return undefined;
+	const ms = settings.timeoutSeconds * 1000;
+	return budgets.timeoutSettingCapMs === null ? ms : Math.min(ms, budgets.timeoutSettingCapMs);
 }

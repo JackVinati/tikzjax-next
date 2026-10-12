@@ -17,8 +17,11 @@ export interface CommandDeps {
 	app: App;
 	/** The finished markup for a block's source, or null if it has not been rendered yet. */
 	markupFor(source: string, notePath: string): Promise<string | null>;
-	/** Render every block in a note and resolve once they have all settled. */
-	warmNote(file: TFile): Promise<{ ok: number; failed: number }>;
+	/**
+	 * Render every block in a note and resolve once they have all come to rest, or at once when
+	 * `signal` aborts. `failed` is every block that did not end up showing its diagram.
+	 */
+	warmNote(file: TFile, signal: AbortSignal): Promise<{ ok: number; failed: number }>;
 	fontCss(): string;
 	openDebugView(): Promise<void>;
 }
@@ -128,11 +131,29 @@ export function registerCommands(plugin: Plugin, deps: CommandDeps): void {
 			void (async () => {
 				const file = app.workspace.getActiveViewOfType(MarkdownView)?.file;
 				if (!file) return void new Notice('No note is open.');
-				const notice = new Notice('Rendering diagrams…', 0);
+				// The notice stays up until the run ends, so it carries the way to end it: a note
+				// of heavy diagrams can take minutes, and there was no way out but to wait.
+				const stop = new AbortController();
+				const notice = new Notice(
+					createFragment((message) => {
+						message.appendText('Rendering diagrams… ');
+						message
+							.createEl('button', { text: 'Stop' })
+							.addEventListener('click', () => stop.abort());
+					}),
+					0,
+				);
 				try {
-					const { ok, failed } = await deps.warmNote(file);
+					const { ok, failed } = await deps.warmNote(file, stop.signal);
 					notice.hide();
-					new Notice(failed ? `Rendered ${ok}, ${failed} failed.` : `Rendered ${ok} diagram(s).`);
+					const total = ok + failed;
+					new Notice(
+						stop.signal.aborted
+							? `Stopped after rendering ${ok} of ${total} diagram(s).`
+							: failed
+								? `Rendered ${ok} of ${total} diagram(s); the rest did not render.`
+								: `Rendered ${ok} diagram(s).`,
+					);
 				} catch (error) {
 					notice.hide();
 					new Notice(`Rendering failed: ${String(error)}`);
@@ -179,10 +200,13 @@ async function finalizeNote(app: App, file: TFile, deps: CommandDeps): Promise<v
 	}
 
 	const notice = new Notice(`Finalizing ${spans.length} diagram(s)…`, 0);
-	const written: { span: TikzBlockSpan; name: string }[] = [];
+	/** `index` is the block's place among `spans`: which block the attachment was rendered from. */
+	const written: { index: number; source: string; name: string }[] = [];
 
 	try {
-		for (const span of spans) {
+		for (let index = 0; index < spans.length; index++) {
+			const span = spans[index];
+			if (!span) continue;
 			const markup = await deps.markupFor(span.source, file.path);
 			if (markup === null) continue;
 
@@ -198,19 +222,29 @@ async function finalizeNote(app: App, file: TFile, deps: CommandDeps): Promise<v
 				file.path,
 			);
 			await app.vault.create(path, svg);
-			written.push({ span, name: path.split('/').pop() ?? path });
+			written.push({ index, source: span.source, name: path.split('/').pop() ?? path });
 		}
 
+		let finalized = 0;
 		if (written.length > 0) {
 			await app.vault.process(file, (current) => {
 				// Re-scan against the CURRENT text rather than trusting offsets taken before the
 				// attachments were written, then rewrite back to front.
+				//
+				// Each attachment goes back to the block it was rendered from: the same place among
+				// the blocks, with the same source. They used to be paired by position among the
+				// RENDERED ones, so with the first diagram in a note unrendered, the second one's
+				// picture was embedded above the first. An edit made in the meantime can now cost an
+				// embed, never put one on the wrong diagram.
 				const fresh = findTikzBlocks(current).filter((b) => !b.finalized);
 				let out = current;
-				for (let i = Math.min(fresh.length, written.length) - 1; i >= 0; i--) {
-					const span = fresh[i];
+				finalized = 0;
+				for (let i = written.length - 1; i >= 0; i--) {
 					const entry = written[i];
-					if (span && entry) out = finalizeBlock(out, span, entry.name);
+					const span = entry ? fresh[entry.index] : undefined;
+					if (!entry || !span || span.source !== entry.source) continue;
+					out = finalizeBlock(out, span, entry.name);
+					finalized++;
 				}
 				return out;
 			});
@@ -218,9 +252,9 @@ async function finalizeNote(app: App, file: TFile, deps: CommandDeps): Promise<v
 
 		notice.hide();
 		new Notice(
-			written.length === spans.length
-				? `Finalized ${written.length} diagram(s).`
-				: `Finalized ${written.length} of ${spans.length}; the rest have not been rendered yet.`,
+			finalized === spans.length
+				? `Finalized ${finalized} diagram(s).`
+				: `Finalized ${finalized} of ${spans.length}; the rest have not been rendered yet.`,
 		);
 	} catch (error) {
 		notice.hide();

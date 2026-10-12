@@ -5,6 +5,9 @@ import {
 	type PreambleEntry,
 	type PreambleSource,
 } from '../src/preamble/resolve';
+import type { App } from 'obsidian';
+import { PreambleService } from '../src/preamble/vault';
+import { fakeApp } from './stubs/vault';
 
 // ------------------------------------------------------------------------------------------
 // Harness
@@ -513,5 +516,91 @@ describe('deps and depHashes', () => {
 		const nested = await resolve(vault(), { inputs: ['c.tex'] });
 
 		expect(nested.depHashes).toContain(`notes/c.tex:${fakeHash('%:input a.tex\n\\def\\c{1}')}`);
+	});
+});
+
+// ------------------------------------------------------------------------------------------
+// The service's dependents: which diagrams a file change invalidates
+
+describe('PreambleService: who depends on a file', () => {
+	/**
+	 * Every block processed added its key under each file it read, and only a change to that file
+	 * ever removed it — so a long session of editing a diagram that uses a preamble kept a key for
+	 * every version of it. A block that is gone no longer depends on anything.
+	 */
+	const service = () => new PreambleService({} as App, fakeHash);
+
+	it('forgets a block once it is unloaded', () => {
+		const preamble = service();
+		preamble.track('k1', ['tikz-preamble.tex']);
+		preamble.untrack('k1', ['tikz-preamble.tex']);
+
+		expect(preamble.trackedFiles()).toEqual([]);
+		expect(preamble.invalidate('tikz-preamble.tex')).toEqual([]);
+	});
+
+	it('keeps a key while any block showing it is still there', () => {
+		// The same diagram in two panes is one key and two blocks.
+		const preamble = service();
+		preamble.track('k1', ['tikz-preamble.tex']);
+		preamble.track('k1', ['tikz-preamble.tex']);
+		preamble.untrack('k1', ['tikz-preamble.tex']);
+
+		expect(preamble.invalidate('tikz-preamble.tex')).toEqual(['k1']);
+	});
+
+	it('takes an unload after an invalidation in its stride', () => {
+		const preamble = service();
+		preamble.track('k1', ['a.tex', 'b.tex']);
+		expect(preamble.invalidate('a.tex')).toEqual(['k1']);
+		preamble.untrack('k1', ['a.tex', 'b.tex']);
+		preamble.untrack('k1', ['a.tex', 'b.tex']);
+
+		expect(preamble.trackedFiles()).toEqual([]);
+	});
+});
+
+describe('PreambleService: resolving against the vault', () => {
+	const entry = (notePath: string, over: Partial<Parameters<PreambleService['resolve']>[0]> = {}) => ({
+		globalPath: null,
+		walkUpName: 'tikz-preamble.tex',
+		blockPath: null,
+		inputs: [],
+		notePath,
+		...over,
+	});
+
+	it('finds the nearest walk-up preamble, from the note’s folder up', () => {
+		const app = fakeApp({ 'a/tikz-preamble.tex': 'A', 'tikz-preamble.tex': 'ROOT' });
+		const preamble = new PreambleService(app, fakeHash);
+
+		expect(preamble.findWalkUp('a/b/note.md', 'tikz-preamble.tex')).toBe('a/tikz-preamble.tex');
+		expect(preamble.findWalkUp('c/note.md', 'tikz-preamble.tex')).toBe('tikz-preamble.tex');
+		expect(preamble.findWalkUp('c/note.md', '')).toBeNull();
+	});
+
+	it('reads a shared preamble once for every block in a note', async () => {
+		const app = fakeApp({ 'tikz-preamble.tex': '\\usetikzlibrary{arrows}' });
+		const preamble = new PreambleService(app, fakeHash);
+
+		const first = await preamble.resolve(entry('note.md'));
+		await preamble.resolve(entry('note.md'));
+
+		expect(first.text).toContain('\\usetikzlibrary{arrows}');
+		expect(app.reads).toEqual(['tikz-preamble.tex']);
+	});
+
+	it('reads the file again once it has changed, so the next block is built from the new text', async () => {
+		// What the editor relies on when a preamble is edited: invalidate, then process again.
+		const app = fakeApp({ 'tikz-preamble.tex': 'OLD' });
+		const preamble = new PreambleService(app, fakeHash);
+		await preamble.resolve(entry('note.md'));
+
+		app.files.set('tikz-preamble.tex', 'NEW');
+		preamble.invalidate('tikz-preamble.tex');
+		const after = await preamble.resolve(entry('note.md'));
+
+		expect(after.text).toContain('NEW');
+		expect(after.depHashes).toEqual([`tikz-preamble.tex:${fakeHash('NEW')}`]);
 	});
 });

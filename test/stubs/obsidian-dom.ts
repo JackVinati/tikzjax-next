@@ -39,6 +39,19 @@ export function installObsidianDom(window: Window & typeof globalThis): void {
 		return el;
 	};
 
+	// A fragment builds the same way — a notice's message is one — so the node-level pair too.
+	nodeProto['createEl'] = proto['createEl'];
+	nodeProto['appendText'] = function (this: Node, text: string): void {
+		this.appendChild((this.ownerDocument ?? window.document).createTextNode(text));
+	};
+	(globalThis as unknown as Record<string, unknown>)['createFragment'] = (
+		build?: (fragment: DocumentFragment) => void,
+	): DocumentFragment => {
+		const fragment = window.document.createDocumentFragment();
+		build?.(fragment);
+		return fragment;
+	};
+
 	proto['createDiv'] = function (this: HTMLElement, info?: DomElementInfo | string): HTMLElement {
 		return (proto['createEl'] as (t: string, i?: unknown) => HTMLElement).call(this, 'div', info);
 	};

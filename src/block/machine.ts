@@ -31,10 +31,17 @@ export type ManualReason = 'manual' | 'depthCap';
 
 /**
  * `poisoned` is deliberately distinct from `timeout`: the first says "a previous run of this exact
- * key wedged a worker, reload to retry", the second is this render's own failure. Same kind of
- * card, different copy and different truth.
+ * key timed out, so this one was not run; Retry runs it", the second is this render's own failure.
+ * Same kind of card, different copy and different truth.
+ *
+ * `pipeline`: TeX produced output, but no document came out of the SVG pipeline having passed
+ * sanitize and ids, so there is nothing that may be shown.
+ *
+ * `export-budget`: a PDF export spent its total budget before this diagram was ready, and stopped
+ * waiting for it. Nothing is known against the diagram; it is just not in this PDF.
  */
-export type FailureReason = TexErrorKind | 'empty-source' | 'preflight' | 'poisoned';
+export type FailureReason =
+	TexErrorKind | 'empty-source' | 'preflight' | 'poisoned' | 'pipeline' | 'export-budget';
 
 export type Phase =
 	| 'INIT'
@@ -107,21 +114,37 @@ export type Event =
 	 * The queue settled `submit` without ever starting the job.
 	 *
 	 * `RenderQueue` rejects with `depth-cap`, `poisoned` or `cancelled` before `run` is ever
-	 * called (src/queue/queue.ts), which means no `slot` will arrive — and `slot` is SCHEDULING's
-	 * only other exit. Without this row an over-cap note (17 blocks on mobile, where `depthCap`
-	 * is 16) leaves every evicted block sitting in SCHEDULING with its processor promise
-	 * unresolved forever, which is precisely the never-settling class of #18 #23 #27 #39 #51 #82
-	 * #85 #89. `depthCap` is the "offer the button" branch — map the queue's `cancelled` here
-	 * too — and every other reason is an error card.
+	 * called (src/queue/queue.ts), which means no `slot` will arrive, and no job result either.
+	 * Without this row an over-cap note (17 blocks on mobile, where `depthCap` is 16) leaves every
+	 * evicted block sitting in SCHEDULING with its processor promise unresolved forever, which is
+	 * precisely the never-settling class of #18 #23 #27 #39 #51 #82 #85 #89. `depthCap` is the
+	 * "offer the button" branch — map the queue's `cancelled` here too — and every other reason is
+	 * an error card.
 	 *
 	 * Strictly pre-start: once `slot` has fired the job is running and the queue's settlement
-	 * arrives as `ok` / `err` / `timeout`, which is what carries `terminateWorker` + `poison`.
+	 * arrives as `ok` / `err` / `timeout` / `interrupted`, which is what carries `terminateWorker`
+	 * + `poison` for a timeout.
 	 */
 	| { type: 'rejected'; reason: 'depthCap' | FailureReason }
 	| { type: 'ok' }
 	| { type: 'err'; reason: TexErrorKind }
 	| { type: 'timeout' }
+	/**
+	 * The engine was stopped under the job for a reason that is not the job's — the app was
+	 * backgrounded, the engine restarted — so it goes back to be scheduled again. Never a card:
+	 * the diagram did nothing wrong, and nothing is known against it.
+	 */
+	| { type: 'interrupted' }
+	/**
+	 * The PDF export this block belongs to spent its total budget (budgets.ts
+	 * `exportTotalBudgetMs`) before the block was ready. Obsidian's export waits on every block's
+	 * promise and has no timeout of its own, so this is what lets it finish.
+	 */
+	| { type: 'expired' }
+	/** The pipeline produced nothing safe: the output did not parse, or `sanitize` or `ids` threw. */
 	| { type: 'stageThrew' }
+	/** The pipeline skipped an optional stage. What is left passed sanitize and ids. */
+	| { type: 'degraded' }
 	| { type: 'mounted' }
 	| { type: 'cssChange' }
 	| { type: 'retry' }
@@ -152,8 +175,12 @@ export type Effect =
 	| { kind: 'poison' }
 	| { kind: 'unpoison' }
 	| { kind: 'mount'; degraded: boolean }
-	/** `fonts.ready` + `getBBox()`, and only on the first mount of a key — the child decides. */
-	| { kind: 'measure' }
+	/**
+	 * `fonts.ready` + `getBBox()`, and only on the first mount of a key — the child decides.
+	 * `persist` is false for a degraded mount: the measurement may correct what is on screen, but
+	 * it must not be how a degraded artifact reaches the cache after all.
+	 */
+	| { kind: 'measure'; persist: boolean }
 	| { kind: 'mountErrorCard'; reason: FailureReason }
 	| { kind: 'mountManualButton'; reason: ManualReason }
 	| { kind: 'settle' };
@@ -218,7 +245,8 @@ function unload(state: State): [State, Effect[]] {
 	if (state.phase === 'COMPILING') {
 		if (state.unloaded) return noop(state);
 		// Stays COMPILING, and deliberately does NOT settle: the running job always ends in ok,
-		// err or timeout — the timeout is the backstop — and the settle happens at DISPOSED then.
+		// err, timeout or interrupted — the timeout is the backstop — and the settle happens at
+		// DISPOSED then.
 		// `release` is still safe here: the queue drops an *unstarted* job at refs 0 and leaves a
 		// started one to finish and cache. Timers are NOT cleared, because the timeout timer is
 		// what terminates a wedged worker whether or not this block still cares.
@@ -270,7 +298,7 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 					// replace, so the child mounts synchronously and the section is never flagged async.
 					return go(state, { phase: 'MOUNTED' }, [
 						{ kind: 'mount', degraded: false },
-						{ kind: 'measure' },
+						{ kind: 'measure', persist: true },
 					]);
 				case 'l1Miss':
 					return go(state, { phase: 'LOOKUP' }, [{ kind: 'lookup' }]);
@@ -299,6 +327,8 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 					]);
 				case 'miss':
 					return miss(state, event);
+				case 'expired':
+					return expire(state, []);
 				default:
 					return noop(state);
 			}
@@ -312,10 +342,11 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 						{ kind: 'startDebounce' },
 					]);
 				case 'noRecordsAfter2s':
-					// A block inside a collapsed callout, a hidden tab, a `display:none` ancestor or a
-					// detached reading-view section never receives an IntersectionObserver record at
-					// all, and would sit here behind a permanent placeholder — a blank-diagram bug
-					// introduced by lazy rendering itself. Lowest band, so it yields to visible work.
+					// A block detached from the document never receives an IntersectionObserver
+					// record at all, and would sit here behind a permanent placeholder — a
+					// blank-diagram bug introduced by lazy rendering itself. (One under a
+					// `display:none` ancestor does get a record, and renders when it is shown; see
+					// block/viewport.ts.) Lowest band, so it yields to visible work.
 					return go(state, { phase: 'SCHEDULING', priority: 3 }, [
 						{ kind: 'unobserve' },
 						{ kind: 'submit', priority: 3 },
@@ -349,6 +380,20 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 							{ kind: 'mountErrorCard', reason: event.reason },
 						]);
 			}
+			if (
+				event.type === 'ok' ||
+				event.type === 'err' ||
+				event.type === 'timeout' ||
+				event.type === 'interrupted'
+			) {
+				// A settlement with no `slot` before it. The queue tells every owner when a job
+				// starts, but a block that missed the word must not ignore its own result: that was
+				// a second block on the same key, left here unsettled for good while the first one
+				// mounted. A settlement is proof the job ran, so it is taken as one.
+				const [compiling] = go(state, { phase: 'COMPILING', priority: state.priority }, []);
+				return reduce(compiling, event);
+			}
+			if (event.type === 'expired') return expire(state, [{ kind: 'release' }]);
 			return noop(state);
 
 		case 'COMPILING':
@@ -375,6 +420,19 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 						{ kind: 'mountErrorCard', reason: 'timeout' },
 					]);
 				}
+				case 'interrupted':
+					// Back in line at the band it had, with the placeholder still up. An unloaded
+					// block has nobody left to show the diagram to, so it just ends; the next mount
+					// of this key will ask for it again.
+					if (state.unloaded) return go(state, { phase: 'DISPOSED' }, []);
+					return go(state, { phase: 'SCHEDULING', priority: state.priority }, [
+						{ kind: 'submit', priority: state.priority },
+					]);
+				case 'expired':
+					// Not aborted: the compile runs on, bounded by its own timeout, and still serves
+					// any other block on the same key. This one just stops waiting for it.
+					if (state.unloaded) return go(state, { phase: 'DISPOSED' }, []);
+					return expire(state, [{ kind: 'release' }]);
 				default:
 					return noop(state);
 			}
@@ -387,14 +445,24 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 						{ kind: 'persist' },
 						{ kind: 'mount', degraded: false },
 					]);
-				case 'stageThrew':
-					// Fall back to the previous stage's output and mount it with a warning chip —
-					// never a silent raw-SVG fallthrough (#15, #48). Not persisted: a degraded
-					// artifact must not become the cached answer for this key. The `ids` stage is
-					// exempt from degradation upstream of here, so this can never reintroduce #12.
+				case 'degraded':
+					// The pipeline skipped an optional stage and kept the last good document, which
+					// has still passed sanitize and ids — those two are never skipped — so it may be
+					// shown, with a warning chip, never as a silent raw-SVG fallthrough (#15, #48).
+					// Not persisted: a degraded artifact must not become the cached answer for this
+					// key.
 					if (state.unloaded) return go(state, { phase: 'DISPOSED' }, []);
 					return go(state, { phase: 'MOUNTING', degraded: true }, [
 						{ kind: 'mount', degraded: true },
+					]);
+				case 'stageThrew':
+					// There is no document that passed sanitize and ids: the output did not parse, or
+					// one of those two threw. This used to mount "degraded" too — which meant the RAW
+					// engine output, past the sanitizer, and measure() then persisted it. An error
+					// card is the only safe thing left to show.
+					if (state.unloaded) return go(state, { phase: 'DISPOSED' }, []);
+					return go(state, { phase: 'FAILED', reason: 'pipeline' }, [
+						{ kind: 'mountErrorCard', reason: 'pipeline' },
 					]);
 				default:
 					return noop(state);
@@ -402,10 +470,17 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 
 		case 'MOUNTING':
 			if (event.type === 'mounted') {
-				const measure: Effect[] = [{ kind: 'measure' }];
+				const measure: Effect[] = [{ kind: 'measure', persist: !state.degraded }];
 				return state.degraded
 					? go(state, { phase: 'MOUNTED_DEGRADED' }, measure)
 					: go(state, { phase: 'MOUNTED' }, measure);
+			}
+			if (event.type === 'err') {
+				// The artifact held no <svg> to mount. Ignoring this left the block in MOUNTING,
+				// never settled.
+				return go(state, { phase: 'FAILED', reason: event.reason }, [
+					{ kind: 'mountErrorCard', reason: event.reason },
+				]);
 			}
 			return noop(state);
 
@@ -416,9 +491,13 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 			return noop(state);
 
 		case 'IDLE_MANUAL':
-			// The "Render diagram" button. Priority 1: the user is looking straight at it.
+			// The "Render diagram" button. Priority 1: the user is looking straight at it. The
+			// button gives way to a spinner at once — it used to stay up, dead, under the diagram.
 			if (event.type === 'retry') {
-				return go(state, { phase: 'SCHEDULING', priority: 1 }, [{ kind: 'submit', priority: 1 }]);
+				return go(state, { phase: 'SCHEDULING', priority: 1 }, [
+					{ kind: 'paintPlaceholder' },
+					{ kind: 'submit', priority: 1 },
+				]);
 			}
 			return noop(state);
 
@@ -429,13 +508,28 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 			// enqueue" exists to prevent — and a Retry wired generically to every error card is
 			// the obvious way for that to happen.
 			if (event.type === 'retry' && state.reason !== 'empty-source') {
+				// The card gives way to a spinner, as the button does above.
 				return go(state, { phase: 'SCHEDULING', priority: 1 }, [
+					{ kind: 'paintPlaceholder' },
 					{ kind: 'unpoison' },
 					{ kind: 'submit', priority: 1 },
 				]);
 			}
 			return noop(state);
 	}
+}
+
+/**
+ * The export this block belongs to stopped waiting for it. Only the phases an export block can be
+ * WAITING in take it — LOOKUP, SCHEDULING, COMPILING; the others are synchronous, never reached by
+ * an export, or already at rest — and the block rests on a card that says so, which is what the
+ * PDF shows in its place.
+ */
+function expire(state: State, effects: Effect[]): [State, Effect[]] {
+	return go(state, { phase: 'FAILED', reason: 'export-budget' }, [
+		...effects,
+		{ kind: 'mountErrorCard', reason: 'export-budget' },
+	]);
 }
 
 /**

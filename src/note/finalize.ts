@@ -66,6 +66,10 @@ export interface TikzBlockSpan {
 	 * The block body, without the fence lines, dedented by the opening fence's indentation the way
 	 * CommonMark dedents fenced content. Informational: nothing in finalize/un-finalize round-trips
 	 * through it — those use the verbatim slice — so an approximate dedent cannot corrupt a note.
+	 *
+	 * Every line keeps its terminator, the last one included, which is NOT what a code-block
+	 * processor is given. Anything that wants to find the rendered diagram goes through
+	 * `asProcessorSource` first.
 	 */
 	source: string;
 	/** The info string after the opening backticks, e.g. 'tikz'. Trimmed, case preserved. */
@@ -226,6 +230,25 @@ function bodyOf(lines: Line[], openLine: number, extent: FenceExtent, indentWidt
 		out += dedent(line.text, indentWidth) + line.terminator;
 	}
 	return out;
+}
+
+/**
+ * A scanned block's `source` in the form Obsidian hands a code-block processor — the form every
+ * cache key was derived from.
+ *
+ * Obsidian drops the last body line's terminator: Reading view strips one trailing newline from
+ * the code element's text, and Live Preview slices from the first body line to the END of the last
+ * one (both read in the 1.14.4 bundle). The scanner keeps it, so a lookup keyed on the scanned text
+ * missed every block, and Copy SVG, Save SVG, Finalize and the zoom view all said "That diagram
+ * has not been rendered yet" about a diagram on screen. Line endings are made LF as well: a note
+ * read from disk can carry CRLF, and the editor the processor reads from never does.
+ *
+ * Exactly one terminator, never a trim: a body that ends in a blank line reaches the processor
+ * ending in a newline, and has to here too.
+ */
+export function asProcessorSource(source: string): string {
+	const lf = source.split('\r\n').join('\n');
+	return lf.endsWith('\n') ? lf.slice(0, -1) : lf;
 }
 
 // -------------------------------------------------------------------------------------------

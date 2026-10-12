@@ -54,7 +54,7 @@ const REACHABLE: ReadonlyArray<readonly [Phase, Event[]]> = [
 	['TRANSFORMING', TO_TRANSFORMING],
 	['MOUNTING', TO_MOUNTING],
 	['MOUNTED', [...TO_MOUNTING, { type: 'mounted' }]],
-	['MOUNTED_DEGRADED', [...TO_TRANSFORMING, { type: 'stageThrew' }, { type: 'mounted' }]],
+	['MOUNTED_DEGRADED', [...TO_TRANSFORMING, { type: 'degraded' }, { type: 'mounted' }]],
 	['IDLE_MANUAL', [...TO_LOOKUP, { type: 'miss', lazy: 'manual' }]],
 	['FAILED', [...LOAD, { type: 'emptySource' }]],
 	['DISPOSED', [...LOAD, { type: 'unload' }]],
@@ -204,22 +204,43 @@ describe('transition table', () => {
 		expect(kinds(fx)).toEqual(['persist', 'mount']);
 	});
 
-	it('TRANSFORMING + stageThrew -> MOUNTING(degraded) and does NOT persist', () => {
-		const [state, fx] = reduce(stateFor('TRANSFORMING'), { type: 'stageThrew' });
+	it('TRANSFORMING + degraded -> MOUNTING(degraded) and does NOT persist', () => {
+		// An optional stage was skipped. What is left has passed sanitize and ids, so it may be
+		// shown — with its warning — but it must never become the cached answer for this key.
+		const [state, fx] = reduce(stateFor('TRANSFORMING'), { type: 'degraded' });
 		expect(state).toMatchObject({ phase: 'MOUNTING', degraded: true });
 		expect(fx).toEqual([{ kind: 'mount', degraded: true }]);
-		// A degraded artifact must never become the cached answer for this key.
+		expect(kinds(fx)).not.toContain('persist');
+	});
+
+	it('TRANSFORMING + stageThrew -> FAILED: no document passed sanitize and ids, so nothing mounts', () => {
+		// It used to mount the RAW engine output "degraded", past the sanitizer, and measure()
+		// then persisted it. The engine passes \special{dvisvgm:raw} through verbatim.
+		const [state, fx] = reduce(stateFor('TRANSFORMING'), { type: 'stageThrew' });
+		expect(state).toMatchObject({ phase: 'FAILED', reason: 'pipeline' });
+		expect(fx).toEqual([{ kind: 'mountErrorCard', reason: 'pipeline' }, { kind: 'settle' }]);
+		expect(kinds(fx)).not.toContain('mount');
 		expect(kinds(fx)).not.toContain('persist');
 	});
 
 	it('MOUNTING + mounted -> MOUNTED or MOUNTED_DEGRADED, per the degraded flag it carried', () => {
-		const [ok] = reduce(stateFor('MOUNTING'), { type: 'mounted' });
+		const [ok, okFx] = reduce(stateFor('MOUNTING'), { type: 'mounted' });
 		expect(ok.phase).toBe('MOUNTED');
+		expect(okFx).toContainEqual({ kind: 'measure', persist: true });
 
-		const degraded = drive(initialState(), [...TO_TRANSFORMING, { type: 'stageThrew' }]).state;
+		const degraded = drive(initialState(), [...TO_TRANSFORMING, { type: 'degraded' }]).state;
 		const [mounted, fx] = reduce(degraded, { type: 'mounted' });
 		expect(mounted.phase).toBe('MOUNTED_DEGRADED');
 		expect(kinds(fx)).toEqual(['measure', 'settle']);
+		// The measurement may correct what is on screen, but a degraded artifact is never stored.
+		expect(fx).toContainEqual({ kind: 'measure', persist: false });
+	});
+
+	it('MOUNTING + err -> FAILED, rather than a block that never settles', () => {
+		// A mount that finds no <svg> in the artifact reports `err`; MOUNTING used to ignore it.
+		const [state, fx] = reduce(stateFor('MOUNTING'), { type: 'err', reason: 'empty-output' });
+		expect(state).toMatchObject({ phase: 'FAILED', reason: 'empty-output' });
+		expect(kinds(fx)).toEqual(['mountErrorCard', 'settle']);
 	});
 
 	it('MOUNTED + css-change is a no-op: colour is CSS', () => {
@@ -233,7 +254,8 @@ describe('transition table', () => {
 		const failed = drive(initialState(), [...TO_COMPILING, { type: 'timeout' }]).state;
 		const [state, fx] = reduce(failed, { type: 'retry' });
 		expect(state).toMatchObject({ phase: 'SCHEDULING', priority: 1 });
-		expect(kinds(fx)).toEqual(['unpoison', 'submit']);
+		// The card gives way to a spinner first: it used to stay up, under the diagram that replaced it.
+		expect(kinds(fx)).toEqual(['paintPlaceholder', 'unpoison', 'submit']);
 	});
 
 	it('FAILED(empty-source) + retry never enqueues', () => {
@@ -250,7 +272,7 @@ describe('transition table', () => {
 	it('IDLE_MANUAL + retry -> SCHEDULING (the "Render diagram" button)', () => {
 		const [state, fx] = reduce(stateFor('IDLE_MANUAL'), { type: 'retry' });
 		expect(state).toMatchObject({ phase: 'SCHEDULING', priority: 1 });
-		expect(fx).toEqual([{ kind: 'submit', priority: 1 }]);
+		expect(fx).toEqual([{ kind: 'paintPlaceholder' }, { kind: 'submit', priority: 1 }]);
 	});
 
 	it('any + unload -> DISPOSED, with teardown scoped to what that phase actually holds', () => {
@@ -300,10 +322,12 @@ describe('COMPILING + unload does not cancel a started job', () => {
 	});
 
 	it('a late stage failure after unload disposes without persisting a degraded artifact', () => {
-		const start = stateFor('COMPILING');
-		const { state, effects } = drive(start, [{ type: 'unload' }, { type: 'ok' }, { type: 'stageThrew' }]);
-		expect(state.phase).toBe('DISPOSED');
-		expect(kinds(effects)).toEqual(['release', 'transform', 'settle']);
+		for (const late of ['stageThrew', 'degraded'] as const) {
+			const start = stateFor('COMPILING');
+			const { state, effects } = drive(start, [{ type: 'unload' }, { type: 'ok' }, { type: late }]);
+			expect(state.phase).toBe('DISPOSED');
+			expect(kinds(effects)).toEqual(['release', 'transform', 'settle']);
+		}
 	});
 
 	it('a late error after unload disposes quietly — no card into a dead DOM', () => {
@@ -319,6 +343,50 @@ describe('COMPILING + unload does not cancel a started job', () => {
 		const { state, effects } = drive(stateFor('COMPILING'), [{ type: 'unload' }, { type: 'timeout' }]);
 		expect(state.phase).toBe('DISPOSED');
 		expect(kinds(effects)).toEqual(['release', 'terminateWorker', 'poison', 'settle']);
+	});
+});
+
+// -------------------------------------------------------------------------------------------
+// Interruption
+
+describe('a job interrupted through no fault of its own', () => {
+	/**
+	 * The engine was killed under it — the app was backgrounded, the engine restarted — so the
+	 * diagram did nothing wrong and nothing is known against it. It used to arrive as a timeout:
+	 * an error card telling the user to simplify a diagram that never got to run.
+	 */
+	it('COMPILING + interrupted -> SCHEDULING again, at the band it had, with no card', () => {
+		const compiling = drive(initialState(), [
+			...TO_DEBOUNCING,
+			{ type: 'timer', priority: 2 },
+			{ type: 'slot' },
+		]).state;
+		const [state, fx] = reduce(compiling, { type: 'interrupted' });
+		expect(state).toMatchObject({ phase: 'SCHEDULING', priority: 2 });
+		expect(fx).toEqual([{ kind: 'submit', priority: 2 }]);
+		expect(state.settled).toBe(false);
+	});
+
+	it('an interrupted block that was unloaded just goes away', () => {
+		const { state, effects } = drive(stateFor('COMPILING'), [
+			{ type: 'unload' },
+			{ type: 'interrupted' },
+		]);
+		expect(state.phase).toBe('DISPOSED');
+		expect(kinds(effects)).toEqual(['release', 'settle']);
+	});
+
+	it('a block still waiting for its slot is re-submitted, not stranded', () => {
+		const [state, fx] = reduce(stateFor('SCHEDULING'), { type: 'interrupted' });
+		expect(state.phase).toBe('SCHEDULING');
+		expect(fx).toEqual([{ kind: 'submit', priority: 1 }]);
+	});
+
+	it('is a no-op everywhere a job is not in flight', () => {
+		for (const phase of ['MOUNTED', 'FAILED', 'IDLE_MANUAL', 'TRANSFORMING'] as Phase[]) {
+			const before = stateFor(phase);
+			expect(reduce(before, { type: 'interrupted' })[0]).toBe(before);
+		}
 	});
 });
 
@@ -344,7 +412,9 @@ describe('unknown events', () => {
 		{ type: 'ok' },
 		{ type: 'err', reason: 'tex-error' },
 		{ type: 'timeout' },
+		{ type: 'interrupted' },
 		{ type: 'stageThrew' },
+		{ type: 'degraded' },
 		{ type: 'mounted' },
 		{ type: 'cssChange' },
 		{ type: 'retry' },
@@ -357,8 +427,9 @@ describe('unknown events', () => {
 				const [after, fx] = reduce(before, event);
 				if (after === before) {
 					expect(fx).toEqual([]);
-				} else {
-					// A real transition must have changed something observable.
+				} else if (fx.length === 0) {
+					// A real transition must have changed something observable: the state, or — an
+					// interrupted block put back in line at the band it had — what it does next.
 					expect(after).not.toEqual(before);
 				}
 			}
@@ -470,7 +541,7 @@ const LAZY = ['on', 'off', 'manual'] as const;
 /** Every event, including the ones that make no sense where they land. That is the point. */
 function randomEvent(rnd: () => number): Event {
 	const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)] as T;
-	const n = Math.floor(rnd() * 21);
+	const n = Math.floor(rnd() * 24);
 	switch (n) {
 		case 0:
 			return { type: 'load' };
@@ -507,8 +578,12 @@ function randomEvent(rnd: () => number): Event {
 			return { type: 'err', reason: pick(ERROR_KINDS) };
 		case 14:
 			return { type: 'timeout' };
+		case 20:
+			return { type: 'interrupted' };
 		case 15:
 			return { type: 'stageThrew' };
+		case 21:
+			return { type: 'degraded' };
 		case 16:
 			return { type: 'mounted' };
 		case 17:
@@ -517,6 +592,8 @@ function randomEvent(rnd: () => number): Event {
 			return { type: 'retry' };
 		case 19:
 			return { type: 'rejected', reason: rnd() < 0.5 ? 'depthCap' : pick(ERROR_KINDS) };
+		case 22:
+			return { type: 'expired' };
 		default:
 			// Weighted up: unload at every point, and duplicated, is the interesting axis.
 			return { type: 'unload' };
@@ -607,6 +684,8 @@ describe('property: exactly one settle, over randomised event sequences', () => 
 				{ type: 'unload' } as Event,
 				{ type: 'ok' } as Event,
 				{ type: 'timeout' } as Event,
+				{ type: 'interrupted' } as Event,
+				{ type: 'expired' } as Event,
 				{ type: 'mounted' } as Event,
 				{ type: 'retry' } as Event,
 			]) {
@@ -654,9 +733,9 @@ const ALL_PHASES: Phase[] = [
 // `RenderQueue` (src/queue/queue.ts) settles `submit` four ways: `timeout`, `poisoned`,
 // `depth-cap`, `cancelled`. Only `timeout` happens after the job started, so only `timeout`
 // reaches a COMPILING block. The other three settle the submit promise WITHOUT ever calling
-// `run`, i.e. while the block is still in SCHEDULING — and SCHEDULING has exactly one other
-// exit, `slot`, which by definition will never come. That is a stranded processor promise,
-// which is the whole failure class this module exists to close.
+// `run`, i.e. while the block is still in SCHEDULING — and neither `slot` nor a job result will
+// ever come. That is a stranded processor promise, which is the whole failure class this module
+// exists to close.
 
 describe('a queue rejection before the job starts', () => {
 	it('SCHEDULING + rejected(depthCap) -> IDLE_MANUAL, the button the queue promises', () => {
@@ -698,7 +777,24 @@ describe('a queue rejection before the job starts', () => {
 		const capped = reduce(stateFor('SCHEDULING'), { type: 'rejected', reason: 'depthCap' })[0];
 		const [state, fx] = reduce(capped, { type: 'retry' });
 		expect(state).toMatchObject({ phase: 'SCHEDULING', priority: 1 });
-		expect(fx).toEqual([{ kind: 'submit', priority: 1 }]);
+		expect(fx).toEqual([{ kind: 'paintPlaceholder' }, { kind: 'submit', priority: 1 }]);
+	});
+
+	it('a settlement that arrives without a `slot` still leaves SCHEDULING', () => {
+		// The queue tells every owner when a shared job starts, but SCHEDULING used to wait for
+		// that word and nothing else: a block that missed it ignored its own result and sat in
+		// SCHEDULING forever, unsettled. A settlement is proof the job ran.
+		const ok = drive(initialState(), [...TO_SCHEDULING, { type: 'ok' }]);
+		expect(ok.state).toMatchObject({ phase: 'TRANSFORMING', origin: 'render' });
+		expect(kinds(ok.effects)).toContain('transform');
+
+		const err = drive(initialState(), [...TO_SCHEDULING, { type: 'err', reason: 'tex-error' }]);
+		expect(err.state).toMatchObject({ phase: 'FAILED', reason: 'tex-error' });
+		expect(countSettles(err.effects)).toBe(1);
+
+		const [timedOut, fx] = reduce(stateFor('SCHEDULING'), { type: 'timeout' });
+		expect(timedOut).toMatchObject({ phase: 'FAILED', reason: 'timeout' });
+		expect(kinds(fx)).toEqual(['terminateWorker', 'poison', 'mountErrorCard', 'settle']);
 	});
 
 	it('a rejection arriving after the job started is not a pre-start rejection', () => {
@@ -706,6 +802,62 @@ describe('a queue rejection before the job starts', () => {
 		// `rejected` must not quietly bypass terminateWorker + poison.
 		const compiling = stateFor('COMPILING');
 		expect(reduce(compiling, { type: 'rejected', reason: 'timeout' })[0]).toBe(compiling);
+	});
+});
+
+// -------------------------------------------------------------------------------------------
+// The total export budget
+
+describe('an export that ran out of time', () => {
+	/**
+	 * Obsidian's PDF export waits on every block's promise and has no timeout of its own. Without
+	 * a total budget, a note with forty uncached diagrams held "Preparing PDF" for forty compiles.
+	 */
+	it('SCHEDULING + expired -> FAILED(export-budget): the block gives up its place and settles', () => {
+		const scheduled = drive(initialState(), [...TO_LOOKUP, { type: 'miss', isExport: true }]).state;
+		const [state, fx] = reduce(scheduled, { type: 'expired' });
+		expect(state).toMatchObject({ phase: 'FAILED', reason: 'export-budget' });
+		expect(kinds(fx)).toEqual(['release', 'mountErrorCard', 'settle']);
+	});
+
+	it('COMPILING + expired -> FAILED(export-budget), without aborting the compile', () => {
+		const [state, fx] = reduce(stateFor('COMPILING'), { type: 'expired' });
+		expect(state).toMatchObject({ phase: 'FAILED', reason: 'export-budget' });
+		expect(kinds(fx)).toEqual(['release', 'mountErrorCard', 'settle']);
+		expect(kinds(fx)).not.toContain('abort');
+	});
+
+	it('LOOKUP + expired -> FAILED(export-budget), and the late answer is ignored', () => {
+		const [state, fx] = reduce(stateFor('LOOKUP'), { type: 'expired' });
+		expect(state).toMatchObject({ phase: 'FAILED', reason: 'export-budget' });
+		expect(kinds(fx)).toEqual(['mountErrorCard', 'settle']);
+		expect(reduce(state, { type: 'hit', tier: 'l2' })[0]).toBe(state);
+	});
+
+	it('a compile it gave up on cannot paint over the card when it finishes', () => {
+		const { state, effects } = drive(initialState(), [
+			...TO_COMPILING,
+			{ type: 'expired' },
+			{ type: 'ok' },
+			{ type: 'timeout' },
+		]);
+		expect(state).toMatchObject({ phase: 'FAILED', reason: 'export-budget' });
+		expect(kinds(effects)).not.toContain('mount');
+		expect(countSettles(effects)).toBe(1);
+	});
+
+	it('an unloaded compile just ends', () => {
+		const unloaded = reduce(stateFor('COMPILING'), { type: 'unload' })[0];
+		const [state, fx] = reduce(unloaded, { type: 'expired' });
+		expect(state.phase).toBe('DISPOSED');
+		expect(kinds(fx)).toEqual(['settle']);
+	});
+
+	it('changes nothing for a block that is already done, or never started', () => {
+		for (const phase of ['MOUNTED', 'FAILED', 'IDLE_MANUAL', 'GATING', 'DEBOUNCING'] as const) {
+			const state = stateFor(phase);
+			expect(reduce(state, { type: 'expired' })[0], phase).toBe(state);
+		}
 	});
 });
 
