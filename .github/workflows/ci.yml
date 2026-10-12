@@ -52,7 +52,54 @@ jobs:
         run: npm run typecheck:legacy
 
       - name: Test
-        run: npm test
+        # With coverage, which fails the step if it falls below the floors in vitest.config.ts.
+        run: npm run test:coverage
+
+      - name: Coverage summary
+        # Into the job summary, not to a coverage service: nothing here needs an account or a token,
+        # and the numbers are read where the run is read. Runs when the tests failed too, since a
+        # floor that was missed is exactly when the numbers are wanted.
+        if: ${{ !cancelled() }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const file = "coverage/coverage-summary.json";
+            if (!fs.existsSync(file)) process.exit(0);
+            const summary = JSON.parse(fs.readFileSync(file, "utf8"));
+            const pct = (m) => (typeof m.pct === "number" ? `${m.pct.toFixed(1)}%` : String(m.pct));
+            const kinds = ["statements", "branches", "functions", "lines"];
+            const out = ["### Test coverage", "", "| | Covered | Total | |", "| --- | --: | --: | --: |"];
+            for (const k of kinds) {
+              const m = summary.total[k];
+              out.push(`| ${k} | ${m.covered} | ${m.total} | ${pct(m)} |`);
+            }
+            const files = Object.entries(summary)
+              .filter(([name]) => name !== "total")
+              .sort(([, a], [, b]) => a.statements.pct - b.statements.pct);
+            out.push("", "<details><summary>By file, least covered first</summary>", "");
+            out.push("| File | Statements | Branches | Functions | Lines |", "| --- | --: | --: | --: | --: |");
+            for (const [name, m] of files) {
+              out.push(`| ${path.relative(process.cwd(), name)} | ${kinds.map((k) => pct(m[k])).join(" | ")} |`);
+            }
+            out.push("", "</details>", "");
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out.join("\n"));
+          '
+
+      # The engine checks. They need no Docker, because the engine is committed (D12): the real TeX
+      # runs in Node, in about half a minute for all three. They used to run only in the Engine
+      # workflow (weekly, or when engine-build/ or engine-src/ changed) and in the release, so a
+      # pull request bumping a package the worker bundles — dvi2html, pako, buffer — was not
+      # rendered through until a Monday or a release.
+      - name: Every fixture renders
+        # LIMIT, never PASS, for a documented boundary; LIFTED if one starts working.
+        run: npm run smoke
+
+      - name: The fork still matches upstream
+        run: npm run verify:fork
+
+      - name: The shipped worker renders identically
+        run: npm run verify:worker
 
       - name: Build
         # The sha256 is printed, not just computed. A release asset has to match what anyone gets by
@@ -102,9 +149,9 @@ jobs:
 
   native-unicode:
     # The pre-flight lint's list of characters the engine typesets by itself is measured from the
-    # committed engine, and this measures it again: about 1,500 TeX runs, a minute or so, several
-    # times what the steps in `check` take together. It is a job of its own so that it runs beside
-    # `check` rather than after it — a push waits for the longer of the two, not for their sum.
+    # committed engine, and this measures it again: about 1,500 TeX runs, a minute or so. It is a job
+    # of its own so that it runs beside `check` rather than after it — a push waits for the longer of
+    # the two, not for their sum.
     #
     # It runs on every push rather than behind a path filter. The list goes stale when the engine
     # changes, when anything under engine-src/ changes (that moves the ENGINE_ID the file records),

@@ -32,6 +32,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "smoke": "node scripts/smoke.mjs",
     "verify:fork": "node scripts/verify-fork.mjs",
     "verify:worker": "node scripts/verify-worker.mjs",
