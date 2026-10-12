@@ -51,11 +51,12 @@ export interface TexJobSpec {
 	timeoutMs: number;
 	isExport: boolean;
 	/**
-	 * Part of a PDF export, whose total budget bounds how long the block waits (processor.ts).
-	 * Narrower than `isExport`, which fails open and so also takes in a pop-out window's blocks:
-	 * no export budget bounds those, and the queue's depth cap still has to.
+	 * Not subject to the queue's depth cap: a block of a PDF export, or of "Render all diagrams in
+	 * this note". Past the cap a block rests on a "Render diagram" button, which is what the PDF
+	 * printed and what the command left behind. Narrower than `isExport`, which fails open and so
+	 * also takes in a pop-out window's blocks — and those only the cap bounds.
 	 */
-	budgeted: boolean;
+	uncapped: boolean;
 	preflight: Diagnostic[];
 }
 
@@ -378,10 +379,7 @@ export class TikzBlock extends MarkdownRenderChild {
 				// block submitted the key first.
 				onStart: () => this.dispatch({ type: 'slot' }),
 				...(this.spec.isExport ? { ignorePoison: true } : {}),
-				// A block of a PDF export may not be refused for queue depth: the refusal is a
-				// "Render diagram" button, and that is what went into the PDF. The export's total
-				// budget bounds its wait instead.
-				...(this.spec.budgeted ? { uncapped: true } : {}),
+				...(this.spec.uncapped ? { uncapped: true } : {}),
 			});
 
 			// The RAW engine output, not a finished artifact: the pipeline is a separate phase, and

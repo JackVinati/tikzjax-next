@@ -135,7 +135,7 @@ function spec(over: Partial<TexJobSpec> = {}): TexJobSpec {
 		legacySource: null,
 		timeoutMs: 1000,
 		isExport: false,
-		budgeted: false,
+		uncapped: false,
 		preflight: [],
 		...over,
 	};
@@ -411,7 +411,7 @@ describe('an export with more diagrams to compile than the queue holds', () => {
 		const els = [container(), container(), container()];
 		const blocks = els.map(
 			(el, i) =>
-				new TikzBlock(el, spec({ key: `K${i}`, isExport: true, budgeted: true }), deps({ queue })),
+				new TikzBlock(el, spec({ key: `K${i}`, isExport: true, uncapped: true }), deps({ queue })),
 		);
 		for (const block of blocks) block.onload();
 

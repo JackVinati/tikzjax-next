@@ -109,6 +109,12 @@ describe('a PDF export', () => {
 		await flush();
 		expect(done.done).toBe(false);
 	});
+
+	it('lets its blocks past the queue depth cap: the budget bounds them instead', async () => {
+		const { deps, seen } = processorDeps();
+		const exported = await processBlock(deps, seen, SOURCE, { el: printed().createDiv(), load: false });
+		expect(exported.spec.uncapped).toBe(true);
+	});
 });
 
 describe('the settings a block is built with', () => {
@@ -234,6 +240,16 @@ describe('"Render all diagrams in this note"', () => {
 		const { deps, seen } = processorDeps();
 		const { spec } = await processBlock(deps, seen, SOURCE, { load: false });
 		expect(spec.options.presentation.lazy).toBe('on');
+	});
+
+	it('is not cut short by the queue depth cap: "all" means all, and the run can be stopped', async () => {
+		// Past the cap (16 on a phone) a block rests on a "Render diagram" button, so a long note
+		// came back from "Render all diagrams" with its last diagrams unrendered.
+		const { deps, seen } = processorDeps();
+		const warm = await processBlock(deps, seen, SOURCE, { el: holder().createDiv(), load: false });
+		const page = await processBlock(deps, seen, SOURCE, { load: false });
+		expect(warm.spec.uncapped).toBe(true);
+		expect(page.spec.uncapped).toBe(false);
 	});
 
 	it('submits a block in the holder even though nothing ever reports it visible', async () => {

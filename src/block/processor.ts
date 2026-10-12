@@ -312,7 +312,7 @@ function buildSpec(
 	resolved: Awaited<ReturnType<PreambleService['resolve']>> | null,
 ): TexJobSpec {
 	const { budgets } = deps;
-	const { isExport, budgeted } = place;
+	const { isExport } = place;
 	const options = parsed.options;
 
 	if (resolved) {
@@ -365,7 +365,8 @@ function buildSpec(
 		legacySource: legacySourceFor(parsed.body, options.baked, settings),
 		timeoutMs,
 		isExport,
-		budgeted,
+		// Each is bounded some other way: an export by its total budget, a warm run by its Stop.
+		uncapped: place.budgeted || place.offscreen,
 		preflight: [
 			// A missing preamble file or an include cycle is a diagnostic in its own right, shown
 			// beside the diagram. PR #77's author conceded that theirs spliced an empty string and
