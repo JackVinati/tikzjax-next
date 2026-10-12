@@ -41,9 +41,25 @@ export interface PreambleSource {
 	read(canonicalPath: string): Promise<string>;
 }
 
+/** One line of the expanded preamble, as the user wrote it: the file, and its line in that file. */
+export interface PreambleLine {
+	path: string;
+	/** 1-based. */
+	line: number;
+}
+
 export interface ResolvedPreamble {
 	/** Fully expanded, ready for `RenderOptions.addToPreamble`. */
 	text: string;
+	/**
+	 * Where each line of `text` came from, one entry per line, in order.
+	 *
+	 * For the error card. TeX numbers the lines of the whole input, and when it stops in the
+	 * preamble the line it names is a line of `text` — of no use to someone who wrote three files
+	 * that were spliced into it. Not in the cache key, and needs not be: it is a function of the
+	 * files, whose contents are.
+	 */
+	lines: PreambleLine[];
 	/** Canonical paths read, sorted and deduped. */
 	deps: string[];
 	/** Sorted `"path:hash"`, for `BakedOptions.depHashes`. */
@@ -102,13 +118,17 @@ export async function resolvePreamble(
 	};
 
 	const parts: string[] = [];
+	const lines: PreambleLine[] = [];
 	for (const slot of slots(entry)) {
 		// Sequential rather than Promise.all: include-once, cycle detection and diagnostic order all
 		// depend on a deterministic traversal, and a preamble is two or three small files that the
 		// adapter reads through Obsidian's own `cachedRead`. Concurrency here would buy microseconds
 		// and cost reproducibility of the cache key.
-		const text = await expand(ctx, slot.path, slot.origin, fromNotePath, []);
-		if (text !== '') parts.push(text);
+		const expanded = await expand(ctx, slot.path, slot.origin, fromNotePath, []);
+		if (expanded.text !== '') {
+			parts.push(expanded.text);
+			lines.push(...expanded.lines);
+		}
 	}
 
 	// Each sorted independently, so `deps[i]` is NOT `depHashes[i]`: appending `:` re-orders any pair
@@ -119,6 +139,7 @@ export async function resolvePreamble(
 
 	return {
 		text: parts.join('\n'),
+		lines,
 		deps,
 		depHashes,
 		// One problem, one chip: a duplicated `%:input`, or a `preamble=` that repeats the global
@@ -145,6 +166,17 @@ function slots(entry: PreambleEntry): { path: string; origin: Origin }[] {
 }
 
 /**
+ * A file's expansion: its text, and where each line of that text was written. An empty `text`
+ * has no lines — it is left out of whatever includes it, so it occupies none of its lines either.
+ */
+interface Expanded {
+	text: string;
+	lines: PreambleLine[];
+}
+
+const NOTHING: Expanded = { text: '', lines: [] };
+
+/**
  * Read one file, splice its own `%:input`s into it, return the text.
  *
  * `stack` is the chain of canonical ancestors, outermost first — the cycle detector and the thing
@@ -159,7 +191,7 @@ async function expand(
 	origin: Origin,
 	fromPath: string,
 	stack: readonly string[],
-): Promise<string> {
+): Promise<Expanded> {
 	// An unset setting is an empty string as often as it is null, and "" is not a missing file: it
 	// is a user who has no global preamble. Diagnosing it would put a permanent error card under
 	// every diagram in a default vault — and, worse, `text` would still be empty, so the L3
@@ -168,7 +200,7 @@ async function expand(
 	// Whitespace was already stripped by whoever produced the path — `slots` for a settings field,
 	// `inputPath` for a directive — because only they can tell a stray space in a text box from one
 	// the user deliberately quoted. Trimming again here would silently unquote `%:input "a .tex "`.
-	if (path === '') return '';
+	if (path === '') return NOTHING;
 
 	// `resolve` is as able to throw as `read` is, and for the same reason: it is the injected
 	// Obsidian boundary (`metadataCache.getFirstLinkpathDest` + `vault.getAbstractFileByPath`), not
@@ -182,17 +214,17 @@ async function expand(
 		canonical = ctx.source.resolve(path, fromPath);
 	} catch (error) {
 		ctx.diagnostics.push(unresolvable(path, origin, stack, error));
-		return '';
+		return NOTHING;
 	}
 	if (canonical === null) {
 		ctx.diagnostics.push(notFound(path, origin, stack));
-		return '';
+		return NOTHING;
 	}
 
 	const at = stack.indexOf(canonical);
 	if (at !== -1) {
 		ctx.diagnostics.push(cycle([...stack.slice(at), canonical]));
-		return '';
+		return NOTHING;
 	}
 
 	// Include-once, not include-always. A preamble file is a pile of `\newcommand`s, and TeX greets
@@ -200,11 +232,11 @@ async function expand(
 	// both include one shared macro file) would turn a perfectly legal include graph into a compile
 	// failure. Splicing the first occurrence and skipping the rest is what `\usepackage` does, and
 	// it is what a user who wrote the graph expects. Silent by design: the content is already there.
-	if (ctx.emitted.has(canonical)) return '';
+	if (ctx.emitted.has(canonical)) return NOTHING;
 
 	if (stack.length >= MAX_INCLUDE_DEPTH) {
 		ctx.diagnostics.push(tooDeep(canonical, stack));
-		return '';
+		return NOTHING;
 	}
 
 	// Marked before the read, so a file that fails to read is diagnosed once rather than once per
@@ -216,7 +248,7 @@ async function expand(
 		text = await read(ctx, canonical);
 	} catch (error) {
 		ctx.diagnostics.push(unreadable(canonical, error));
-		return '';
+		return NOTHING;
 	}
 
 	// The digest is over the bytes as read, never over the expansion: `depHashes` answers "has this
@@ -226,10 +258,14 @@ async function expand(
 
 	const childStack = [...stack, canonical];
 	const out: string[] = [];
-	for (const line of text.split('\n')) {
+	const lines: PreambleLine[] = [];
+	const written = text.split('\n');
+	for (let i = 0; i < written.length; i++) {
+		const line = written[i] ?? '';
 		const included = inputPath(line);
 		if (included === null) {
 			out.push(line);
+			lines.push({ path: canonical, line: i + 1 });
 			continue;
 		}
 		// The directive line itself never reaches TeX. It is a comment, so leaving it would be
@@ -243,10 +279,15 @@ async function expand(
 			continue;
 		}
 		const child = await expand(ctx, included, 'input', canonical, childStack);
-		if (child !== '') out.push(child);
+		if (child.text !== '') {
+			out.push(child.text);
+			lines.push(...child.lines);
+		}
 	}
 
-	return out.join('\n');
+	const expanded = out.join('\n');
+	// A file of one empty line, or of nothing but includes that came to nothing, is left out.
+	return expanded === '' ? NOTHING : { text: expanded, lines };
 }
 
 /**

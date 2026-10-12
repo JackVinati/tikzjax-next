@@ -1,5 +1,6 @@
 import { Notice } from 'obsidian';
 import type { Diagnostic } from '../types';
+import type { PreambleLine } from '../preamble/resolve';
 
 /**
  * What a failed diagram looks like. See internal/DESIGN.md §7.6.
@@ -17,12 +18,53 @@ export interface ErrorCardOptions {
 	diagnostic: Diagnostic;
 	/** The block's own source, so the offending line can be shown in context. */
 	source: string;
+	/**
+	 * What TeX was given ahead of the block — the preamble files, expanded — and where each of its
+	 * lines was written (preamble/resolve.ts), for an error TeX met before it reached the block.
+	 */
+	preamble?: { text: string; lines: readonly PreambleLine[] } | undefined;
 	log: string[];
 	onRetry?: (() => void) | undefined;
 }
 
+/** Where the line an error names is, in what the user wrote. */
+type Place =
+	| { in: 'block'; line: number; text: string }
+	| { in: 'preamble'; path: string | null; line: number; text: string }
+	/** The one line the worker writes itself: the block's packages and libraries, \begin{document}. */
+	| { in: 'head' };
+
+/**
+ * `line` is numbered as the block's own lines are, from 1 — pre-flight numbers them that way, and
+ * the host turns TeX's `l.NN` into that (engine/worker-host.ts). Counting on upwards, 0 is the line
+ * just above the block, which is the preamble's last, -1 the one above it, and so on: the worker
+ * writes the preamble's lines immediately before the block, and everything of its own ahead of them
+ * on their first line (engine-src/document.ts). Past the block's last line is the `\end{document}`
+ * it was wrapped in, and the last line is the nearest thing the user wrote.
+ */
+function place(line: number, source: string, preamble: ErrorCardOptions['preamble']): Place {
+	if (line >= 1) {
+		const lines = source.split('\n');
+		const index = Math.min(line, lines.length) - 1;
+		return { in: 'block', line: index + 1, text: lines[index] ?? '' };
+	}
+
+	const text = preamble?.text ?? '';
+	if (text === '') return { in: 'head' };
+	const lines = text.split('\n');
+	const index = lines.length + line - 1;
+	if (index < 0) return { in: 'head' };
+	const origin = preamble?.lines[index];
+	return {
+		in: 'preamble',
+		path: origin?.path ?? null,
+		line: origin?.line ?? index + 1,
+		text: lines[index] ?? '',
+	};
+}
+
 export function renderErrorCard(container: HTMLElement, options: ErrorCardOptions): void {
-	const { diagnostic, source, log, onRetry } = options;
+	const { diagnostic, source, preamble, log, onRetry } = options;
 
 	container.empty();
 	const card = container.createDiv({ cls: 'tikzjax-error' });
@@ -35,19 +77,32 @@ export function renderErrorCard(container: HTMLElement, options: ErrorCardOption
 		card.createDiv({ cls: 'tikzjax-error-hint', text: diagnostic.hint });
 	}
 
-	// The offending line with a caret. TeX's `l.NN` is 1-based and counts the assembled input,
-	// which begins with our preamble on line 1 — so the number is offset by one relative to what
-	// the user wrote. Showing the text rather than only the number sidesteps the ambiguity.
+	// The offending line with a caret, and its text as well as its number: the number alone is easy
+	// to misread against a block whose `%!tikz` lines were taken out before TeX saw it. A line in
+	// the preamble is shown from the file it was written in, at that file's own line — TeX's number
+	// for it counts every preamble file before it, and the block's lines are no help at all.
 	if (diagnostic.line !== undefined) {
-		const lines = source.split('\n');
-		const index = Math.min(Math.max(diagnostic.line - 2, 0), lines.length - 1);
-		const text = lines[index];
-		if (text !== undefined) {
+		const at = place(diagnostic.line, source, preamble);
+		if (at.in === 'head') {
+			card.createDiv({
+				cls: 'tikzjax-error-where',
+				text: 'TeX stopped before reaching the diagram, on the line that loads its packages and libraries.',
+			});
+		} else {
+			if (at.in === 'preamble') {
+				card.createDiv({
+					cls: 'tikzjax-error-where',
+					text:
+						at.path === null
+							? `In the preamble, line ${at.line}`
+							: `In the preamble: ${at.path}, line ${at.line}`,
+				});
+			}
 			const block = card.createDiv({ cls: 'tikzjax-error-source' });
-			block.createSpan({ text: `${index + 1} | ${text}\n` });
+			block.createSpan({ text: `${at.line} | ${at.text}\n` });
 			block.createSpan({
 				cls: 'tikzjax-error-caret',
-				text: `${' '.repeat(String(index + 1).length + 3)}^`,
+				text: `${' '.repeat(String(at.line).length + 3)}^`,
 			});
 		}
 	}

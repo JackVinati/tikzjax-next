@@ -293,23 +293,18 @@ export class WorkerHost implements TexHost {
 		}
 
 		this.current = null;
+		const line = blockLine(message.line, message.bodyLine);
 		if (message.type === 'ok') {
 			const result: TexResult = {
 				svg: message.svg,
 				log: message.log,
 				durationMs: message.durationMs,
 				firstError: message.firstError,
-				line: message.line,
+				line,
 			};
 			this.settle(job, () => job.resolve(result));
 		} else {
-			const error = new TexError(
-				message.kind,
-				message.log,
-				message.firstError,
-				message.line,
-				message.message,
-			);
+			const error = new TexError(message.kind, message.log, message.firstError, line, message.message);
 			this.settle(job, () => job.reject(error));
 		}
 		this.pump();
@@ -406,6 +401,21 @@ export class WorkerHost implements TexHost {
 		this.timers?.clearTimeout(this.idleTimer);
 		this.idleTimer = null;
 	}
+}
+
+/**
+ * TeX's `l.NN`, as a line of the block.
+ *
+ * TeX counts the lines of the whole input, and every preamble file comes first, so the block's own
+ * first line is wherever the worker says it put it (engine-src/document.ts). The error card used to
+ * subtract a fixed 2, which was right only for a preamble of one line: with a three-line preamble
+ * file it showed the block's line two below the one at fault. Lines above the block come out as 0,
+ * -1 and so on, counting up through the preamble — block/error-card.ts says which file that is.
+ *
+ * A worker that does not say is the one-line assembly every worker before this one used.
+ */
+function blockLine(line: number | undefined, bodyLine: number | undefined): number | undefined {
+	return line === undefined ? undefined : line - (bodyLine ?? 2) + 1;
 }
 
 function unloaded(): TexError {

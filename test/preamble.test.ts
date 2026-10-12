@@ -473,6 +473,61 @@ describe('missing files', () => {
 	});
 });
 
+describe('where each line came from', () => {
+	/**
+	 * TeX's `l.NN` for an error in the preamble is a line of `text`, and the user wrote that line
+	 * in some file, at some line of its own. The error card used to point into the BLOCK by the
+	 * same number, at an unrelated line of TikZ.
+	 */
+	it('names the file and its own line for every line of the text, includes spliced in place', async () => {
+		const vault = new FakeVault({
+			'preambles/global.tex': '\\usepackage{amsmath}\n\\newcommand{\\R}{\\mathbb{R}}',
+			'notes/block.tex': '\\def\\a{1}\n%:input macros.tex\n\\def\\c{3}',
+			'notes/macros.tex': '\\def\\b{2}\n\\def\\bb{22}',
+		});
+
+		const resolved = await resolve(vault, {
+			globalPath: 'preambles/global.tex',
+			blockPath: 'block.tex',
+		});
+
+		const lines = resolved.text.split('\n');
+		expect(resolved.lines).toHaveLength(lines.length);
+		expect(resolved.lines).toEqual([
+			{ path: 'preambles/global.tex', line: 1 },
+			{ path: 'preambles/global.tex', line: 2 },
+			{ path: 'notes/block.tex', line: 1 },
+			// The %:input line itself never reaches TeX; the file it names takes its place.
+			{ path: 'notes/macros.tex', line: 1 },
+			{ path: 'notes/macros.tex', line: 2 },
+			{ path: 'notes/block.tex', line: 3 },
+		]);
+		expect(lines[4]).toBe('\\def\\bb{22}');
+	});
+
+	it('keeps step with the text when a file is empty, ends in a newline, or includes nothing', async () => {
+		const vault = new FakeVault({
+			'notes/empty.tex': '',
+			'notes/trailing.tex': '\\def\\t{1}\n',
+			'notes/only-include.tex': '%:input empty.tex',
+		});
+
+		const resolved = await resolve(vault, {
+			inputs: ['empty.tex', 'trailing.tex', 'only-include.tex', 'missing.tex'],
+		});
+
+		expect(resolved.text).toBe('\\def\\t{1}\n');
+		expect(resolved.lines).toEqual([
+			{ path: 'notes/trailing.tex', line: 1 },
+			{ path: 'notes/trailing.tex', line: 2 },
+		]);
+	});
+
+	it('is empty when there is no preamble', async () => {
+		expect((await resolve(new FakeVault({}))).lines).toEqual([]);
+	});
+});
+
 describe('deps and depHashes', () => {
 	const vault = () =>
 		new FakeVault({

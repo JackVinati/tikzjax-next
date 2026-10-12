@@ -190,6 +190,13 @@ The @font-face rules below embed TeX fonts as WOFF2, under the licences listed i
 	margin-bottom: 0.5em;
 }
 
+/* Which preamble file the line below it is from, when TeX stopped before reaching the block. */
+.tikzjax-error-where {
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+	margin-bottom: 0.25em;
+}
+
 .tikzjax-error-source {
 	font-family: var(--font-monospace);
 	font-size: var(--font-smaller);

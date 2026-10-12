@@ -7,6 +7,7 @@ import { BlockTally, OFFSCREEN_CLASS, rendersDifferently } from '../src/block/pr
 import type { BlockOutcome } from '../src/block/render-child';
 import { budgetsFor } from '../src/platform/budgets';
 import { DEFAULT_SETTINGS, type TikzSettings } from '../src/settings/schema';
+import { TexError } from '../src/types';
 
 beforeAll(() => {
 	installObsidianDom(window as unknown as Window & typeof globalThis);
@@ -288,6 +289,66 @@ describe('BlockTally', () => {
 		report?.({ state: 'error', message: 'x' });
 		report?.({ state: 'ok' });
 		expect(tally.counts()).toEqual({ ok: 1, failed: 0 });
+	});
+});
+
+describe('an error TeX found in a preamble file', () => {
+	/**
+	 * The whole path from the vault to the card, short of the engine: TeX's `l.2` behind a preamble
+	 * of three lines is two lines above the block (engine/worker-host.ts turns it into -1), and the
+	 * card has to say which file that line is in, at that file's own line.
+	 */
+	it('is shown on the card from the file, at the line it was written on', async () => {
+		const app = fakeApp({
+			'preambles/global.tex': '\\usetikzlibrary{arrows.meta}\n\\undefinedmacro',
+			'tikz-preamble.tex': '\\tikzset{box/.style={draw}}',
+		});
+		const submit = vi.fn(
+			(
+				_key: string,
+				_job: unknown,
+				_band: number,
+				_timeout: number,
+				opts?: { onStart?: () => void },
+			) => {
+				opts?.onStart?.();
+				return Promise.reject(
+					new TexError(
+						'tex-error',
+						['! Undefined control sequence.'],
+						'Undefined control sequence.',
+						-1,
+					),
+				);
+			},
+		);
+		const { deps, seen, settings } = processorDeps(
+			{
+				queue: { submit, release: () => undefined } as never,
+				budgets: { ...budgetsFor(false), debounceMs: 0 },
+			},
+			app,
+		);
+		settings.current = { ...DEFAULT_SETTINGS, preamblePath: 'preambles/global.tex' };
+
+		const { spec, settled, el } = await processBlock(deps, seen, `%!tikz lazy=off\n${SOURCE}`);
+		expect(spec.preambleLines).toEqual([
+			{ path: 'preambles/global.tex', line: 1 },
+			{ path: 'preambles/global.tex', line: 2 },
+			{ path: 'tikz-preamble.tex', line: 1 },
+		]);
+
+		await settled;
+		expect(el.querySelector('.tikzjax-error-where')?.textContent).toBe(
+			'In the preamble: preambles/global.tex, line 2',
+		);
+		expect(el.querySelector('.tikzjax-error-source span')?.textContent).toBe('2 | \\undefinedmacro\n');
+	});
+
+	it('leaves a block with no preamble files nothing to look up', async () => {
+		const { deps, seen } = processorDeps();
+		const { spec } = await processBlock(deps, seen, SOURCE, { load: false });
+		expect(spec.preambleLines).toEqual([]);
 	});
 });
 

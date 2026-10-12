@@ -61,7 +61,7 @@ class FakeWorker {
 		this.onerror?.({ message } as ErrorEvent);
 	}
 
-	private emit(message: WorkerResponse): void {
+	emit(message: WorkerResponse): void {
 		this.onmessage?.({ data: message } as MessageEvent<WorkerResponse>);
 	}
 }
@@ -364,5 +364,92 @@ describe('dispose()', () => {
 		expect(late.result.error).toBeInstanceOf(TexError);
 		expect((late.result.error as TexError).kind).toBe('engine-unavailable');
 		expect(FakeWorker.spawned).toHaveLength(1);
+	});
+});
+
+describe('the line TeX blamed', () => {
+	/**
+	 * TeX's `l.NN` counts the lines of the whole input, preamble files first, and the worker says
+	 * on which of them the block starts. The host hands on the line of the BLOCK, numbered as
+	 * pre-flight numbers it, so nothing past it has to know how the input was put together.
+	 */
+	it('is the line of the block, however long the preamble before it', async () => {
+		const host = new WorkerHost();
+		const failed = render(host, 'a');
+		const recovered = render(host, 'b');
+		worker(0).boot();
+
+		// A three-line preamble puts the block's first line on line 4 of the input, so TeX's l.6 is
+		// the block's line 3.
+		worker(0).emit({
+			type: 'error',
+			id: worker(0).renders[0] ?? -1,
+			kind: 'tex-error',
+			message: 'Undefined control sequence.',
+			firstError: 'Undefined control sequence.',
+			line: 6,
+			bodyLine: 4,
+			log: [],
+			missing: [],
+			durationMs: 1,
+		});
+		await tick();
+		worker(0).emit({
+			type: 'ok',
+			id: worker(0).renders[1] ?? -1,
+			svg: '<svg/>',
+			log: [],
+			missing: [],
+			durationMs: 1,
+			firstError: 'Undefined control sequence.',
+			line: 5,
+			bodyLine: 4,
+		});
+		await tick();
+
+		expect((failed.result.error as TexError).line).toBe(3);
+		expect(recovered.result.value?.line).toBe(2);
+	});
+
+	it('is below 1 when TeX stopped in the preamble, counting up from the block', async () => {
+		const host = new WorkerHost();
+		const failed = render(host, 'a');
+		worker(0).boot();
+
+		// l.2 of an input whose block starts on line 4: two lines above the block's first.
+		worker(0).emit({
+			type: 'error',
+			id: worker(0).renders[0] ?? -1,
+			kind: 'tex-error',
+			message: 'Undefined control sequence.',
+			line: 2,
+			bodyLine: 4,
+			log: [],
+			missing: [],
+			durationMs: 1,
+		});
+		await tick();
+
+		expect((failed.result.error as TexError).line).toBe(-1);
+	});
+
+	it('assumes the one-line preamble 0.1.4 did, should a worker not say', async () => {
+		const host = new WorkerHost();
+		const failed = render(host, 'a');
+		worker(0).boot();
+
+		worker(0).emit({
+			type: 'error',
+			id: worker(0).renders[0] ?? -1,
+			kind: 'tex-error',
+			message: 'Undefined control sequence.',
+			line: 3,
+			log: [],
+			missing: [],
+			durationMs: 1,
+		});
+		await tick();
+
+		expect((failed.result.error as TexError).line).toBe(2);
 	});
 });

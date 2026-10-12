@@ -132,6 +132,7 @@ function spec(over: Partial<TexJobSpec> = {}): TexJobSpec {
 		options: options(),
 		svgo: 'preset',
 		texOptions: {},
+		preambleLines: [],
 		legacySource: null,
 		timeoutMs: 1000,
 		isExport: false,

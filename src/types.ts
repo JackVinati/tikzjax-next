@@ -138,6 +138,10 @@ export interface TexResult {
 	durationMs: number;
 	/** TeX recovered but complained. The diagram mounts with a warning rather than an error. */
 	firstError?: string | undefined;
+	/**
+	 * The line TeX blamed, as a line of the BLOCK, from 1, the way pre-flight numbers them. Lines
+	 * above the block are 0, -1, … and are in the preamble; see engine/worker-host.ts `blockLine`.
+	 */
 	line?: number | undefined;
 }
 
@@ -148,6 +152,7 @@ export class TexError extends Error {
 	readonly kind: TexErrorKind;
 	readonly log: string[];
 	readonly firstError: string | undefined;
+	/** A line of the block, as `TexResult.line` is. */
 	readonly line: number | undefined;
 
 	constructor(kind: TexErrorKind, log: string[], firstError?: string, line?: number, message?: string) {
@@ -207,6 +212,7 @@ export interface TexHost {
 export interface Diagnostic {
 	kind: TexErrorKind | 'warning';
 	message: string;
+	/** A line of the block, from 1; below 1, a line of the preamble before it (block/error-card.ts). */
 	line?: number | undefined;
 	/** Actionable next step, derived from the engine inventory rather than guessed. */
 	hint?: string | undefined;

@@ -362,6 +362,7 @@ function buildSpec(
 			captureLog: settings.captureLog,
 			...(options.baked.twoPass ? { twoPass: true } : {}),
 		},
+		preambleLines: resolved?.lines ?? [],
 		legacySource: legacySourceFor(parsed.body, options.baked, settings),
 		timeoutMs,
 		isExport,

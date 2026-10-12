@@ -181,6 +181,27 @@ if (names.includes('broken')) {
 		`${ok ? '\x1b[32mOK  \x1b[0m' : '\x1b[31mFAIL\x1b[0m'}  the blamed line is the block's line 3, ` +
 			`with a one-line and a three-line preamble: ${blamed.join(', ')}`,
 	);
+
+	// An error in the preamble itself. The plugin finds the preamble's line by counting up from the
+	// block — 0 is the preamble's last line (src/block/error-card.ts) — which holds only while the
+	// worker writes the preamble's lines straight before the block and puts everything of its own
+	// ahead of them on their first line. The undefined control sequence is on the preamble's line 2.
+	const preamble = '\\def\\a{1}\n\\undefinedinthepreamble\n\\def\\c{3}';
+	const reply = await send({
+		type: 'render',
+		id: ++id,
+		source: '\\begin{tikzpicture}\\draw (0,0) -- (1,1);\\end{tikzpicture}',
+		options: { addToPreamble: preamble, captureLog: true },
+	});
+	const found =
+		reply.line === undefined || reply.bodyLine === undefined
+			? `l.${reply.line} with bodyLine ${reply.bodyLine}`
+			: preamble.split('\n').length + (reply.line - reply.bodyLine + 1);
+	if (found !== 2) failures++;
+	console.log(
+		`${found === 2 ? '\x1b[32mOK  \x1b[0m' : '\x1b[31mFAIL\x1b[0m'}  an error in a three-line ` +
+			`preamble is found on the preamble's line 2: ${found}`,
+	);
 }
 
 process.exit(failures ? 1 : 0);

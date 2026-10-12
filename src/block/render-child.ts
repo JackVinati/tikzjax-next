@@ -21,6 +21,7 @@ import { runPipeline } from '../svg/pipeline';
 import { buildStages } from '../svg/stages';
 import { optimizeString, type SvgoLike } from '../svg/optimize';
 import { explain } from '../engine/hints';
+import type { PreambleLine } from '../preamble/resolve';
 import { STRINGS } from '../ui/strings';
 
 /**
@@ -46,6 +47,11 @@ export interface TexJobSpec {
 		wrap?: 'auto' | 'always' | 'never';
 		captureLog?: boolean;
 	};
+	/**
+	 * Where each line of the preamble files in `texOptions.addToPreamble` was written, so an error
+	 * TeX meets there is shown from the file it is in (block/error-card.ts). Empty without one.
+	 */
+	preambleLines: readonly PreambleLine[];
 	/** The source as the OLD plugin would have hashed it, for the L3 read-through. Null disables it. */
 	legacySource: string | null;
 	timeoutMs: number;
@@ -605,6 +611,7 @@ export class TikzBlock extends MarkdownRenderChild {
 		renderErrorCard(this.body, {
 			diagnostic,
 			source: this.spec.source,
+			preamble: { text: this.spec.texOptions.addToPreamble ?? '', lines: this.spec.preambleLines },
 			log: failure.log,
 			onRetry: () => this.dispatch({ type: 'retry' }),
 		});
