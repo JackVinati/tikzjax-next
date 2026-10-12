@@ -820,6 +820,25 @@ function recordingBands(): { queue: BlockDeps['queue']; bands: number[] } {
 	return { queue, bands };
 }
 
+describe('a block the viewport never reports on', () => {
+	/**
+	 * After two seconds without a record the viewport gate gives up waiting — for a block detached
+	 * from the document, say — and the escape hatch was meant to queue it at the back. It reported
+	 * the block VISIBLE instead, so it went in with the diagrams the reader was looking at.
+	 */
+	it('goes to the back of the queue', async () => {
+		const { queue, bands } = recordingBands();
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ queue, observe: (_el, onChange) => onChange(true, true) }),
+		);
+		child.onload();
+		await vi.waitFor(() => expect(bands).toHaveLength(1));
+		expect(bands).toEqual([3]);
+	});
+});
+
 describe('fast mode', () => {
 	/**
 	 * Fast mode is a preset (settings: "Preset: no SVGO, no pre-flight lint, one priority band up"),

@@ -85,7 +85,8 @@ export interface BlockDeps {
 	queue: RenderQueue<TexJobSpec, TexResult>;
 	host: TexHost;
 	svgo: SvgoLike | null;
-	observe: (el: HTMLElement, onChange: (visible: boolean) => void) => void;
+	/** `escaped`: no record ever came and the gate gave up waiting (block/viewport.ts). */
+	observe: (el: HTMLElement, onChange: (visible: boolean, escaped?: boolean) => void) => void;
 	unobserve: (el: HTMLElement) => void;
 	ensureFonts: (doc: Document) => void;
 	debounceMs: number;
@@ -228,7 +229,13 @@ export class TikzBlock extends MarkdownRenderChild {
 				return;
 
 			case 'observe':
-				this.deps.observe(this.body, (visible) => {
+				this.deps.observe(this.body, (visible, escaped) => {
+					// The gate gave up waiting for a record: the lowest band, no debounce. Taken for
+					// plain visibility, it went in with the diagrams the reader was looking at.
+					if (escaped) {
+						this.dispatch({ type: 'noRecordsAfter2s' });
+						return;
+					}
 					this.visible = visible;
 					if (visible) this.dispatch({ type: 'intersect' });
 				});

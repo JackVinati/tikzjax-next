@@ -9,18 +9,24 @@
 export interface ViewportGateOptions {
 	rootMarginPx: number;
 	/**
-	 * A block inside a collapsed callout, a hidden tab, a `display:none` ancestor, or a reading-view
-	 * section Obsidian has detached receives NO IntersectionObserver record at all — not even a
-	 * non-intersecting one. Without a timeout it would sit behind a placeholder forever: a new class
-	 * of blank-diagram bug introduced by lazy rendering itself. So after this long with zero records
-	 * we give up waiting and schedule it at the lowest priority.
+	 * A block that is not in the document — a reading-view section Obsidian has detached — receives
+	 * NO IntersectionObserver record at all, not even a non-intersecting one. Without a timeout it
+	 * would sit behind a placeholder forever: a new class of blank-diagram bug introduced by lazy
+	 * rendering itself. So after this long with zero records we give up waiting, and the block is
+	 * scheduled at the lowest priority.
+	 *
+	 * A block under a `display:none` ancestor — a collapsed callout, a background tab — is a
+	 * different case, though it was long listed with this one: it DOES get a record, not
+	 * intersecting (measured in Chromium), and renders when it is shown. That is lazy rendering
+	 * doing its job, and the escape hatch leaves it alone.
 	 */
 	zeroRecordEscapeMs: number;
 	setTimeout: (fn: () => void, ms: number) => number;
 	clearTimeout: (id: number) => void;
 }
 
-type Callback = (visible: boolean) => void;
+/** `escaped`: no record ever came, and the gate gave up waiting (see `zeroRecordEscapeMs`). */
+type Callback = (visible: boolean, escaped?: boolean) => void;
 
 export class ViewportGate {
 	/**
@@ -68,8 +74,9 @@ export class ViewportGate {
 		this.clearEscape(el);
 		const timer = this.options.setTimeout(() => {
 			if (this.sawRecord.has(el)) return;
-			// Never observed at all. Treat as "render it anyway, at the back of the queue".
-			this.callbacks.get(el)?.(true);
+			// Never observed at all: "render it anyway, at the back of the queue". Said as an escape
+			// rather than as plain visibility, which put the block in with the diagrams on screen.
+			this.callbacks.get(el)?.(true, true);
 		}, this.options.zeroRecordEscapeMs);
 		this.escapeTimers.set(el, timer);
 	}

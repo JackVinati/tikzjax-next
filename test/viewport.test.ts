@@ -115,13 +115,30 @@ describe('ViewportGate', () => {
 		expect(FakeObserver.live.size).toBe(0);
 	});
 
-	it('still escapes after two seconds without a single record', () => {
+	it('escapes after two seconds without a single record, and says that is what happened', () => {
+		// So the block can go to the back of the queue, as the escape hatch promises, rather than
+		// in with the diagrams the reader is looking at.
 		const timers = new FakeTimers();
 		const viewport = gate(timers);
-		const seen: boolean[] = [];
-		viewport.observe(scrollRoot().createDiv(), (visible) => seen.push(visible));
+		const seen: [boolean, boolean | undefined][] = [];
+		viewport.observe(scrollRoot().createDiv(), (visible, escaped) => seen.push([visible, escaped]));
 
 		timers.advance(2000);
-		expect(seen).toEqual([true]);
+		expect(seen).toEqual([[true, true]]);
+	});
+
+	it('does not escape a block it has heard about, even one reported out of view', () => {
+		// A block under a `display:none` ancestor — a collapsed callout, a background tab — DOES get
+		// a record, not intersecting, and is rendered when it is shown. That is lazy rendering
+		// working, not a block to rescue.
+		const timers = new FakeTimers();
+		const viewport = gate(timers);
+		const block = scrollRoot().createDiv();
+		const seen: boolean[] = [];
+		viewport.observe(block, (visible) => seen.push(visible));
+
+		[...FakeObserver.live][0]?.report(block, false);
+		timers.advance(2000);
+		expect(seen).toEqual([false]);
 	});
 });

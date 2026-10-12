@@ -342,10 +342,11 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 						{ kind: 'startDebounce' },
 					]);
 				case 'noRecordsAfter2s':
-					// A block inside a collapsed callout, a hidden tab, a `display:none` ancestor or a
-					// detached reading-view section never receives an IntersectionObserver record at
-					// all, and would sit here behind a permanent placeholder — a blank-diagram bug
-					// introduced by lazy rendering itself. Lowest band, so it yields to visible work.
+					// A block detached from the document never receives an IntersectionObserver
+					// record at all, and would sit here behind a permanent placeholder — a
+					// blank-diagram bug introduced by lazy rendering itself. (One under a
+					// `display:none` ancestor does get a record, and renders when it is shown; see
+					// block/viewport.ts.) Lowest band, so it yields to visible work.
 					return go(state, { phase: 'SCHEDULING', priority: 3 }, [
 						{ kind: 'unobserve' },
 						{ kind: 'submit', priority: 3 },

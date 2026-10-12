@@ -38,9 +38,10 @@ const DESKTOP: Budgets = {
 	queueDepthCap: 64,
 	rootMarginPx: 200,
 	/**
-	 * A block inside a collapsed callout, a hidden tab or a `display:none` ancestor never receives
-	 * an IntersectionObserver record at all. Without this escape hatch it would sit behind a
-	 * permanent placeholder — a new class of blank-diagram bug introduced by lazy rendering itself.
+	 * A block detached from the document never receives an IntersectionObserver record at all.
+	 * Without this escape hatch it would sit behind a permanent placeholder — a new class of
+	 * blank-diagram bug introduced by lazy rendering itself. (A collapsed callout or a background
+	 * tab does get a record, and renders when shown: block/viewport.ts.)
 	 */
 	zeroRecordEscapeMs: 2_000,
 	debounceMs: 300,
