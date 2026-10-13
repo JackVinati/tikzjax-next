@@ -10,9 +10,11 @@ top of its notes on GitHub, and will not publish a version that has none.
   that rendered before come out the same. The original TikZJax plugin's cache is still read where
   there is one.
 - Letters with a dieresis (ä, ö, ü, also written as `\"u`), `Ł` and `ł`, and symbols such as
-  `\spadesuit` no longer make the whole diagram fail. Nor do `°` `×` `±` `µ`, arrows, `™`, `§`, daggers, bulleted
-  lists and siunitx's units such as `\degree`, `\micro` and `\ohm`; they are drawn from the math
-  fonts, so `µ` comes out as the italic math `μ`.
+  `\spadesuit` no longer make the whole diagram fail. Nor do `°` `×` `±` `µ`, arrows, `™`, `§`,
+  daggers, bulleted lists and siunitx's units such as `\degree`, `\micro` and `\ohm`; they are
+  drawn from the math fonts, so `µ` comes out as the italic math `μ`. Nor do `£` `€` `©` `®` `ª`
+  `º`, `\pounds`, `\copyright` and `\$` in a label, built from the Computer Modern text fonts; `€`
+  is a C with a small `=` across it, LaTeX's own stand-in for a font without a euro.
 - Exporting a note to PDF finishes within about a minute however many diagrams are uncached, with
   a short note in place of any that was not ready, and never a "Render diagram" button in the PDF.
   The same diagram shown twice, in two panes, a hover preview or an export while it compiles, no

@@ -1,0 +1,3 @@
+{
+  "note": "£ € © ® ª º, their text commands, \\pounds, \\copyright and a \\$ outside math are all set in TS1 (tcrm1000), which dvi2html cannot draw, and none has a math-font glyph. The worker's TS1 shim (engine-src/ts1-shim.ts) builds them from Computer Modern text fonts as LaTeX did before TS1: £ and $ are character 36 of cmu10, cmti10 and cmr10, © and ® a letter in cmsy10's large circle, and € LaTeX's own stand-in, a C with a small = across it."
+}

@@ -328,13 +328,14 @@ const MAX_REPORTED_CHARS = 5;
  * scripts/scan-native-unicode.mjs renders each one through the committed engine and writes
  * ./native-unicode. It is the same reason `caps` is generated — a hand-kept list would be true of
  * one engine and quietly wrong after the next rebuild. What remains genuinely fails: TeX leaves
- * Greek, Cyrillic and CJK out with "Unicode character … not set up for use with LaTeX", and € and
- * £ compile into a TS1 font the SVG converter cannot draw, which loses the whole diagram.
+ * Greek, Cyrillic and CJK out with "Unicode character … not set up for use with LaTeX", and ¥, ¢
+ * and ‰ compile into a TS1 font the SVG converter cannot draw, which loses the whole diagram.
  *
- * Most of TS1 is drawable all the same. °, ×, µ, → and the others in engine-src/ts1-shim.ts have a
- * glyph in the math fonts, and the worker redefines them to it for any block that can use one. The
- * scan measures the bare engine, which still cannot draw them, so the shim's table is consulted
- * here as well: a warning on 90° would be false.
+ * Most of TS1 is drawable all the same. °, ×, µ, → and most of the others in engine-src/ts1-shim.ts
+ * have a glyph in the math fonts, £, € and © can be built from the Computer Modern text fonts, and
+ * the worker redefines them that way for any block that can use one. The scan measures the bare
+ * engine, which still cannot draw them, so the shim's table is consulted here as well: a warning on
+ * 90° or £5 would be false.
  *
  * Latin-1 is covered too, because the scan measured it and most of it is native but not all.
  * Letters with a dieresis — ä, ö, ü — were an exception, and this rule had to warn that no
@@ -374,11 +375,11 @@ function checkEncoding(text: string, out: Diagnostic[]): void {
  * No inputenc here, although the old hint offered it: the format already reads UTF-8, and what
  * stops these characters is that nothing defines them, which inputenc does not change. The
  * examples are math commands this engine draws for characters it does not; °, × and → were the
- * examples once, and they need none now. Nor is there a word about the dieresis any more: it
- * renders, however it is written.
+ * examples once, and they need none now, nor do £ and €. Nor is there a word about the dieresis any
+ * more: it renders, however it is written.
  */
 const ENCODING_HINT =
-	'The engine typesets most accented letters, curly quotes, dashes and symbols such as ° × → itself, ' +
+	'The engine typesets most accented letters, curly quotes, dashes and symbols such as ° × → £ € itself, ' +
 	'but not these: TeX either leaves each one out with an error or produces a diagram the SVG converter ' +
 	'cannot draw. Where TeX has a math command, write that instead: $\\Omega$, $\\alpha$, $\\in$, $\\infty$.';
 
