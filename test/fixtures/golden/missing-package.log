@@ -12,3 +12,5 @@ Enter file name:
          
 l.1 \nonstopmode\usepackage{nosuchpackage}\begin
                                                 {document}^^M
+No pages of output.
+Transcript written on input.log.

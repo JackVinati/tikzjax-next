@@ -1,0 +1,8 @@
+{
+  "expect": "failure",
+  "reply": {
+    "type": "ok",
+    "firstError": "LaTeX Error: File `nosuchfile.tex' not found."
+  },
+  "note": "A page shipped, then a fatal error: TeX finishes the DVI it has begun, as it does anywhere, and the page is drawn with the error beside it. Until 0.2.0 a fatal error ended the run without TeX's close_files_and_terminate, the page stayed in TeX's output buffer, and the DVI came out empty."
+}

@@ -25,8 +25,9 @@
  *     instead of showing a mystery failure (upstream #81).
  *  7. The engine is built without asyncify (internal/DECISIONS.md D14), so nothing here unwinds or
  *     rewinds: a run is TeX's main program, start to end. TeX's jump out of every procedure on a
- *     fatal error, which asyncify made, is a call to jumpOut, which ends the run there. Upstream's
- *     host waited for a `tex_final_end` that jump skips, so such a run never ended.
+ *     fatal error, which asyncify made, is a call to jumpOut, which ends the run there once TeX has
+ *     closed its files (D17). Upstream's host waited for a `tex_final_end` that jump skips, so such
+ *     a run never ended.
  *  8. getfilesize answers -1 for a file it does not have, where upstream answered 0, and the engine's
  *     \filesize then prints nothing, as pdfTeX's does (internal/DECISIONS.md D16).
  */

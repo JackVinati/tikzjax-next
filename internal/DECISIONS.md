@@ -859,6 +859,31 @@ with `\IfFileExists`, so this has to come before that engine (`TODO.md`, E1).
 
 ---
 
+## D17 — A fatal error ends the run the way TeX ends it
+
+**Amends D14, which ends the run at TeX's jump out and leaves TeX's own ending out.**
+
+Since D14 TeX's `jump_out` calls the host's `jumpOut`, which ends the run where it stands. In
+`tex.web` the jump goes to `end_of_TEX`, where `close_files_and_terminate` finishes the DVI file,
+says "No pages of output." or "Output written on …", and closes the transcript; the jump through
+`jumpOut` passed over all of it. TeX writes its DVI in halves of a 16,384-byte buffer, so a page it
+had shipped before the error, which in a diagram is smaller than that, never reached the file: the
+DVI came out empty and the diagram failed, where any other TeX draws the page. The transcript
+ended at the error.
+
+Section 81 of `tex.web` says what a compiler with no jump out of a procedure should do: have
+`jump_out` call `close_files_and_terminate` before it ends the program, which is what web2c's TeX
+does. `engine-build/changes/jump-out.ch` does that, and `close_files_and_terminate` is written to be
+safe after a fatal error (section 1333). The `fatal-after-page` fixture ships a page and then
+`\input`s a file that does not exist: it used to come back as an empty DVI and a missing file, and
+now its page is drawn and the card shows LaTeX's "File `nosuchfile.tex' not found" with it, as
+pdflatex gives a PDF of the pages it shipped before stopping. The transcripts of `runaway-macro` and
+`missing-package` end with TeX's own last two lines now, "No pages of output." and "Transcript
+written on input.log."; no other fixture changes, and the dump is the same bytes, because nothing
+in the format build ends in a fatal error.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

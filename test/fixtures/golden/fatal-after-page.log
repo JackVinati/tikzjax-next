@@ -1,0 +1,19 @@
+This is e-TeX, Version 3.141592653-2.6 (preloaded format=latex 2026.1.1)
+**entering extended mode
+(input.tex
+LaTeX2e <2023-11-01> patch level 1
+L3 programming layer <2024-01-22>
+("l3backend-dvips.def")
+No file input.aux.
+[1]
+! LaTeX Error: File `nosuchfile.tex' not found.
+Type X to quit or <RETURN> to proceed,
+or enter new name. (Default extension: tex)
+Enter file name: 
+! Emergency stop.
+<read *> 
+         
+l.3 \input{nosuchfile}
+                      ^^M
+Output written on input.dvi (1 page, 868 bytes).
+Transcript written on input.log.

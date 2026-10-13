@@ -250,7 +250,9 @@ ok "library.js clock pinned to 2026-01-01, so core.dump is reproducible"
 # its import would be left for the host to provide under asyncify's name, and an unwind that did not
 # happen would return into whatever called jump_out and let TeX carry on past a fatal error. So the
 # jump becomes a call to the host's `library.jumpOut`, which ends the run by throwing, followed by
-# `unreachable`, so that TeX traps rather than carries on should a host ever return from it.
+# `unreachable`, so that TeX traps rather than carries on should a host ever return from it. The jump
+# also passes over the close_files_and_terminate at end_of_TEX, so engine-build/changes/jump-out.ch
+# has jump_out call it first, as tex.web asks of a compiler that cannot make the jump (D17).
 #
 # Both edits are to web2js's code generator, before it compiles anything. Each must find what it
 # replaces exactly once and leave its replacement in place, or the build stops.
@@ -385,10 +387,11 @@ ok "hash_prime $HASH_PRIME of hash_size 600000"
 # applies one after the other, each to TeX as the ones before it left it (internal/DECISIONS.md D8).
 # engine-build/changes holds ours, for what LaTeX expects of the engine and web2js's do not give it:
 # the \ifincsname primitive, and a \filesize that prints nothing for a file that does not exist
-# (D16). Each goes at the end of the list, so it changes TeX as web2js changed it, and tie stops the
-# build if a change no longer finds the text it replaces. A change file of web2js's own by the same
-# name is not overwritten.
-OUR_CHANGES=(ifincsname.ch filesize-missing.ch)
+# (D16), and a fatal error that closes TeX's files before the jump below ends the run (D17). Each
+# goes at the end of the list, so it changes TeX as web2js changed it, and tie stops the build if a
+# change no longer finds the text it replaces. A change file of web2js's own by the same name is not
+# overwritten.
+OUR_CHANGES=(ifincsname.ch filesize-missing.ch jump-out.ch)
 for ch in "${OUR_CHANGES[@]}"; do
     [ -s "$SRC/changes/$ch" ] || die "the image has no engine-build/changes/$ch — rebuild it (npm run engine:image)"
     [ ! -e "web2js/changes/$ch" ] || die "web2js has a change file of its own named $ch — read it before adding ours"
@@ -456,10 +459,11 @@ done
 # tie stops on a change that does not match, so this is the other half: that each of ours is in the
 # TeX that was compiled. web2js/tex.web is the merged source build:tie wrote and build:tangle read.
 for marker in 'primitive("ifincsname",if_test,if_in_csname_code);' \
-              'filesize_code: if cur_val>=0 then print_int(cur_val);'; do
+              'filesize_code: if cur_val>=0 then print_int(cur_val);' \
+              'begin close_files_and_terminate; goto end_of_TEX;'; do
     grep -qF "$marker" web2js/tex.web || die "the TeX compiled lacks a change of ours: $marker"
 done
-ok "the TeX compiled carries \\ifincsname and \\filesize's nothing for a missing file"
+ok "the TeX compiled carries \\ifincsname, \\filesize's nothing for a missing file, and jump_out's close"
 
 # In place of build:asyncify-wasm: the same -O4, and nothing beyond WebAssembly 1.0. The engine has
 # to compile in the WebViews minAppVersion admits, iOS 14.5's among them, and the later features
