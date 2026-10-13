@@ -3,7 +3,7 @@
 What changed in each release, newest first. The release workflow puts a version's section at the
 top of its notes on GitHub, and will not publish a version that has none.
 
-## 0.1.5 — unreleased
+## 0.1.5 — 2026-10-13
 
 - After updating, every cached diagram is compiled once more, the next time it is shown: both the
   engine's id and the SVG pipeline's revision are part of the cache key, and both changed. Diagrams
