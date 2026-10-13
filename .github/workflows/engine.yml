@@ -87,6 +87,12 @@ jobs:
       - name: Build the engine
         run: npm run engine:build
 
+      - name: The engine is WebAssembly 1.0
+        # Nothing from a later proposal, or the engine does not compile in the older WebViews
+        # minAppVersion admits (iOS 14.5, Chromium 106) while every desktop runs it. CI's tests check
+        # the committed engine the same way; this checks the one just built, before anything else.
+        run: node scripts/wasm-mvp.mjs engine-build/out/tex.wasm
+
       - name: The committed engine is the one this source produces
         # The compressed engine is committed so `npm run build` works in a clean checkout with no
         # Docker (internal/DECISIONS.md D12), which is only honest if it can be checked.
