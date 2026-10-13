@@ -3,7 +3,7 @@
 What changed in each release, newest first. The release workflow puts a version's section at the
 top of its notes on GitHub, and will not publish a version that has none.
 
-## 0.2.0-beta.1 — 2026-10-13
+## 0.2.0 — 2026-10-13
 
 - After updating, every cached diagram is compiled once more, the next time it is shown: the
   engine's id is part of the cache key, and it changed. Diagrams that rendered before come out the
