@@ -26,5 +26,13 @@
   "pgflibrarypgfplots.colorbrewer.code.tex",
   "pgflibrarypgfplots.colortol.code.tex",
 
-  "pgfplotstable.sty"
+  "//",
+  "// pgfplotstable.sty is a wrapper: it \\inputs pgfplotstable.code.tex, which \\inputs",
+  "// pgfplotstable.coltype.code.tex. With the .sty alone \\usepackage{pgfplotstable} stopped at",
+  "// `I can't find file pgfplotstable.code.tex'. The test/fixtures/tex/pgfplotstable fixture loads it.",
+  "//",
+
+  "pgfplotstable.sty",
+  "pgfplotstable.code.tex",
+  "pgfplotstable.coltype.code.tex"
 ]

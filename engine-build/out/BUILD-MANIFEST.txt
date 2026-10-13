@@ -9,5 +9,5 @@ wasm-opt         --mvp-features -O4 (binaryen 99.0.0), no asyncify
 tikzjax          461ac15f1c63351392115c4262d8179bc9922404
 memory pages     2500 (156 MiB)
 hash_prime       131071 (hash_size 600000)
-tex_files        245
+tex_files        247
 node             v22.23.3

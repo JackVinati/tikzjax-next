@@ -45,6 +45,8 @@ top of its notes on GitHub, and will not publish a version that has none.
   `amsthm`, is drawn as before, with that message on it. An `\input` of a file the engine does not
   have now stops the diagram at once, with LaTeX's message, where it used to be read as an empty
   file.
+- `pgfplotstable` loads, as the README has said it does. Only its `.sty` was bundled, and that
+  reads two files that were not, so a diagram that loaded it never finished.
 - The diagnostics view shows, under each diagram compiled, where its time went: waiting for other
   diagrams, waiting for the engine to start, setting up TeX's memory, TeX itself, turning TeX's
   output into SVG, and preparing that SVG for the note.
