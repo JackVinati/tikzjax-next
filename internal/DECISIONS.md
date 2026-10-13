@@ -819,26 +819,26 @@ the page.
 The format changes with it. LaTeX's `utf8.def` asks whether `\ifincsname` exists and, on an engine
 without it, loads `utf8-2018.def` instead, the UTF-8 support LaTeX had before 2019, kept for old
 e-pTeX builds. This engine had been loading that. Now it loads `utf8.def`'s own code, as pdfTeX
-does, in which a UTF-8 character is a `\protected` macro, and its own bytes inside a `\csname`. The
-format is built from 145 files rather than 146, and BUILD-MANIFEST counts them now instead of
-saying 146. expl3 copies the primitive to `\tex_ifincsname:D` and uses it nowhere; of the other
-packages in TeX Live 2023 that test it (kvsetkeys, kvdefinekeys, babel, hologo, thmtools), none is
-bundled. All 27 fixtures that were there before give the same DVI, transcript and SVG (D13), and
-`scan:native` finds the same characters native. `tex.wasm` is 356,483 B, 77,339 gzipped, and
-`core.dump.gz` 5,994,457 B; ENGINE_ID moves, in the release that already recompiles every diagram.
-Two Docker builds produced the same 411 files.
+does, in which a UTF-8 character is a `\protected` macro that gives its own bytes inside a
+`\csname`. The format is built from 145 files rather than 146, and BUILD-MANIFEST counts them now
+instead of saying 146. expl3 copies the primitive to `\tex_ifincsname:D` and uses it nowhere; of the
+other packages in TeX Live 2023 that test it (kvsetkeys, kvdefinekeys, babel, hologo, thmtools),
+none is bundled. All 27 fixtures that were there before give the same DVI, transcript and SVG
+(D13), and `scan:native` finds the same characters native. `tex.wasm` is 356,483 B, 77,339 gzipped,
+and `core.dump.gz` 5,994,457 B; ENGINE_ID moves, in the release that already recompiles every
+diagram. Two Docker builds produced the same 411 files.
 
 **`\filesize` of a file that does not exist is empty.** web2js's `filesize.ch` prints whatever the
 host's `getfilesize` returns, and both hosts, web2js's `library.js` that the format is built with
 and `engine-src/library.ts`, returned 0 for a file they did not have. pdfTeX prints nothing. The
-LaTeX of TeX Live 2023 has `\IfFileExists` ask `\filesize`, through expl3's `\file_full_name:n`, and
-take any answer that is not empty for a file that exists, so on this engine every file existed: a missing
-package was found and read as an empty file, and so was every `\input` of a missing file and every
-probe for an optional file. The hosts now answer -1 for a file they do not have, and
-`filesize-missing.ch` has `\filesize` print the size only when there is one. `library.ts` looks the
-name up, in the run's own files, dvi2html's font metrics and the bundle, rather than opening it as
-upstream did, so asking puts nothing in the run's table of files; a file TeX wrote earlier in the
-run exists, with size 0, because that is how the host reads it back.
+LaTeX of TeX Live 2023 has `\IfFileExists` ask `\filesize`, through expl3's `\file_full_name:n`,
+and take any answer that is not empty for a file that exists, so on this engine every file
+existed: a missing package was found and read as an empty file, and so was every `\input` of a
+missing file and every probe for an optional file. The hosts now answer -1 for a file they do not
+have, and `filesize-missing.ch` has `\filesize` print the size only when there is one. `library.ts`
+looks the name up, in the run's own files, dvi2html's font metrics and the bundle, rather than
+opening it as upstream did, so asking puts nothing in the run's table of files; a file TeX wrote
+earlier in the run exists, with size 0, because that is how the host reads it back.
 
 A missing package now stops TeX at once, as it does on any TeX: LaTeX reports "File `x.sty' not
 found", asks for another name, and TeX in nonstop mode cannot read one, so it ends with an
@@ -892,8 +892,8 @@ file's lines join the log, under a line that says where they come from.
 
 Each way TeX gives up has a fixture, and `verify:worker` holds the reply of the shipped worker to
 what the fixture says it must be, then has the same worker draw `basic` and requires the drawing it
-gives on its own. In Node, on the desktop D14 was measured on, each failure comes back in 50 to
-100 ms, or 300 ms for the one that loads pgfplots first:
+gives on its own. In Node, on the desktop D14 was measured on, each failure comes back in under
+100 ms, and in 300 to 400 ms the one that loads pgfplots first:
 
 | Fixture | How TeX gives up | Kind | First error on the card |
 |---|---|---|---|
