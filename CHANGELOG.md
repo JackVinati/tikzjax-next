@@ -5,8 +5,8 @@ top of its notes on GitHub, and will not publish a version that has none.
 
 ## 0.2.0 — unreleased
 
-- TeX runs in a little over half the time: over the 26 diagrams the engine is tested with, its time
-  went from 4.6 s to 2.5 s, measured in Node, which runs JavaScript and WebAssembly with the same
+- TeX runs in a little over half the time: over the 26 diagrams 0.1.5 was tested with, its time went
+  from 4.6 s to 2.5 s, measured in Node, which runs JavaScript and WebAssembly with the same
   engine as Obsidian on the desktop. The engine no longer carries asyncify, machinery in every
   function that 0.1.5 no longer used and still paid for, and TeX looks up its macros in a table
   spread wider, with shorter searches. Nothing has been measured on an iPhone or iPad yet. Diagrams
