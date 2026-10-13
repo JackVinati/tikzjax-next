@@ -18,7 +18,7 @@ export interface TikzSettings {
 	 * measurement": the engine's frame is an inch short of the drawing, so that would clip it.
 	 */
 	fast: boolean;
-	/** 0 uses the platform budget. A user value is clamped to it on mobile. */
+	/** 0 uses the platform budget. A user value applies as it is, on every device. */
 	timeoutSeconds: number;
 
 	// --- source -------------------------------------------------------------------------------

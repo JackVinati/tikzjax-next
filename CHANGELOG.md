@@ -19,8 +19,7 @@ top of its notes on GitHub, and will not publish a version that has none.
   longer leaves one copy spinning forever.
 - On iPhone and iPad, switching away while a diagram compiles no longer turns it into a "took
   longer than its time budget" error: it finishes when you come back. Diagrams no longer all
-  recompile after the app returns, the engine needs about half the memory while starting, and the
-  time limit setting gives one diagram at most 20 seconds.
+  recompile after the app returns, and the engine needs about half the memory while starting.
 - Timeouts are fairer: starting the engine no longer counts against the first diagram, a slow
   diagram can no longer make the one next to it time out or fail, Retry on a timed-out diagram
   really runs it again, and any settings change gives timed-out diagrams another chance.

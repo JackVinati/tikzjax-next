@@ -291,7 +291,7 @@ function prepare(
 	// Once, so a block whose preamble resolves after a settings change is still built from one
 	// set of settings rather than half of each.
 	const settings = deps.settings();
-	const parsed = parseDirectives(source, defaultOptions(settings, deps.budgets));
+	const parsed = parseDirectives(source, defaultOptions(settings));
 
 	const needsPreamble =
 		parsed.preamblePath !== null ||
@@ -417,9 +417,9 @@ function legacySourceFor(body: string, baked: BakedOptions, settings: TikzSettin
 	return body;
 }
 
-/** What a block gets before its own `%!tikz` lines are read: the settings, under the budgets. */
-function defaultOptions(settings: TikzSettings, budgets: Budgets): BlockOptions {
-	const timeoutMs = settingTimeoutMs(settings, budgets);
+/** What a block gets before its own `%!tikz` lines are read: the settings. */
+function defaultOptions(settings: TikzSettings): BlockOptions {
+	const timeoutMs = settingTimeoutMs(settings);
 	return {
 		baked: {
 			border: null,
@@ -442,9 +442,14 @@ function defaultOptions(settings: TikzSettings, budgets: Budgets): BlockOptions 
 	};
 }
 
-/** The time limit setting in ms, capped where the platform caps it; undefined for the budget's own. */
-function settingTimeoutMs(settings: TikzSettings, budgets: Budgets): number | undefined {
-	if (!(settings.timeoutSeconds > 0)) return undefined;
-	const ms = settings.timeoutSeconds * 1000;
-	return budgets.timeoutSettingCapMs === null ? ms : Math.min(ms, budgets.timeoutSettingCapMs);
+/**
+ * The time limit setting in ms; undefined for the platform budget's own.
+ *
+ * Not capped on a phone. The phone is the slower device, so a limit raised for heavy diagrams is
+ * wanted there most. The clock starts only when the engine takes the job (queue.ts, `startupMs`)
+ * and the worker runs one job at a time, so a long limit can delay the diagrams waiting behind it
+ * but cannot make them fail.
+ */
+function settingTimeoutMs(settings: TikzSettings): number | undefined {
+	return settings.timeoutSeconds > 0 ? settings.timeoutSeconds * 1000 : undefined;
 }

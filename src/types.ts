@@ -224,8 +224,6 @@ export interface Diagnostic {
 export interface Budgets {
 	concurrency: number;
 	timeoutMs: number;
-	/** The most the time limit SETTING may give a diagram. Null: whatever it says. */
-	timeoutSettingCapMs: number | null;
 	firstJobGraceMs: number;
 	exportBlockTimeoutMs: number;
 	exportTotalBudgetMs: number;

@@ -177,16 +177,14 @@ describe('the time limit from the settings', () => {
 		expect(spec.timeoutMs).toBe(60_000);
 	});
 
-	it('is clamped to the platform budget on a phone, as the setting says', async () => {
-		// The setting syncs between devices: a limit chosen for a desktop's heavy diagrams would let
-		// one diagram hold the phone's only engine, and its memory, for that long.
+	it('is not capped on a phone, the slower device, where a raised limit is wanted most', async () => {
 		const { deps, seen, settings } = processorDeps({ budgets: budgetsFor(true) });
 		settings.current = { ...settings.current, timeoutSeconds: 60 };
 		const { spec } = await processBlock(deps, seen, SOURCE, { load: false });
-		expect(spec.timeoutMs).toBe(budgetsFor(true).timeoutMs);
+		expect(spec.timeoutMs).toBe(60_000);
 	});
 
-	it('may still be lowered on a phone', async () => {
+	it('may be lowered on a phone', async () => {
 		const { deps, seen, settings } = processorDeps({ budgets: budgetsFor(true) });
 		settings.current = { ...settings.current, timeoutSeconds: 5 };
 		const { spec } = await processBlock(deps, seen, SOURCE, { load: false });

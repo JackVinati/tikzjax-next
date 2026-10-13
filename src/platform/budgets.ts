@@ -18,7 +18,6 @@ const DESKTOP: Budgets = {
 	 */
 	concurrency: 1,
 	timeoutMs: 10_000,
-	timeoutSettingCapMs: null,
 	/**
 	 * How long a job may wait for the engine to come up before its own `timeoutMs` starts.
 	 *
@@ -64,14 +63,6 @@ const MOBILE: Budgets = {
 	 */
 	concurrency: 1,
 	timeoutMs: 20_000,
-	/**
-	 * The time limit setting may lower the limit on a phone, not raise it. The setting syncs between
-	 * devices, and a limit chosen for a desktop's heavy diagrams would let one diagram hold the
-	 * phone's only engine — and its ~156 MiB — for that long, with every other diagram waiting. A
-	 * block's own `%!tikz timeout=` is not capped: it is a decision about that one diagram, and the
-	 * timeout card is what tells the user to write it.
-	 */
-	timeoutSettingCapMs: 20_000,
 	firstJobGraceMs: 30_000,
 	exportBlockTimeoutMs: 30_000,
 	exportTotalBudgetMs: 60_000,

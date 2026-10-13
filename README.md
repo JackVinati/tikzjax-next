@@ -119,8 +119,7 @@ The plugin's settings cover colours, lazy rendering, fast mode, the time limit, 
 cleaned up, the pre-flight checks, the preamble files, the TeX log and the cache. A change applies
 to the open notes straight away, also when it arrives from another device through Sync. Where an
 option shares its name with a setting — `colors`, `lazy`, `timeout`, `fast` — the option wins for
-its block. On a phone the time limit setting gives a diagram at most 20 seconds; a block's own
-`timeout` is not capped.
+its block.
 
 ## Shared preambles
 

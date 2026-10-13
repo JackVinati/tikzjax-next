@@ -484,7 +484,7 @@ A bare `setTimeout(() => pool.kill(...))` around an `await host.run(...)` is **n
 | | Desktop | Mobile (`Platform.isMobile`) |
 |---|---|---|
 | Concurrency | **1** as built: one worker runs one TeX job at a time, so a second slot gave no parallelism (a second worker would double a ~156 MiB core dump and a boot). The setting is retired | **1**, hard-clamped, not a preference |
-| Per-diagram timeout | 10 s | 20 s; the time-limit **setting** is capped at 20 s, a block's own `%!tikz timeout=` is not |
+| Per-diagram timeout | 10 s; the time-limit **setting**, or a block's own `%!tikz timeout=`, replaces it | 20 s, the same; neither is capped on a phone, the slower device |
 | First-job grace (engine boot) | 20 s, before the job's own clock starts (§5.3) | 30 s |
 | **Per-block export timeout** | 30 s | 30 s |
 | **Total export budget** | **60 s**, per `.print` container | 60 s |
