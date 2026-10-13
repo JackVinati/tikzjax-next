@@ -1,0 +1,9 @@
+{
+  "expect": "failure",
+  "reply": {
+    "type": "error",
+    "kind": "tex-error",
+    "firstError": "Undefined control sequence."
+  },
+  "note": "\\batchmode, then a hundred errors: TeX stops with \"(That makes 100 errors; please try again.)\", and in batch mode it says that, and every error before it, in its transcript file and not on the terminal. The worker reads the file when the terminal shows no error; it used to report \"TeX produced no output\"."
+}

@@ -126,6 +126,7 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] Error card: message, offending line with a caret, capability-driven hint, collapsible log, Copy log / Retry / Docs — **closes #81 #100**. Since 0.1.5 the line is right behind a preamble of several lines, and a line in a preamble file is shown from that file
 - [x] Session-only poison set; never persisted
 - [x] A fatal error fails at once (0.2.0). "TeX capacity exceeded", an emergency stop and a hundredth error all end in TeX's `jump_out`, which the engine made with asyncify; the run then never ended, and the diagram waited for its timeout. Now the run ends there and the card shows TeX's message (`test/fixtures/tex/runaway-macro.tex`, D14)
+- [x] TeX's message on the card for every way it gives up (0.2.0): a missing package, a missing pgfplots library, capacity, `\batchmode` with a hundred errors, whose messages are only in TeX's transcript file and are read from there, and a page shipped before the stop, which is drawn. Each is a fixture whose reply `verify:worker` checks, and after each the same worker has to draw `basic` as before (D17)
 
 ## 6 · Mobile
 

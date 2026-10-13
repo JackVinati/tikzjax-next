@@ -882,6 +882,30 @@ pdflatex gives a PDF of the pages it shipped before stopping. The transcripts of
 written on input.log."; no other fixture changes, and the dump is the same bytes, because nothing
 in the format build ends in a fatal error.
 
+**What reaches the card.** TeX prints an error to the terminal and to its transcript file,
+`input.log`, except in batch mode, where it prints to the file alone; the worker reads the
+terminal. A diagram that switched to `\batchmode` and then failed came back with no error, and a
+hundredth error, which ends the run, as "TeX produced no output". When the terminal shows no error,
+the worker now reads the file as well, and if the file has one, the card is built from it and the
+file's lines join the log, under a line that says where they come from.
+
+Each way TeX gives up has a fixture, and `verify:worker` holds the reply of the shipped worker to
+what the fixture says it must be, then has the same worker draw `basic` and requires the drawing it
+gives on its own. In Node, on the desktop D14 was measured on, each failure comes back in 50 to
+100 ms, or 300 ms for the one that loads pgfplots first:
+
+| Fixture | How TeX gives up | Kind | First error on the card |
+|---|---|---|---|
+| `missing-package` | LaTeX asks for another name; nonstop mode cannot read one, so an emergency stop | `missing-file` | LaTeX Error: File `nosuchpackage.sty' not found. |
+| `missing-pgfplots-library` | `\input` of a file that does not exist: "job aborted, file error in nonstop mode" | `missing-file` | I can't find file `pgflibrarypgfplots.nosuchlibrary.code.tex'. |
+| `runaway-macro` | a macro that expands to itself: capacity exceeded | `capacity` | TeX capacity exceeded, sorry [input stack size=5000]. |
+| `batchmode-errors` | `\batchmode`, then a hundred errors | `tex-error` | Undefined control sequence. |
+| `fatal-after-page` | a page shipped, then a missing file | drawn, with the error | LaTeX Error: File `nosuchfile.tex' not found. |
+
+The plugin's time limit stays as it is. A TeX run is synchronous inside the worker, so a run that
+does not end, a `\loop` with no way out say, is still stopped only by terminating the worker; what
+no longer reaches the limit is a run TeX itself has given up on.
+
 ---
 
 ## Open, still needing a human

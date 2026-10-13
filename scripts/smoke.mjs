@@ -40,6 +40,8 @@ if (!engineFilesPresent(OUT) || !existsSync(join(DIST, 'tex_files'))) {
 
 // The fork takes its log sink by injection rather than reaching for postMessage.
 let transcript = [];
+/** The run's transcript file, input.log, by lines. */
+let transcriptFile = [];
 
 // The fork and dvi2html bundled together, dvi2html with the patch the shipped worker carries — so
 // these references draw what the plugin draws, and verify-worker can compare against them byte
@@ -80,6 +82,7 @@ library.setMissingFileSink((name) => missed.push(name));
  */
 async function texify(source, dataset = {}) {
 	transcript = [];
+	transcriptFile = [];
 	missed = [];
 
 	const input = library.buildInput(source, dataset).text;
@@ -103,6 +106,13 @@ async function texify(source, dataset = {}) {
 		await library.executeAsync(instance.exports);
 		dvi = library.readFileSync('input.dvi').buffer;
 	} finally {
+		// TeX's transcript file, read before the run's files go: after \batchmode TeX says nothing
+		// more on the terminal, and its errors are only here.
+		try {
+			transcriptFile = new TextDecoder().decode(library.readFileSync('input.log')).split('\n');
+		} catch {
+			transcriptFile = [];
+		}
 		// After a run that wrote no DVI too, or the next fixture would start with this one's files
 		// still in the table of files TeX has opened.
 		library.deleteEverything();
@@ -150,7 +160,8 @@ for (const name of names) {
 	const ms = Date.now() - started;
 
 	const log = result?.log ?? transcript;
-	const texError = log.find((l) => l.startsWith('! '));
+	// The transcript file when the terminal shows no error, as the worker reads it.
+	const texError = log.find((l) => l.startsWith('! ')) ?? transcriptFile.find((l) => l.startsWith('! '));
 	const wroteDvi = log.some((l) => l.includes('Output written on'));
 	const expectFailure = meta.expect === 'failure';
 	// A documented boundary rather than a regression. It still RUNS — so the day the limit is
