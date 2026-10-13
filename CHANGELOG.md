@@ -10,7 +10,7 @@ top of its notes on GitHub, and will not publish a version that has none.
   engine as Obsidian on the desktop. The engine no longer carries asyncify, machinery in every
   function that 0.1.5 no longer used and still paid for, and TeX looks up its macros in a table
   spread wider, with shorter searches. Nothing has been measured on an iPhone or iPad yet. Diagrams
-  come out the same, byte for byte.
+  come out the same, byte for byte, apart from the changes below.
 - After updating, every cached diagram is compiled once more, the next time it is shown, because the
   engine changed.
 - A diagram on which TeX gives up, with "TeX capacity exceeded" from a macro that never stops

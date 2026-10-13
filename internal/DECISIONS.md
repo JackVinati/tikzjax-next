@@ -715,7 +715,8 @@ now ends in 40 ms with "TeX capacity exceeded, sorry [input stack size=5000]", w
 reports as a capacity error. What the jump does not do is TeX's `close_files_and_terminate`, so the
 transcript stops at the error's context, and a DVI begun before the jump would lack its postamble.
 That needs a page shipped before a fatal error, which a picture, shipped at `\end{document}`, does
-not do; web2c's `jump_out` closes the files first, and a change file could do the same here.
+not do; web2c's `jump_out` closes the files first, and a change file could do the same here. D17
+does.
 
 **WebAssembly 1.0, and nothing later.** The engine has to compile in every WebView minAppVersion
 1.7.2 admits, iOS 14.5's and Chromium 106's among them, and later features give this code nothing:
@@ -905,6 +906,15 @@ gives on its own. In Node, on the desktop D14 was measured on, each failure come
 The plugin's time limit stays as it is. A TeX run is synchronous inside the worker, so a run that
 does not end, a `\loop` with no way out say, is still stopped only by terminating the worker; what
 no longer reaches the limit is a run TeX itself has given up on.
+
+D16 and D17 cost no TeX time that could be measured. Over the 26 fixtures 0.1.5 had, the minimum of
+three runs of each, summed, in Node 22.19 on the desktop of D14, two paired runs of the three
+engines gave 8,803 and 8,710 ms for 0.1.5, 4,547 and 4,460 ms for D15's engine, and 4,604 and
+4,450 ms for this one. Every figure is about twice D15's because the desktop was busy with other
+work while they were taken; the ratios are what the runs show, and the D15 engine and this one are
+within a run's noise of each other. `tex.wasm` is 356,500 B, 77,347 gzipped, `core.dump.gz`
+5,994,269 B and `main.js` 12,335,931 B, 1,125 B more than D15's. Nothing was measured on an iPhone.
+Two Docker builds of the final source produced the same 411 files, the ones committed.
 
 ---
 
