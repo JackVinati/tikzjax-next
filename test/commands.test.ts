@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { App, Command, Editor, MarkdownView, Plugin } from 'obsidian';
 import { installObsidianDom } from './stubs/obsidian-dom';
 import { shownNotices, TFile } from './stubs/obsidian';
+import { BLOCKS } from './support/obsidian-blocks';
 import { fakeApp } from './stubs/vault';
 import { artifact, processBlock, processorDeps } from './stubs/processor';
 import { asProcessorSource, findTikzBlocks, type TikzBlockSpan } from '../src/note/finalize';
@@ -234,6 +235,12 @@ function workspace(
 		l1.set(await processedKey(deps, seen, readingView(note, span), file.path), artifact());
 	};
 
+	/** Render a block from what a view hands the processor. */
+	const renderAs = async (source: string): Promise<void> => {
+		const { spec } = await processBlock(deps, seen, source, { path: file.path, load: false });
+		l1.set(spec.key, artifact());
+	};
+
 	/** Run an editor command with the cursor on the first occurrence of `marker`. */
 	const run = (id: string, marker: string): void => {
 		const text = vault.get(file.path) ?? '';
@@ -254,7 +261,7 @@ function workspace(
 		void command.callback();
 	};
 
-	return { vault, created, file, render, run, call };
+	return { vault, created, file, render, renderAs, run, call };
 }
 
 const lastNotice = (): string => String(shownNotices[shownNotices.length - 1]?.message ?? '');
@@ -323,6 +330,23 @@ describe('the commands at the cursor', () => {
 			[true, true],
 		]);
 	});
+});
+
+describe('the commands at the cursor, in a list item, a blockquote or a callout', () => {
+	beforeEach(() => {
+		shownNotices.length = 0;
+	});
+
+	for (const block of BLOCKS) {
+		it(`Save SVG finds the diagram Reading view rendered in ${block.name}`, async () => {
+			const w = workspace(block.note);
+			await w.renderAs(block.reading);
+
+			w.run('save-svg', block.marker);
+			await vi.waitFor(() => expect(lastNotice()).toBe('Saved folder/note-diagram.svg'));
+			expect(w.vault.get('folder/note-diagram.svg')).toContain('<svg');
+		});
+	}
 });
 
 describe('"Render all diagrams in this note"', () => {

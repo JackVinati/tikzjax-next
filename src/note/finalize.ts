@@ -64,8 +64,9 @@ export interface TikzBlockSpan {
 	end: number;
 	/**
 	 * The block body, without the fence lines, dedented by the opening fence's indentation the way
-	 * CommonMark dedents fenced content. Informational: nothing in finalize/un-finalize round-trips
-	 * through it — those use the verbatim slice — so an approximate dedent cannot corrupt a note.
+	 * CommonMark dedents fenced content, and without its quote markers when it is in a blockquote
+	 * (`findTikzBlockAt`). Informational: nothing in finalize/un-finalize round-trips through it —
+	 * those use the verbatim slice — so an approximate dedent cannot corrupt a note.
 	 *
 	 * Every line keeps its terminator, the last one included, which is NOT what a code-block
 	 * processor is given. Anything that wants to find the rendered diagram goes through
@@ -90,9 +91,17 @@ export interface TikzBlockSpan {
 //    CommonMark ever sees the fence, and we have no container stack to strip it with. The cost is
 //    that a ```tikz line inside a 4-space indented code block is read as a fence. A tikz diagram
 //    in a list is common; a fence quoted inside an indented code block is not.
-//  * BLOCKQUOTES. `> ```tikz` is not recognised. Recognising it means reproducing the whole
-//    lazy-continuation rule to know where the quote ends, and a wrong answer would write an embed
-//    outside the quote it belongs to. Better to find nothing than to find it in the wrong place.
+//  * BLOCKQUOTES, callouts included. `findTikzBlocks` does not report `> ```tikz`. Rewriting it
+//    means reproducing the whole lazy-continuation rule to know where the quote ends, and a wrong
+//    answer would write an embed outside the quote it belongs to. Better to find nothing than to
+//    find it in the wrong place. `findTikzBlockAt` does find it, for the commands that only read
+//    the diagram: a wrong extent there costs a "not rendered yet", never a line of the note. It
+//    takes the quote to end, and the block with it, at the first line without the opener's
+//    markers, where Obsidian would read a lazy line as more of the block.
+//  * A FENCE ON A LIST MARKER'S LINE, `1. ```tikz`, is not reported by `findTikzBlocks` either:
+//    its embed would have to take the fence's place on that line, and un-finalize put the fence
+//    back there. `findTikzBlockAt` finds it. Either way it is read as a fence, so nothing inside it
+//    is mistaken for a block of its own.
 //  * INLINE `%%comment%%` PAIRS, and a block comment opened by `%% text` rather than a bare `%%`.
 //    Only a line whose entire content is `%%` toggles comment state here. That is the shape
 //    Obsidian's own docs use for a block comment and the shape this module writes, and the
@@ -103,6 +112,10 @@ export interface TikzBlockSpan {
 //    finalize.
 
 const FENCE_OPEN = /^([ \t]*)(`{3,}|~{3,})(.*)$/;
+/** A blockquote marker, and the one space after it that belongs to the marker. */
+const QUOTE_MARKER = /^[ \t]*>[ ]?/;
+/** A list item's marker and the space after it, as it stands in front of a fence on its line. */
+const LIST_MARKER = /^[ \t]*(?:[*+-]|\d{1,9}[.)])[ \t]+/;
 /** A line that is nothing but `%%`. See the note above on why nothing looser is accepted. */
 const COMMENT_DELIMITER = /^[ \t]*%%[ \t]*$/;
 /** A wiki embed alone on its line. Markdown-style `![](x.svg)` is not written by us, so not read. */
@@ -168,6 +181,44 @@ function matchOpener(text: string): Fence | null {
 	return { indent, char, length: run.length, info: rest.trim() };
 }
 
+/** An opening fence and what stands in front of it on its line. */
+interface Opener extends Fence {
+	/** Blockquote markers in front of it. Every line of the block carries as many. */
+	quotes: number;
+	/**
+	 * Characters between the quote markers and the fence: its indentation, or a list item's marker
+	 * and the space after it. Reading view takes up to this many off the start of each body line.
+	 */
+	width: number;
+	/** On a list item's marker line, `1. ```tikz`, rather than on a line of its own. */
+	onMarkerLine: boolean;
+}
+
+/** `matchOpener` for a fence in a blockquote, or on a list item's marker line, as well. */
+function matchContainedOpener(text: string): Opener | null {
+	let rest = text;
+	let quotes = 0;
+	for (let m = QUOTE_MARKER.exec(rest); m; m = QUOTE_MARKER.exec(rest)) {
+		rest = rest.slice(m[0].length);
+		quotes++;
+	}
+	const marker = LIST_MARKER.exec(rest)?.[0] ?? '';
+	const fence = matchOpener(rest.slice(marker.length));
+	if (!fence) return null;
+	return { ...fence, quotes, width: marker.length + fence.indent.length, onMarkerLine: marker !== '' };
+}
+
+/** A line without its first `quotes` blockquote markers, or null when it has fewer. */
+function unquote(text: string, quotes: number): string | null {
+	let rest = text;
+	for (let q = 0; q < quotes; q++) {
+		const m = QUOTE_MARKER.exec(rest);
+		if (!m) return null;
+		rest = rest.slice(m[0].length);
+	}
+	return rest;
+}
+
 /**
  * A closing fence is at least as long as its opener and carries no info string.
  *
@@ -190,14 +241,21 @@ function isCloser(text: string, fence: Fence): boolean {
 interface FenceExtent {
 	/** Index of the closing fence line, or null when the fence runs to the end of the note. */
 	closeLine: number | null;
-	/** Last line the block occupies: the closing fence, or the last line of the note. */
+	/**
+	 * Last line the block occupies: the closing fence, the last line of the note, or for a fence
+	 * in a blockquote the last line of the quote.
+	 */
 	lastLine: number;
 }
 
-function scanFence(lines: Line[], openLine: number, fence: Fence): FenceExtent {
+/** `quotes` is the opener's count of blockquote markers, which every line of the block carries. */
+function scanFence(lines: Line[], openLine: number, fence: Fence, quotes = 0): FenceExtent {
 	for (let j = openLine + 1; j < lines.length; j++) {
 		const line = lines[j];
-		if (line && isCloser(line.text, fence)) return { closeLine: j, lastLine: j };
+		if (!line) continue;
+		const text = unquote(line.text, quotes);
+		if (text === null) return { closeLine: null, lastLine: j - 1 };
+		if (isCloser(text, fence)) return { closeLine: j, lastLine: j };
 	}
 	// Unterminated. CommonMark ends the block at the end of the document; we do the same and stop,
 	// which is what keeps this loop from running off the array or throwing.
@@ -221,13 +279,19 @@ function dedent(text: string, width: number): string {
 	return text.slice(k);
 }
 
-function bodyOf(lines: Line[], openLine: number, extent: FenceExtent, indentWidth: number): string {
-	const stop = extent.closeLine ?? lines.length;
+function bodyOf(
+	lines: Line[],
+	openLine: number,
+	extent: FenceExtent,
+	indentWidth: number,
+	quotes = 0,
+): string {
+	const stop = extent.closeLine ?? extent.lastLine + 1;
 	let out = '';
 	for (let j = openLine + 1; j < stop; j++) {
 		const line = lines[j];
 		if (!line) continue;
-		out += dedent(line.text, indentWidth) + line.terminator;
+		out += dedent(unquote(line.text, quotes) ?? '', indentWidth) + line.terminator;
 	}
 	return out;
 }
@@ -254,29 +318,59 @@ export function asProcessorSource(source: string): string {
 // -------------------------------------------------------------------------------------------
 // The scanner
 
+/** The blocks finalize can rewrite in place: see the divergences above for the ones it cannot. */
 export function findTikzBlocks(noteText: string): TikzBlockSpan[] {
+	return scan(noteText)
+		.filter((block) => block.inPlace)
+		.map((block) => block.span);
+}
+
+/**
+ * The block at `offset`, for the commands that read a diagram — Copy SVG, Save SVG, the zoom
+ * view — rather than rewrite the note. Null when `offset` is in none.
+ *
+ * Besides every block `findTikzBlocks` reports, it finds the two kinds Obsidian renders and
+ * finalize leaves alone: a fence in a blockquote or a callout, whose `source` has the quote
+ * markers taken off as Reading view takes them off, and a fence on its list item's marker line.
+ * A block covers its opening line from the first character, quote or list markers included, to
+ * the end of its closing line, and `offset` may be at either end.
+ */
+export function findTikzBlockAt(noteText: string, offset: number): TikzBlockSpan | null {
+	return scan(noteText).find(({ span }) => offset >= span.start && offset <= span.end)?.span ?? null;
+}
+
+interface ScannedBlock {
+	span: TikzBlockSpan;
+	/** Whether finalize can rewrite it: not in a blockquote, not on a list item's marker line. */
+	inPlace: boolean;
+}
+
+function scan(noteText: string): ScannedBlock[] {
 	const lines = splitLines(noteText);
-	const spans: TikzBlockSpan[] = [];
+	const blocks: ScannedBlock[] = [];
 	let i = 0;
 
 	while (i < lines.length) {
 		const line = lines[i];
 		if (!line) break;
 
-		const fence = matchOpener(line.text);
+		const fence = matchContainedOpener(line.text);
 		if (fence) {
-			const extent = scanFence(lines, i, fence);
+			const extent = scanFence(lines, i, fence, fence.quotes);
 			// Every fence is consumed, but only tikz fences are reported: this is what makes a
 			// tikz block nested inside a larger ````markdown block invisible, since the inner
 			// opener is never looked at as a line in its own right.
 			if (isTikzInfo(fence.info)) {
 				const last = lines[extent.lastLine];
-				spans.push({
-					start: line.start,
-					end: last ? last.end : noteText.length,
-					source: bodyOf(lines, i, extent, fence.indent.length),
-					info: fence.info,
-					finalized: false,
+				blocks.push({
+					span: {
+						start: line.start,
+						end: last ? last.end : noteText.length,
+						source: bodyOf(lines, i, extent, fence.width, fence.quotes),
+						info: fence.info,
+						finalized: false,
+					},
+					inPlace: fence.quotes === 0 && !fence.onMarkerLine,
 				});
 			}
 			i = extent.lastLine + 1;
@@ -286,7 +380,7 @@ export function findTikzBlocks(noteText: string): TikzBlockSpan[] {
 		if (COMMENT_DELIMITER.test(line.text)) {
 			const region = matchFinalizedRegion(lines, i);
 			if (region) {
-				spans.push(region.span);
+				blocks.push({ span: region.span, inPlace: true });
 				i = region.nextLine;
 				continue;
 			}
@@ -297,7 +391,7 @@ export function findTikzBlocks(noteText: string): TikzBlockSpan[] {
 		i++;
 	}
 
-	return spans;
+	return blocks;
 }
 
 interface FinalizedMatch {

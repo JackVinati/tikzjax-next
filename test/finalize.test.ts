@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { findTikzBlocks, finalizeBlock, unfinalizeBlock, type TikzBlockSpan } from '../src/note/finalize';
+import {
+	asProcessorSource,
+	findTikzBlockAt,
+	findTikzBlocks,
+	finalizeBlock,
+	unfinalizeBlock,
+	type TikzBlockSpan,
+} from '../src/note/finalize';
+import { BLOCKS } from './support/obsidian-blocks';
 
 // Notes are written as line arrays and joined with an explicit terminator, so every test says out
 // loud which line ending it is about. A trailing '' element is a trailing newline — the thing a
@@ -218,6 +226,51 @@ describe('findTikzBlocks: recognising a finalized block', () => {
 	it('does not call it finalized when the commented fence is another language', () => {
 		const text = note(['![[a.svg]]', '%%', '```js', 'x', '```', '%%', '']);
 		expect(findTikzBlocks(text)).toEqual([]);
+	});
+});
+
+describe('findTikzBlockAt', () => {
+	for (const block of BLOCKS) {
+		it(`finds the block in ${block.name}, as Reading view hands it to the processor`, () => {
+			const span = findTikzBlockAt(block.note, block.note.indexOf(block.marker));
+			expect(span).not.toBeNull();
+			expect(asProcessorSource(span?.source ?? '')).toBe(block.reading);
+		});
+	}
+
+	it('covers the fence lines and their quote markers, and nothing around them', () => {
+		const text = note(['> [!note]', '> ```tikz', '> \\draw (0,0);', '> ```', '', 'after', '']);
+		const span = findTikzBlockAt(text, text.indexOf('draw'));
+
+		expect(span && sliceOf(text, span)).toBe(note(['> ```tikz', '> \\draw (0,0);', '> ```']));
+		expect(findTikzBlockAt(text, text.indexOf('> ```tikz'))).toEqual(span);
+		expect(findTikzBlockAt(text, text.indexOf('[!note]'))).toBeNull();
+		expect(findTikzBlockAt(text, text.indexOf('after'))).toBeNull();
+	});
+
+	it('ends a quoted block where the quote ends', () => {
+		const text = note(['> ```tikz', '> \\draw (0,0);', '', 'after', '']);
+
+		expect(findTikzBlockAt(text, text.indexOf('draw'))?.source).toBe('\\draw (0,0);\n');
+		expect(findTikzBlockAt(text, text.indexOf('after'))).toBeNull();
+	});
+
+	it('takes off as many quote markers as the opening fence has', () => {
+		const text = note(['> > ```tikz', '> > \\draw (0,0);', '> >   \\draw (1,1);', '> > ```', '']);
+		expect(findTikzBlockAt(text, text.indexOf('draw'))?.source).toBe('\\draw (0,0);\n  \\draw (1,1);\n');
+	});
+
+	it('does not find a block inside a %% comment, which does not render', () => {
+		const text = note(['%%', '> ```tikz', '> \\draw (0,0);', '> ```', '%%', '']);
+		expect(findTikzBlockAt(text, text.indexOf('draw'))).toBeNull();
+	});
+
+	it('finds a finalized block, from its embed as well', () => {
+		const text = note(['![[d.svg]]', '%%', '```tikz', '\\draw (0,0);', '```', '%%', '']);
+		const span = findTikzBlockAt(text, 2);
+
+		expect(span?.finalized).toBe(true);
+		expect(span?.source).toBe('\\draw (0,0);\n');
 	});
 });
 
@@ -504,9 +557,25 @@ describe('documented divergences', () => {
 		// Deliberate, and worth pinning: recognising `> ```tikz` means reproducing lazy
 		// continuation to know where the quote ends, and a wrong answer writes the embed OUTSIDE
 		// the quote it belongs to. Finding nothing is the safe failure; if this ever starts
-		// returning a span, the offsets have to be proven against the quote first.
+		// returning a span, the offsets have to be proven against the quote first. The commands
+		// that only read the diagram find it with findTikzBlockAt, and write nothing.
 		const text = note(['> ```tikz', '> \draw (0,0);', '> ```', '']);
 		expect(findTikzBlocks(text)).toEqual([]);
+	});
+
+	it('does not report a fence that opens on its list item marker line', () => {
+		// Its embed would have to take the fence's place on the marker's line, and un-finalize put
+		// the fence back there: a rewrite of its own, for a rare shape. findTikzBlockAt finds it.
+		const text = note(['1. ```tikz', '   \\draw (0,0);', '   ```', '']);
+		expect(findTikzBlocks(text)).toEqual([]);
+	});
+
+	it('does not see a tikz fence quoted inside a fence that opens on a list marker line', () => {
+		// The marker-line fence used to be read as prose, so the example inside it was a block of
+		// its own, and Finalize would have replaced it with a picture.
+		const text = note(['- ````markdown', '  ```tikz', '  \\draw (0,0);', '  ```', '  ````', '']);
+		expect(findTikzBlocks(text)).toEqual([]);
+		expect(findTikzBlockAt(text, text.indexOf('draw'))).toBeNull();
 	});
 });
 
@@ -537,6 +606,7 @@ describe('round trip over generated notes', () => {
 		'\node {```};',
 		'> ```tikz',
 		'- item',
+		'1. ```tikz',
 		'%%  ',
 	];
 
