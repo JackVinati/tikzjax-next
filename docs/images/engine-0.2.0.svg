@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="518" viewBox="0 0 640 518" role="img" aria-labelledby="title desc">
+<title id="title">Engine start and memory, 0.1.5 and 0.2.0, Windows desktop, Node 22.19 (V8)</title>
+<desc id="desc">Four pairs of horizontal bars, a grey bar for 0.1.5 and a blue bar for 0.2.0, each pair on its own scale: engine start, 528 ms and 161 ms; a small diagram, compiled in the running engine worker, 61 ms and 27 ms; memory buffers held once started, 157.5 MiB and 23.5 MiB; peak memory of the whole test process, five compiles, 703 MiB and 168 MiB. Every blue bar is shorter than the grey bar above it, between 15 and 44 percent of its length.</desc>
+<style>
+	.card { fill: #f6f8fa; stroke: #d1d9e0; }
+	text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; }
+	.t1 { fill: #1f2328; }
+	.t2 { fill: #59636e; }
+	.num { font-variant-numeric: tabular-nums; }
+	.rule { stroke: #d1d9e0; stroke-width: 1; }
+	.base { stroke: #808893; stroke-width: 1; }
+	.link { stroke: #808893; stroke-width: 2; fill: none; }
+	.open { stroke: #808893; stroke-width: 2; stroke-dasharray: 4 4; fill: none; }
+	.old { fill: #656d76; }
+	.new { fill: #2a78d6; }
+	.dot { fill: #2a78d6; stroke: #f6f8fa; stroke-width: 2; }
+	.ring { fill: none; stroke: #2a78d6; stroke-width: 2; }
+	.todo { fill: #f6f8fa; stroke: #656d76; stroke-width: 2; }
+	@media (prefers-color-scheme: dark) {
+		.card { fill: #161b22; stroke: #3d444d; }
+		.t1 { fill: #f0f6fc; }
+		.t2 { fill: #9198a1; }
+		.rule { stroke: #3d444d; }
+		.base { stroke: #626c78; }
+		.link { stroke: #626c78; }
+		.open { stroke: #626c78; }
+		.old { fill: #6e7681; }
+		.new { fill: #3987e5; }
+		.dot { fill: #3987e5; stroke: #161b22; }
+		.ring { stroke: #3987e5; }
+		.todo { fill: #161b22; stroke: #6e7681; }
+	}
+</style>
+<rect x="0.5" y="0.5" width="639" height="517" rx="10" class="card"/>
+<text x="24" y="42" class="t1" font-size="22" font-weight="600">Engine start and memory</text>
+<text x="24" y="70" class="t2" font-size="17">Each pair drawn to its own scale. Shorter is better.</text>
+<rect x="24" y="91" width="16" height="14" rx="2" class="old"/>
+<text x="46" y="104" class="t2" font-size="17">0.1.5</text>
+<rect x="110.1" y="91" width="16" height="14" rx="2" class="new"/>
+<text x="132.1" y="104" class="t2" font-size="17">0.2.0</text>
+<text x="24" y="141" class="t1" font-size="18" font-weight="600">Engine start</text>
+<path class="old" d="M24 152H449.4A3 3 0 0 1 452.4 155V164A3 3 0 0 1 449.4 167H24Z"/>
+<path class="new" d="M24 170H151.6A3 3 0 0 1 154.6 173V182A3 3 0 0 1 151.6 185H24Z"/>
+<text x="459.4" y="166" class="t2 num" font-size="18">528 ms</text>
+<text x="161.6" y="184" class="t1 num" font-size="18" font-weight="600">161 ms</text>
+<text x="616" y="175" class="t2 num" font-size="18" text-anchor="end">−70%</text>
+<text x="24" y="223" class="t1" font-size="18" font-weight="600">A small diagram, compiled in the running engine worker</text>
+<path class="old" d="M24 234H449.4A3 3 0 0 1 452.4 237V246A3 3 0 0 1 449.4 249H24Z"/>
+<path class="new" d="M24 252H210.6A3 3 0 0 1 213.6 255V264A3 3 0 0 1 210.6 267H24Z"/>
+<text x="459.4" y="248" class="t2 num" font-size="18">61 ms</text>
+<text x="220.6" y="266" class="t1 num" font-size="18" font-weight="600">27 ms</text>
+<text x="616" y="257" class="t2 num" font-size="18" text-anchor="end">−56%</text>
+<text x="24" y="305" class="t1" font-size="18" font-weight="600">Memory buffers held once started</text>
+<path class="old" d="M24 316H449.4A3 3 0 0 1 452.4 319V328A3 3 0 0 1 449.4 331H24Z"/>
+<path class="new" d="M24 334H84.9A3 3 0 0 1 87.9 337V346A3 3 0 0 1 84.9 349H24Z"/>
+<text x="459.4" y="330" class="t2 num" font-size="18">157.5 MiB</text>
+<text x="94.9" y="348" class="t1 num" font-size="18" font-weight="600">23.5 MiB</text>
+<text x="616" y="339" class="t2 num" font-size="18" text-anchor="end">−85%</text>
+<text x="24" y="387" class="t1" font-size="18" font-weight="600">Peak memory of the whole test process, five compiles</text>
+<path class="old" d="M24 398H449.4A3 3 0 0 1 452.4 401V410A3 3 0 0 1 449.4 413H24Z"/>
+<path class="new" d="M24 416H123.4A3 3 0 0 1 126.4 419V428A3 3 0 0 1 123.4 431H24Z"/>
+<text x="459.4" y="412" class="t2 num" font-size="18">703 MiB</text>
+<text x="133.4" y="430" class="t1 num" font-size="18" font-weight="600">168 MiB</text>
+<text x="616" y="421" class="t2 num" font-size="18" text-anchor="end">−76%</text>
+<text x="24" y="470" class="t2" font-size="18">Windows desktop, Node 22.19 (V8). Medians of 7 fresh processes.</text>
+<text x="24" y="496" class="t2" font-size="18">Not measured on a phone yet.</text>
+</svg>
