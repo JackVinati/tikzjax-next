@@ -7,6 +7,7 @@
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { join, resolve } from 'node:path';
 import esbuild from 'esbuild';
 import { dvi2htmlPatch } from './dvi2html-patch.mjs';
@@ -16,6 +17,16 @@ export const engineOutDir = (root) => join(root, 'engine-build', 'out');
 export function engineIsBuilt(root) {
 	const out = engineOutDir(root);
 	return existsSync(join(out, 'tex.wasm.gz')) && existsSync(join(out, 'dist', 'tex_files'));
+}
+
+/**
+ * core.dump, inflated from the committed archive: the 156.25 MiB WebAssembly.Memory image every TeX
+ * run starts from. The archive, not a raw `core.dump` an engine build may have left beside it,
+ * because the archive is what ships.
+ */
+export function readCoreDump(root) {
+	const dump = gunzipSync(readFileSync(join(engineOutDir(root), 'core.dump.gz')));
+	return new Uint8Array(dump.buffer, dump.byteOffset, dump.length);
 }
 
 /**

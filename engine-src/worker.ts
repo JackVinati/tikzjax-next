@@ -10,6 +10,8 @@
  *  - the WebAssembly.Module is compiled ONCE, not on every render;
  *  - no `coredump.slice(0)` — at pages=2500 that copy is 156.25 MiB per render — and the dump is
  *    inflated into one buffer rather than glued together from chunks into a second (./inflate);
+ *  - each run's fresh Memory gets only the dump's non-zero runs, since it is zero everywhere else
+ *    already (./core-dump);
  *  - \begin{document} wrapping is conditional (upstream nests it into every existing vault), and the
  *    input is assembled in ./document, with a TS1 shim for a block that can use one (./ts1-shim);
  *  - \nonstopmode, so a TeX error is logged instead of blocking on the interactive `? ` prompt;
@@ -35,6 +37,7 @@ import * as library from './library';
 import { describeConvertError } from './convert-error';
 import { buildInput } from './document';
 import { inflateExactly } from './inflate';
+import { nonZeroRuns, startingMemory } from './core-dump';
 import { CORE_DUMP_GZ, ENGINE_ID, INVENTORY, TEX_FILES, TEX_WASM_GZ } from 'virtual:engine-assets';
 import type { ErrorMessage, OkMessage, RenderOptions, TexErrorKind, WorkerRequest } from './protocol';
 
@@ -71,12 +74,14 @@ const texModule = new WebAssembly.Module(ungzip(fromBase64(TEX_WASM_GZ)));
 
 /**
  * Inflated straight into one buffer of the size the Memory needs, and asserted to be exactly that
- * size: the runtime .set()s the dump over the whole non-growable Memory, so a short dump would
- * leave live TeX state uninitialised — a corruption that would surface much later as garbage output
- * rather than as a failure here. Not `ungzip`, which glues 64 KiB chunks into a copy and so holds
- * the 156 MiB dump twice at boot (./inflate).
+ * size: a short dump would leave live TeX state uninitialised — a corruption that would surface
+ * much later as garbage output rather than as a failure here. Not `ungzip`, which glues 64 KiB
+ * chunks into a copy and so holds the 156 MiB dump twice at boot (./inflate).
+ *
+ * Then cut, once, into the stretches that are not zero, which are all a run's fresh Memory needs
+ * written into it (./core-dump). They are views of the inflated buffer, not copies.
  */
-const coreDump = inflateExactly(fromBase64(CORE_DUMP_GZ), library.pages * 65536);
+const coreDump = nonZeroRuns(inflateExactly(fromBase64(CORE_DUMP_GZ), library.pages * 65536));
 
 // --- transcript analysis --------------------------------------------------------------------------
 
@@ -341,10 +346,10 @@ interface PassResult {
  * `<job>.dvi`. Everything the run leaves behind stays there for the caller to harvest or discard.
  */
 const runPass = async (job: string): Promise<PassResult> => {
-	const memory = new WebAssembly.Memory({ initial: library.pages, maximum: library.pages });
-	// No .slice(0): upstream copies the dump before writing it, which at pages=2500 is an extra
-	// 156.25 MiB allocated and discarded on every single render.
-	new Uint8Array(memory.buffer, 0, library.pages * 65536).set(coreDump);
+	// A new Memory with the dump's non-zero runs written into it: 21.5 MiB rather than all 156.25,
+	// the rest being zero from the start. Upstream also copies the dump with .slice(0) first, an
+	// extra 156.25 MiB allocated and discarded on every single render.
+	const memory = startingMemory(coreDump, library.pages);
 
 	library.setMemory(memory.buffer);
 	library.setInput(`${job}.tex\n\\end\n`);

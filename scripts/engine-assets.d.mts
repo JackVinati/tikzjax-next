@@ -9,6 +9,8 @@ export declare const ENGINE_ID_PLACEHOLDER: string;
 
 export declare function engineIdOf(bundle: string): string;
 
+export declare function readCoreDump(root: string): Uint8Array;
+
 export declare function buildWorker(
 	root: string,
 	options?: { minify?: boolean; plugins?: Plugin[] },
