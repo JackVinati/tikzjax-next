@@ -4,12 +4,12 @@
  * The dump is the engine's whole WebAssembly.Memory, 2500 pages, as it stood once the LaTeX format
  * was loaded (internal/DECISIONS.md D12). Each run gets a fresh Memory with the dump in it, because
  * a run leaves its own state all over the one it had. Upstream copies the whole 156.25 MiB into
- * every one: 27 ms a render on the desktop (V8), and every page of the new Memory written, so it all
- * counts against the worker's footprint until the collector frees it.
+ * every one: about 29 ms a render on the desktop (V8), and every page of the new Memory written,
+ * so it all counts against the worker's footprint until the collector frees it.
  *
  * 134 MiB of the dump is zero — TeX's arrays are sized for the largest document it will take, and
  * a diagram fills a corner of them — and a fresh Memory is zero already: the WebAssembly spec fills
- * new pages with zeros. So only the stretches that are not zero are written: 21.5 MiB, about 5 ms,
+ * new pages with zeros. So only the stretches that are not zero are written: 22.3 MiB, about 5 ms,
  * and the pages TeX never touches are never touched at all. The build cuts the dump into those
  * stretches and ships nothing else (scripts/engine-assets.mjs `packCoreDump`).
  *

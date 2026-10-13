@@ -146,9 +146,9 @@ describe('the runs the build cuts the dump into', () => {
 	});
 
 	it('leave out most of the committed dump', () => {
-		// 21.5 MiB of 156.25 on the 0.1.5 engine: what the worker inflates at boot and writes into
-		// each run's memory. Held to the point rather than to one engine's sizes, which a rebuild
-		// with a larger hash table, say, moves.
+		// 22.3 MiB of 156.25 on the 0.2.0 engine, and 21.5 on 0.1.5's: what the worker inflates at
+		// boot and writes into each run's memory. Held to the point rather than to one engine's sizes,
+		// which a rebuild moves, as the larger hash table of 0.2.0 did.
 		const { size, runs } = encodeCoreDump(ROOT);
 		expect(packedLength(runs)).toBeLessThan(size / 4);
 		expect(runs.length / 2).toBeLessThan(1000);

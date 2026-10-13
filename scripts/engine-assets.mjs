@@ -38,7 +38,7 @@ function inflated(archive) {
  * A run of zeros at least this long ends one of the dump's runs; a shorter one stays inside it.
  *
  * Splitting at every zero byte would cut the dump into thousands of runs to save a few zeros. With
- * 4 KiB the committed dump is 28 runs and 21.5 MiB, against 10.9 MiB of bytes that are literally
+ * 4 KiB the committed dump is 28 runs and 22.3 MiB, against 10.8 MiB of bytes that are literally
  * not zero: TeX's arrays are full of short zero stretches.
  */
 const DUMP_GAP = 4096;
@@ -50,7 +50,7 @@ const DUMP_GAP = 4096;
  * 134 of the dump's 156.25 MiB are zero, and the memory a TeX run starts from is zero wherever the
  * worker writes nothing (engine-src/core-dump.ts), so the zeros need not ship. They used to: the
  * whole dump went into main.js gzipped, and every boot inflated all 156.25 MiB of it, half a
- * second on the desktop and the worker's largest allocation, to keep 21.5 MiB of it.
+ * second on the desktop and the worker's largest allocation, to keep 22.3 MiB of it.
  *
  * Each run starts at a byte that is not zero and ends after the last one that is, so the dump is
  * `size` zeros with the runs written over them, and nothing is lost.

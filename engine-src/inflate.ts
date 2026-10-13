@@ -3,7 +3,7 @@ import { Inflate } from 'pako';
 /**
  * A gzip stream inflated into one buffer of exactly `size` bytes, or an error.
  *
- * For the core dump, at every worker boot: its non-zero runs since 0.2.0, 21.5 MiB, and the whole
+ * For the core dump, at every worker boot: its non-zero runs since 0.2.0, 22.3 MiB, and the whole
  * 156.25 MiB before that (./core-dump). pako's `ungzip` collects its output in 64 KiB chunks and at
  * the end copies them into a new array of the total length, so for that moment the bytes exist
  * twice — with the whole dump the boot peaked at about 313 MiB of ArrayBuffers instead of 156 (V8,

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
  * The second-pass decision, tested on the shipped worker's own source.
  *
  * engine-src/worker.ts cannot be imported: it is a worker ENTRY POINT, so importing it compiles
- * 526 KB of WebAssembly, inflates a 156 MiB core dump and installs an `onmessage` handler, and it
+ * 356 KB of WebAssembly, inflates 22 MiB of core dump and installs an `onmessage` handler, and it
  * imports `virtual:engine-assets`, a module that exists only inside the esbuild build. Copying the
  * predicate into this file instead would assert a copy — the one thing a test must never do, since
  * the copy passes forever after the original changes.

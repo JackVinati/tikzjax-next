@@ -83,12 +83,13 @@ library.setBundledFiles(bundled, (gz) => ungzip(gz));
 
 /**
  * Compiled once. Upstream calls WebAssembly.instantiate() with the raw bytes on every render,
- * which recompiles 526 KB of wasm each time; instantiating a Module reuses the compiled code.
+ * which recompiles its 526 KB of wasm each time (this engine, without asyncify, is 356 KB);
+ * instantiating a Module reuses the compiled code.
  */
 const texModule = new WebAssembly.Module(ungzip(fromBase64(TEX_WASM_GZ)));
 
 /**
- * The dump's non-zero runs, 21.5 MiB of its 156.25, which the build packed back to back
+ * The dump's non-zero runs, 22.3 MiB of its 156.25, which the build packed back to back
  * (scripts/engine-assets.mjs `packCoreDump`): they are all a run's fresh Memory needs written into
  * it (./core-dump). Inflating the whole dump took half a second of every boot on the desktop.
  *
@@ -369,7 +370,7 @@ interface PassResult {
  */
 const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> => {
 	const started = performance.now();
-	// A new Memory with the dump's non-zero runs written into it: 21.5 MiB rather than all 156.25,
+	// A new Memory with the dump's non-zero runs written into it: 22.3 MiB rather than all 156.25,
 	// the rest being zero from the start. Upstream also copies the dump with .slice(0) first, an
 	// extra 156.25 MiB allocated and discarded on every single render.
 	const memory = startingMemory(coreDump, library.pages);
