@@ -163,6 +163,7 @@ The manual matrix in DESIGN.md §10.4, in full. The three that catch the most:
 - [ ] **A vault with a pre-existing legacy cache**: upgrade, open a note, assert **zero** TeX compiles
 - [ ] **Devtools Network tab** across a full session including a failing diagram: assert zero requests
 - [ ] **Finalize a fence with no blank line above it**, then un-finalize: the embed must render as an embed, the `%%` must open a comment, and the note must come back byte for byte (the open question in `src/note/finalize.ts`)
+- [ ] **A diagram in a list item, on a 1.7.2 install**: open it in Live Preview, then in Reading view; the diagnostics view must show one compile and then the diagram coming from the cache, and Copy SVG with the cursor in it must work. The shared key rests on `getSectionInfo` framing Live Preview's code-block widget as it does in 1.14.4, the only version it was checked against
 
 Submitted to the community plugin browser on 2026-09-01 through Obsidian's developer portal. The automated review runs on every version and pulls a failing one from search within a day, so each release is held to it: 0.1.3 passed with zero errors and a byte-for-byte reproducible `main.js`.
 
