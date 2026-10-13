@@ -205,6 +205,17 @@ const diagnose = (t: Transcript, missing: string[]): Diagnosis => {
 	};
 };
 
+/**
+ * A run cut off by the engine's stack (runPass). A limit TeX ran into, though not one of its own, so
+ * it is reported as one of them is: TeX ran out of room. Whatever TeX said before it still counts.
+ */
+const overflowed = (t: Transcript): Diagnosis => ({
+	kind: 'capacity',
+	message: "TeX nested deeper than the engine's stack allows.",
+	firstError: t.firstError,
+	line: t.line,
+});
+
 // --- two passes ----------------------------------------------------------------------------------
 
 /*
@@ -361,6 +372,8 @@ interface PassResult {
 	svg: string;
 	wroteDvi: boolean;
 	convertError?: string | undefined;
+	/** TeX nested deeper than the engine's stack holds, and the run was cut off there. */
+	overflowed?: boolean | undefined;
 }
 
 /**
@@ -382,6 +395,7 @@ const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> =
 	let svg = '';
 	let wroteDvi = false;
 	let convertError: string | undefined;
+	let overflowed = false;
 	// When TeX was done, and when drawing its DVI began. A run that throws out of TeX sets neither,
 	// and all of its time is TeX's; one that wrote no DVI drew nothing, and spent nothing drawing.
 	let texDone: number | undefined;
@@ -401,14 +415,19 @@ const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> =
 			svg = await dviToSvg(dvi);
 		}
 	} catch (error) {
-		// Two very different things land here, and telling them apart is the difference between a
+		// Very different things land here, and telling them apart is the difference between a
 		// useful message and a shrug:
 		//   - readFileSync throws when TeX never wrote a DVI at all;
 		//   - dvi2html throws when the DVI names a font its built-in metric table does not carry
 		//     (eufm10, rsfs10, tcrm1000 ...), which is a SUCCESSFUL TeX run we cannot draw.
-		//     See ./convert-error for what the user is told.
-		// Swallowing both produced "TeX produced no output" for a compile that worked perfectly.
+		//     See ./convert-error for what the user is told;
+		//   - TeX itself is cut off by the stack it runs on. Each level of an expansion, or of a box
+		//     inside a box, is a few calls deeper in the engine, and something that nests itself a
+		//     few thousand deep runs out of the worker's stack before it reaches any limit of TeX's
+		//     own, so TeX says nothing and closes no file. V8 and JavaScriptCore throw a RangeError.
+		// Swallowing them all produced "TeX produced no output" for a compile that worked perfectly.
 		if (wroteDvi) convertError = error instanceof Error ? error.message : String(error);
+		else if (texDone === undefined && error instanceof RangeError) overflowed = true;
 	}
 
 	const done = performance.now();
@@ -416,7 +435,7 @@ const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> =
 	spent.texMs += (texDone ?? done) - reset;
 	spent.svgMs += drawing === undefined ? 0 : done - drawing;
 	spent.passes += 1;
-	return { svg, wroteDvi, convertError };
+	return { svg, wroteDvi, convertError, overflowed };
 };
 
 /** `spent` as the plugin is told it: whole milliseconds, which is all a person reading it needs. */
@@ -585,7 +604,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 		return {
 			type: 'error',
 			id,
-			...diagnose(transcript, missing),
+			...(reported.overflowed ? overflowed(transcript) : diagnose(transcript, missing)),
 			bodyLine,
 			log,
 			missing,

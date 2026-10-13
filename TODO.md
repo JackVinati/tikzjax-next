@@ -129,6 +129,7 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] Session-only poison set; never persisted
 - [x] A fatal error fails at once (0.2.0). "TeX capacity exceeded", an emergency stop and a hundredth error all end in TeX's `jump_out`, which the engine made with asyncify; the run then never ended, and the diagram waited for its timeout. Now the run ends there and the card shows TeX's message (`test/fixtures/tex/runaway-macro.tex`, D14)
 - [x] TeX's message on the card for every way it gives up (0.2.0): an `\input` of a missing file, a missing pgfplots library, capacity, `\batchmode` with a hundred errors, whose messages are only in TeX's transcript file and are read from there, and a page shipped before the stop, which is drawn. Each is a fixture whose reply `verify:worker` checks, and after each the same worker has to draw `basic` as before (D17)
+- [x] A run nested deeper than the engine's stack, which runs out before any limit of TeX's own, is a capacity error instead of "TeX produced no output" (0.2.0, `verify:worker`, D17). TeX says nothing about it, and a page shipped before it is lost; how deep the stack goes on an iPhone is not measured
 
 ## 6 · Mobile
 

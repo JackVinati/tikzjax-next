@@ -918,6 +918,15 @@ gives on its own. In Node, on the desktop D14 was measured on, each failure come
 Since D19 `missing-package` no longer gives up: the worker answers LaTeX's question for it, and the
 diagram is drawn with the error.
 
+One way a run ends is not TeX's. Each level of an expansion, or of a box inside a box, is a few
+calls deeper in the engine, and something nested a few thousand deep runs out of the worker's stack
+before it reaches any limit of TeX's own: the engine throws a RangeError, TeX says nothing and
+closes no file, and a page it shipped before is lost. Through the shipped worker in Node 22.19,
+3,000 nested `\number` render and 5,000 do not; on 0.1.5's engine 1,000 render and 3,000 do not. The
+worker used to report such a run as "TeX produced no output"; it now reports it as a capacity error,
+"TeX nested deeper than the engine's stack allows.", with whatever TeX said before it, and
+`verify:worker` checks that with 20,000. How deep the stack goes on an iPhone has not been measured.
+
 The plugin's time limit stays as it is. A TeX run is synchronous inside the worker, so a run that
 does not end, a `\loop` with no way out say, is still stopped only by terminating the worker; what
 no longer reaches the limit is a run TeX itself has given up on.

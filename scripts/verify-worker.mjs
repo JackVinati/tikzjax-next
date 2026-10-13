@@ -281,4 +281,35 @@ if (names.includes('broken')) {
 	);
 }
 
+// --- deeper than the engine's stack ---------------------------------------------------------------
+// Twenty thousand nested \number: each one's scan_int expands the next, a few calls deeper in the
+// engine every time, and the worker's stack runs out long before any limit of TeX's own, so TeX says
+// nothing. Not a fixture, because what it shows is the stack of the JavaScript engine running it, and
+// smoke and verify-golden run TeX outside the worker. The reply has to say TeX ran out of room, not
+// that it produced nothing, and the same worker has to draw `basic` afterwards.
+{
+	const deep = `\\edef\\y{${'\\number'.repeat(20_000)}7}\n\\begin{tikzpicture}\n\\node {\\y};\n\\end{tikzpicture}`;
+	const reply = await send({ type: 'render', id: ++id, source: deep, options: { captureLog: true } }).catch(
+		(error) => ({ type: 'none', message: error.message }),
+	);
+	const ok = reply.type === 'error' && reply.kind === 'capacity';
+	if (!ok) failures++;
+	console.log(
+		`${ok ? '\x1b[32mOK  \x1b[0m' : '\x1b[31mFAIL\x1b[0m'}  a run deeper than the engine's stack is ` +
+			`reported as capacity: ${reply.type === 'error' ? `${reply.kind}: ${reply.message}` : reply.type}`,
+	);
+	const next = await send({
+		type: 'render',
+		id: ++id,
+		source: basicSource,
+		options: { captureLog: true },
+	}).catch((error) => ({ type: 'none', message: error.message }));
+	const drew = next.type === 'ok' && basicReference !== null && next.svg === basicReference;
+	if (!drew) failures++;
+	console.log(
+		`${drew ? '\x1b[32mOK  \x1b[0m' : '\x1b[31mFAIL\x1b[0m'}  ${''.padEnd(24)} then basic, ` +
+			`${drew ? 'as drawn on its own' : next.type === 'ok' ? 'drawn differently' : `${next.type}: ${next.message}`}`,
+	);
+}
+
 process.exit(failures ? 1 : 0);

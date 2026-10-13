@@ -25,7 +25,10 @@ top of its notes on GitHub, and will not publish a version that has none.
   waiting out its time budget and being reported as too slow. That includes a `\usepgfplotslibrary`
   the engine does not have. A diagram that switches TeX to `\batchmode`, which keeps TeX's messages
   off the terminal, gets its error from TeX's transcript file instead of "TeX produced no output",
-  and a page TeX shipped before giving up is still drawn.
+  and a page TeX shipped before giving up is still drawn. Something nested a few thousand deep can
+  run out of the engine's own stack before TeX reaches a limit of its own; that is now reported as
+  TeX running out of room instead of "TeX produced no output", though TeX says nothing about it and
+  a page it shipped before is lost.
 - `~` is a non-breaking space, as in LaTeX. Until now every `~` in a diagram gave three TeX errors
   and drew a stray tilde before its space, because the engine lacked the `\ifincsname` primitive
   LaTeX's `~` asks for. A node with `Fig.~1` now comes out as TeX Live's own `latex` sets it.
