@@ -1,6 +1,6 @@
 import { buildSync, type Plugin } from 'esbuild';
-import { describe, expect, it } from 'vitest';
-import { buildWorker, ENGINE_ID_PLACEHOLDER } from '../scripts/engine-assets.mjs';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { buildWorker, encodeCoreDump, ENGINE_ID_PLACEHOLDER } from '../scripts/engine-assets.mjs';
 
 /*
  * ENGINE_ID is a cache-key input: whatever it fails to cover, a user keeps seeing as the old code
@@ -16,6 +16,14 @@ import { buildWorker, ENGINE_ID_PLACEHOLDER } from '../scripts/engine-assets.mjs
 
 /** Relative to the project root, which is where vitest runs (vitest.config.ts lives there). */
 const ROOT = '.';
+
+// buildWorker reads the committed engine before any plugin stands in for it, and the first time a
+// process does, it packs the core dump (scripts/engine-assets.mjs `encodeCoreDump`): about 3 s on
+// the desktop, and five times as long under coverage. Done once here, with a limit to match, so it
+// does not land on whichever test runs first.
+beforeAll(() => {
+	encodeCoreDump(ROOT);
+}, 120_000);
 
 /**
  * A file's text exactly as this checkout has it.

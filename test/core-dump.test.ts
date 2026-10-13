@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import {
 	packedLength,
 	restoreCoreDump,
@@ -23,6 +23,14 @@ import { encodeCoreDump, packCoreDump, readCoreDump } from '../scripts/engine-as
 const ROOT = '.';
 
 const PAGE = 65536;
+
+// Packing the committed dump is the build's own work, done as the build does it: 156.25 MiB cut into
+// runs and gzipped by pako at level 9, in JavaScript. That is about 3 s on the desktop, and five
+// times as long under coverage, which slows every line of JavaScript it runs, so it is done once,
+// here, with a limit to match. encodeCoreDump keeps the result for the tests that read it.
+beforeAll(() => {
+	encodeCoreDump(ROOT);
+}, 120_000);
 
 /** The index of the first byte at which `a` and `b` differ, or -1. Faster than `toEqual` on 156 MiB. */
 function firstDifference(a: Uint8Array, b: Uint8Array): number {
