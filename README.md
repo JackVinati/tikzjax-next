@@ -190,7 +190,9 @@ Preview. When TeX stops on a line of a preamble file, the error card names the f
 | Restart the TeX engine | Stops the engine, which starts again with the next diagram, and lets diagrams that failed in this session try again. |
 
 The commands about the diagram at the cursor, and Finalize and Un-finalize, need the note open in
-the editor, in Live Preview or Source mode; they are not offered in Reading view.
+the editor, in Live Preview or Source mode; they are not offered in Reading view. Finalize leaves
+alone a diagram in a blockquote or a callout, and one whose fence starts on the list item's own
+line (`1. ```tikz`); copy or save those as SVG instead.
 
 ## What is bundled
 
