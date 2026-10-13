@@ -101,7 +101,9 @@ export interface TikzBlockSpan {
 //  * A FENCE ON A LIST MARKER'S LINE, `1. ```tikz`, is not reported by `findTikzBlocks` either:
 //    its embed would have to take the fence's place on that line, and un-finalize put the fence
 //    back there. `findTikzBlockAt` finds it. Either way it is read as a fence, so nothing inside it
-//    is mistaken for a block of its own.
+//    is mistaken for a block of its own, and it ends where Reading view ends its list item, so a
+//    fence left open there does not swallow the diagrams after the item. That is the one container
+//    the scanner reads: a fence on a line of its own inside a list item still runs to its closer.
 //  * INLINE `%%comment%%` PAIRS, and a block comment opened by `%% text` rather than a bare `%%`.
 //    Only a line whose entire content is `%%` toggles comment state here. That is the shape
 //    Obsidian's own docs use for a block comment and the shape this module writes, and the
@@ -115,7 +117,11 @@ const FENCE_OPEN = /^([ \t]*)(`{3,}|~{3,})(.*)$/;
 /** A blockquote marker, and the one space after it that belongs to the marker. */
 const QUOTE_MARKER = /^[ \t]*>[ ]?/;
 /** A list item's marker and the space after it, as it stands in front of a fence on its line. */
-const LIST_MARKER = /^[ \t]*(?:[*+-]|\d{1,9}[.)])[ \t]+/;
+const LIST_MARKER = /^([ \t]*)([*+-]|\d{1,9}[.)])([ \t]+)/;
+/** A line that starts a list item of its own, empty or not. */
+const ITEM_START = /^[ \t]*(?:[*+-]|\d+[.)])(?:[ \t]|$)/;
+/** Besides a fence and a new item, what ends a list item: a heading, a rule or a `%%` comment. */
+const ITEM_BREAK = /^[ \t]*(?:#{1,6}(?:[ \t]|$)|([-*_])(?:[ \t]*\1){2,}[ \t]*$|%%[^%]*$)/;
 /** A line that is nothing but `%%`. See the note above on why nothing looser is accepted. */
 const COMMENT_DELIMITER = /^[ \t]*%%[ \t]*$/;
 /** A wiki embed alone on its line. Markdown-style `![](x.svg)` is not written by us, so not read. */
@@ -190,8 +196,12 @@ interface Opener extends Fence {
 	 * and the space after it. Reading view takes up to this many off the start of each body line.
 	 */
 	width: number;
-	/** On a list item's marker line, `1. ```tikz`, rather than on a line of its own. */
-	onMarkerLine: boolean;
+	/**
+	 * For a fence on a list item's marker line, `1. ```tikz`, the column the item's content starts
+	 * at, which a line has to reach to be sure of staying in the item. Null for a fence on a line of
+	 * its own.
+	 */
+	item: number | null;
 }
 
 /** `matchOpener` for a fence in a blockquote, or on a list item's marker line, as well. */
@@ -202,10 +212,52 @@ function matchContainedOpener(text: string): Opener | null {
 		rest = rest.slice(m[0].length);
 		quotes++;
 	}
-	const marker = LIST_MARKER.exec(rest)?.[0] ?? '';
-	const fence = matchOpener(rest.slice(marker.length));
+	const marker = LIST_MARKER.exec(rest);
+	const length = marker?.[0].length ?? 0;
+	const fence = matchOpener(rest.slice(length));
 	if (!fence) return null;
-	return { ...fence, quotes, width: marker.length + fence.indent.length, onMarkerLine: marker !== '' };
+	return {
+		...fence,
+		quotes,
+		width: length + fence.indent.length,
+		item: marker ? contentColumn(marker[1] ?? '', marker[2] ?? '', marker[3] ?? '') : null,
+	};
+}
+
+/** The column after `whitespace` at the start of a line, a tab running to the next multiple of 4. */
+function columnAfter(whitespace: string, from = 0): number {
+	let column = from;
+	for (const c of whitespace) column = c === '\t' ? column + 4 - (column % 4) : column + 1;
+	return column;
+}
+
+/**
+ * The column a list item's content starts at, counted as remark-parse 8 counts it: after the
+ * marker, a tab runs to the next tab stop, and up to four spaces count, but only one when five or
+ * more follow the marker, the rest then being part of the item's content.
+ */
+function contentColumn(indent: string, bullet: string, gap: string): number {
+	const column = columnAfter(indent) + bullet.length;
+	if (gap.startsWith('\t')) return columnAfter('\t', column);
+	let spaces = 0;
+	while (gap[spaces] === ' ') spaces++;
+	return column + (spaces > 4 ? 1 : spaces);
+}
+
+/**
+ * Whether a non-blank line under a fence on a list item's marker line is past the end of the item,
+ * by the rule Reading view's parser follows (remark-parse 8 in the 1.14.4 bundle). A line indented
+ * as far as the item's content is in the item. One that is not ends the item when it starts an
+ * item of its own, follows a blank line, or opens a fence, a heading, a rule or a `%%` comment.
+ * Other text carries the item on, plain text at the margin included, as does a line indented more
+ * than four columns.
+ */
+function endsItem(text: string, item: number, afterBlank: boolean): boolean {
+	const indent = columnAfter(leadingWhitespace(text));
+	if (indent >= item) return false;
+	if (ITEM_START.test(text)) return true;
+	if (indent > 4) return false;
+	return afterBlank || ITEM_BREAK.test(text) || matchOpener(text) !== null;
 }
 
 /** A line without its first `quotes` blockquote markers, or null when it has fewer. */
@@ -239,27 +291,55 @@ function isCloser(text: string, fence: Fence): boolean {
 }
 
 interface FenceExtent {
-	/** Index of the closing fence line, or null when the fence runs to the end of the note. */
+	/**
+	 * Index of the closing fence line, or null when the fence runs to the end of the note, of its
+	 * blockquote or of its list item.
+	 */
 	closeLine: number | null;
 	/**
-	 * Last line the block occupies: the closing fence, the last line of the note, or for a fence
-	 * in a blockquote the last line of the quote.
+	 * Last line the block occupies: the closing fence, the last line of the note, for a fence in a
+	 * blockquote the last line of the quote, and for one on a list marker's line the last line of
+	 * the item.
 	 */
 	lastLine: number;
 }
 
-/** `quotes` is the opener's count of blockquote markers, which every line of the block carries. */
-function scanFence(lines: Line[], openLine: number, fence: Fence, quotes = 0): FenceExtent {
+/**
+ * `quotes` is the opener's count of blockquote markers, which every line of the block carries.
+ * `item` is the content column of the list item whose marker line the fence opens on, if it does.
+ *
+ * Such a fence ends with its item, as in Reading view. Without that, one left open in its item ran
+ * on to the next closing fence in the note, and every diagram on the way was lost to Finalize and
+ * the commands. The item's end is looked for before the closer: a closing fence less indented than
+ * the item's content ends the item, and then opens a fence of its own.
+ */
+function scanFence(
+	lines: Line[],
+	openLine: number,
+	fence: Fence,
+	quotes = 0,
+	item: number | null = null,
+): FenceExtent {
+	// The item's last line so far. Reading view leaves out of it the blank lines the item ends on,
+	// unless they are indented as far as its content.
+	let itemEnd = openLine;
+	let afterBlank = false;
 	for (let j = openLine + 1; j < lines.length; j++) {
 		const line = lines[j];
 		if (!line) continue;
 		const text = unquote(line.text, quotes);
 		if (text === null) return { closeLine: null, lastLine: j - 1 };
+		if (item !== null) {
+			const blank = text.trim() === '';
+			if (!blank && endsItem(text, item, afterBlank)) return { closeLine: null, lastLine: itemEnd };
+			if (!blank || columnAfter(text) >= item) itemEnd = j;
+			afterBlank = blank;
+		}
 		if (isCloser(text, fence)) return { closeLine: j, lastLine: j };
 	}
 	// Unterminated. CommonMark ends the block at the end of the document; we do the same and stop,
 	// which is what keeps this loop from running off the array or throwing.
-	return { closeLine: null, lastLine: lines.length - 1 };
+	return { closeLine: null, lastLine: item === null ? lines.length - 1 : itemEnd };
 }
 
 /** Obsidian keys its code-block registry on the first token of the info string. */
@@ -380,7 +460,7 @@ function scan(noteText: string): ScannedBlock[] {
 
 		const fence = matchContainedOpener(line.text);
 		if (fence) {
-			const extent = scanFence(lines, i, fence, fence.quotes);
+			const extent = scanFence(lines, i, fence, fence.quotes, fence.item);
 			// Every fence is consumed, but only tikz fences are reported: this is what makes a
 			// tikz block nested inside a larger ````markdown block invisible, since the inner
 			// opener is never looked at as a line in its own right.
@@ -394,7 +474,7 @@ function scan(noteText: string): ScannedBlock[] {
 						info: fence.info,
 						finalized: false,
 					},
-					inPlace: fence.quotes === 0 && !fence.onMarkerLine,
+					inPlace: fence.quotes === 0 && fence.item === null,
 				});
 			}
 			i = extent.lastLine + 1;

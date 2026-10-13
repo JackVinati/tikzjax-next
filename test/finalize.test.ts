@@ -606,6 +606,110 @@ describe('documented divergences', () => {
 	});
 });
 
+describe("a fence on a list item's marker line ends with its item", () => {
+	// Reading view reads such a fence as part of its list item, so one with no closer inside the
+	// item ends where the item does, and the diagrams after it render. The scanner ran it on to the
+	// next closing fence, past them, and Finalize skipped them while the commands said the cursor
+	// was in no block. `reading` is what Obsidian 1.14.4's own Reading view parser hands the
+	// processor for each tikz block, in order; `finalized` the blocks Finalize may rewrite.
+	const CASES: ReadonlyArray<{ name: string; text: string; reading: string[]; finalized: string[] }> = [
+		{
+			name: 'an item that starts with ``` and has no closer',
+			text: '- ``` starts a code block in Markdown\n- next item\n\n```tikz\n\\draw (0,0) -- (1,1);\n```\n',
+			reading: ['\\draw (0,0) -- (1,1);'],
+			finalized: ['\\draw (0,0) -- (1,1);'],
+		},
+		{
+			name: 'a tikz fence left open, then the next item',
+			text: '- ```tikz\n  \\draw (0,0);\n- next\n\n```tikz\n\\draw (1,1);\n```\n',
+			reading: ['\\draw (0,0);', '\\draw (1,1);'],
+			finalized: ['\\draw (1,1);'],
+		},
+		{
+			name: 'a numbered line that continues a paragraph',
+			text: 'Some text\n2. ```\n```tikz\n\\draw (0,0);\n```\n',
+			reading: ['\\draw (0,0);'],
+			finalized: ['\\draw (0,0);'],
+		},
+		{
+			name: 'a heading under the item',
+			text: '- ```tikz\n  \\draw (0,0);\n# Heading\n```tikz\n\\draw (1,1);\n```\n',
+			reading: ['\\draw (0,0);', '\\draw (1,1);'],
+			finalized: ['\\draw (1,1);'],
+		},
+		{
+			name: 'a nested item, then its sibling',
+			text: '- a\n  - ```tikz\n    \\draw (0,0);\n  - b\n\n```tikz\n\\draw (1,1);\n```\n',
+			reading: ['\\draw (0,0);', '\\draw (1,1);'],
+			finalized: ['\\draw (1,1);'],
+		},
+		{
+			name: 'an item in a blockquote',
+			text: '> - ```tikz\n>   \\draw (0,0);\n> - next\n>\n> ```tikz\n> \\draw (1,1);\n> ```\n',
+			reading: ['\\draw (0,0);', '\\draw (1,1);'],
+			finalized: [],
+		},
+		{
+			name: 'a blank line, then text at the margin',
+			text: '- ```tikz\n  \\draw (0,0);\n\nafter\n\n```tikz\n\\draw (1,1);\n```\n',
+			reading: ['\\draw (0,0);', '\\draw (1,1);'],
+			finalized: ['\\draw (1,1);'],
+		},
+		{
+			name: 'the end of the note, after blank lines',
+			text: '- ```tikz\n  \\draw (0,0);\n\n\n',
+			reading: ['\\draw (0,0);'],
+			finalized: [],
+		},
+		{
+			// Not a closer: it is left of the item's content, so it ends the item and opens a fence of
+			// its own, which runs to the end of the note and takes the block below with it.
+			name: 'a closing fence at the margin',
+			text: '- ```tikz\n  \\draw (0,0);\n```\n\n```tikz\n\\draw (2,2);\n```\n',
+			reading: ['\\draw (0,0);'],
+			finalized: [],
+		},
+		// What Reading view keeps in the item, the block keeps too: a line at the margin straight
+		// under the item's text, a blank line followed by more of the item, and lines indented with
+		// a tab, which reaches past the item's two columns.
+		{
+			name: 'a line at the margin that continues the item',
+			text: '- ```tikz\n  \\draw (0,0);\nlazy\n  ```\n\n```tikz\n\\draw (1,1);\n```\n',
+			reading: ['\\draw (0,0);\nlazy', '\\draw (1,1);'],
+			finalized: ['\\draw (1,1);'],
+		},
+		{
+			name: 'a blank line inside the item',
+			text: '- ```tikz\n  \\draw (0,0);\n\n  \\draw (1,1);\n  ```\n',
+			reading: ['\\draw (0,0);\n\n\\draw (1,1);'],
+			finalized: [],
+		},
+		{
+			name: 'an item continued with tabs',
+			text: '- ```tikz\n\t\\draw (0,0);\n\t```\n- next\n',
+			reading: ['\\draw (0,0);'],
+			finalized: [],
+		},
+	];
+
+	/** Every block the commands find, wherever the cursor is, in the order of the note. */
+	function everyBlockAt(text: string): string[] {
+		const byStart = new Map<number, string>();
+		for (let offset = 0; offset <= text.length; offset++) {
+			const span = findTikzBlockAt(text, offset);
+			if (span) byStart.set(span.start, asProcessorSource(span.source));
+		}
+		return [...byStart.values()];
+	}
+
+	for (const { name, text, reading, finalized } of CASES) {
+		it(`finds what Reading view renders: ${name}`, () => {
+			expect(everyBlockAt(text)).toEqual(reading);
+			expect(findTikzBlocks(text).map((s) => asProcessorSource(s.source))).toEqual(finalized);
+		});
+	}
+});
+
 describe('a diagram in a list item', () => {
 	// The finalized shapes below were run through Obsidian 1.14.4's Reading view parser: the embed
 	// stays in the item's paragraph, the %% comment is a block of the same item, and the item after
