@@ -162,6 +162,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 						record.state = outcome.state;
 						record.tier = outcome.tier;
 						record.durationMs = outcome.durationMs;
+						record.timings = outcome.timings;
 						record.message = outcome.message;
 						record.log = outcome.log;
 						for (const watch of watchers) watch(outcome);

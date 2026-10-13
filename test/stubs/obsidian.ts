@@ -72,6 +72,20 @@ export class Notice {
 	}
 }
 
+/**
+ * A view with somewhere to draw: the diagnostics panel renders into `contentEl`, which a test reads.
+ * Needs a document, so only a happy-dom test may construct one.
+ */
+export class ItemView extends Component {
+	leaf: unknown;
+	contentEl: HTMLElement;
+	constructor(leaf: unknown) {
+		super();
+		this.leaf = leaf;
+		this.contentEl = document.createElement('div');
+	}
+}
+
 /** Only so that modules defining a modal or naming a view type load; nothing here opens one. */
 export class Modal {
 	app: unknown;

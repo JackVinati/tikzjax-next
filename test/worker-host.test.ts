@@ -453,3 +453,82 @@ describe('the line TeX blamed', () => {
 		expect((failed.result.error as TexError).line).toBe(2);
 	});
 });
+
+describe('where the time went', () => {
+	/**
+	 * The diagnostics view shows, for each diagram compiled, how long it waited and what each step
+	 * took. The worker times its own steps; the host adds the one thing only it can see, how long
+	 * the job waited for the engine to start.
+	 */
+	const TIMINGS = { resetMs: 5, texMs: 63, svgMs: 9, passes: 1 };
+
+	function answer(w: FakeWorker, index: number): void {
+		w.emit({
+			type: 'ok',
+			id: w.renders[index] ?? -1,
+			svg: '<svg/>',
+			log: [],
+			missing: [],
+			durationMs: 80,
+			timings: TIMINGS,
+		});
+	}
+
+	it("hands on the worker's own steps", async () => {
+		const host = new WorkerHost();
+		void host.ready();
+		worker(0).boot();
+		const a = render(host, 'a');
+		answer(worker(0), 0);
+		await tick();
+
+		expect(a.result.value?.timings).toEqual(TIMINGS);
+	});
+
+	it('adds the start to the job that waited for the engine, and to no job after it', async () => {
+		let now = 1000;
+		const host = new WorkerHost({ now: () => now });
+		const a = render(host, 'a');
+		now = 1850;
+		worker(0).boot();
+		answer(worker(0), 0);
+		await tick();
+
+		now = 2000;
+		const b = render(host, 'b');
+		answer(worker(0), 1);
+		await tick();
+
+		expect(a.result.value?.timings).toEqual({ ...TIMINGS, startMs: 850 });
+		expect(b.result.value?.timings).toEqual(TIMINGS);
+	});
+
+	it('counts only the part of the start a job was there for', async () => {
+		let now = 1000;
+		const host = new WorkerHost({ now: () => now });
+		const a = render(host, 'a');
+		now = 1400;
+		const b = render(host, 'b');
+		now = 1850;
+		worker(0).boot();
+		now = 1900;
+		answer(worker(0), 0);
+		await tick();
+		answer(worker(0), 1);
+		await tick();
+
+		expect(a.result.value?.timings?.startMs).toBe(850);
+		// Waiting behind `a` once the engine was up is not the engine starting.
+		expect(b.result.value?.timings?.startMs).toBe(450);
+	});
+
+	it('says nothing of the steps a worker did not time', async () => {
+		const host = new WorkerHost({ now: () => 0 });
+		const a = render(host, 'a');
+		worker(0).boot();
+		worker(0).reply(worker(0).renders[0] ?? -1);
+		await tick();
+
+		expect(a.result.value?.timings).toBeUndefined();
+	});
+});

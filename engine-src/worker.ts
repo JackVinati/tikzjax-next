@@ -47,7 +47,14 @@ import {
 	TEX_FILES,
 	TEX_WASM_GZ,
 } from 'virtual:engine-assets';
-import type { ErrorMessage, OkMessage, RenderOptions, TexErrorKind, WorkerRequest } from './protocol';
+import type {
+	ErrorMessage,
+	OkMessage,
+	RenderOptions,
+	RenderTimings,
+	TexErrorKind,
+	WorkerRequest,
+} from './protocol';
 
 // --- base64 -------------------------------------------------------------------------------------
 
@@ -358,12 +365,15 @@ interface PassResult {
 /**
  * Run TeX once over `<job>.tex`, which must already be in the virtual filesystem, and draw
  * `<job>.dvi`. Everything the run leaves behind stays there for the caller to harvest or discard.
+ * What each step took is added to `spent`.
  */
-const runPass = async (job: string): Promise<PassResult> => {
+const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> => {
+	const started = performance.now();
 	// A new Memory with the dump's non-zero runs written into it: 21.5 MiB rather than all 156.25,
 	// the rest being zero from the start. Upstream also copies the dump with .slice(0) first, an
 	// extra 156.25 MiB allocated and discarded on every single render.
 	const memory = startingMemory(coreDump, library.pages);
+	const reset = performance.now();
 
 	library.setMemory(memory.buffer);
 	library.setInput(`${job}.tex\n\\end\n`);
@@ -371,16 +381,24 @@ const runPass = async (job: string): Promise<PassResult> => {
 	let svg = '';
 	let wroteDvi = false;
 	let convertError: string | undefined;
+	// When TeX was done, and when drawing its DVI began. A run that throws out of TeX sets neither,
+	// and all of its time is TeX's; one that wrote no DVI drew nothing, and spent nothing drawing.
+	let texDone: number | undefined;
+	let drawing: number | undefined;
 	try {
 		const instance = await WebAssembly.instantiate(texModule, {
 			library,
 			env: { memory },
 		});
 		await library.executeAsync(instance.exports);
+		texDone = performance.now();
 
 		const dvi = library.readFileSync(`${job}.dvi`);
 		wroteDvi = dvi.byteLength > 0;
-		if (wroteDvi) svg = await dviToSvg(dvi);
+		if (wroteDvi) {
+			drawing = performance.now();
+			svg = await dviToSvg(dvi);
+		}
 	} catch (error) {
 		// Two very different things land here, and telling them apart is the difference between a
 		// useful message and a shrug:
@@ -391,8 +409,22 @@ const runPass = async (job: string): Promise<PassResult> => {
 		// Swallowing both produced "TeX produced no output" for a compile that worked perfectly.
 		if (wroteDvi) convertError = error instanceof Error ? error.message : String(error);
 	}
+
+	const done = performance.now();
+	spent.resetMs += reset - started;
+	spent.texMs += (texDone ?? done) - reset;
+	spent.svgMs += drawing === undefined ? 0 : done - drawing;
+	spent.passes += 1;
 	return { svg, wroteDvi, convertError };
 };
+
+/** `spent` as the plugin is told it: whole milliseconds, which is all a person reading it needs. */
+const rounded = (spent: RenderTimings): RenderTimings => ({
+	resetMs: Math.round(spent.resetMs),
+	texMs: Math.round(spent.texMs),
+	svgMs: Math.round(spent.svgMs),
+	passes: spent.passes,
+});
 
 /** A file the run wrote, or undefined if it never wrote one. */
 const readIfWritten = (name: string): Uint8Array | undefined => {
@@ -431,6 +463,8 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	// Both passes read this same text, so `bodyLine` holds for an `l.NN` from either.
 	const { text, bodyLine } = buildInput(source, options);
 	const input = new TextEncoder().encode(text);
+	/** Where the time went, over both passes when there are two. */
+	const spent: RenderTimings = { resetMs: 0, texMs: 0, svgMs: 0, passes: 0 };
 
 	/** Where the first pass's transcript ends, so its diagnosis can never be read out of pass two. */
 	let firstEnd: number;
@@ -440,7 +474,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	let adoptedSecondPass = false;
 	try {
 		library.writeFileSync(`${FIRST_JOB}.tex`, input);
-		const first = await runPass(FIRST_JOB);
+		const first = await runPass(FIRST_JOB, spent);
 		firstEnd = log.length;
 		reported = first;
 
@@ -470,7 +504,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 				if (logging)
 					emit(`(tikzjax) second pass: re-running with ${carried.map((f) => f.name).join(', ')}`);
 
-				const second = await runPass(SECOND_JOB);
+				const second = await runPass(SECOND_JOB, spent);
 				if (second.wroteDvi && second.svg.includes('<svg')) {
 					reported = second;
 					adoptedSecondPass = true;
@@ -484,6 +518,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	}
 
 	const durationMs = Math.round(performance.now() - started);
+	const timings = rounded(spent);
 	const gotSvg = reported.svg.includes('<svg');
 	const transcript = readTranscript(log.slice(0, firstEnd));
 
@@ -508,13 +543,23 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 			log,
 			missing,
 			durationMs,
+			timings,
 		};
 	}
 
 	if (!reported.wroteDvi || !gotSvg) {
 		// Only ever reached with a failed FIRST pass — a failed second one is discarded above — so
 		// `transcript` here is that pass's own, not a later run's.
-		return { type: 'error', id, ...diagnose(transcript, missing), bodyLine, log, missing, durationMs };
+		return {
+			type: 'error',
+			id,
+			...diagnose(transcript, missing),
+			bodyLine,
+			log,
+			missing,
+			durationMs,
+			timings,
+		};
 	}
 	return {
 		type: 'ok',
@@ -523,6 +568,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 		log,
 		missing,
 		durationMs,
+		timings,
 		firstError: diagnostics.firstError,
 		line: diagnostics.line,
 		bodyLine,

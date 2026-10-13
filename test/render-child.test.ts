@@ -11,14 +11,17 @@ beforeAll(() => {
 });
 
 // One optional stage that throws, switched on per test: the only way to reach a pipeline that
-// degrades without being handed output so broken that it cannot be parsed at all.
-const pipeline = vi.hoisted(() => ({ breakAStage: false }));
+// degrades without being handed output so broken that it cannot be parsed at all. And one that
+// runs `during`, for a test that has to pass time inside the pipeline.
+const pipeline = vi.hoisted(() => ({ breakAStage: false, during: null as (() => void) | null }));
 vi.mock('../src/svg/stages', async (importOriginal) => {
 	const real = await importOriginal<typeof import('../src/svg/stages')>();
 	return {
 		...real,
 		buildStages: (options: Parameters<typeof real.buildStages>[0]) => {
 			const stages = real.buildStages(options);
+			const during = pipeline.during;
+			if (during) return [...stages, { name: 'during', run: () => during() }];
 			if (!pipeline.breakAStage) return stages;
 			return [
 				...stages,
@@ -1078,7 +1081,42 @@ describe('what a block reports when it comes to rest', () => {
 		);
 		child.onload();
 		await child.settled;
-		expect(reports).toEqual([{ state: 'ok', durationMs: 42 }]);
+		expect(reports).toEqual([{ state: 'ok', durationMs: 42, timings: { queueMs: 0, postMs: 0 } }]);
+	});
+
+	it('a compiled diagram: where its time went, before the engine, in it and after it', async () => {
+		const { reports, report } = reporting();
+		let now = 100;
+		const engine = { resetMs: 5, texMs: 63, svgMs: 9, passes: 1, startMs: 850 };
+		const queue = {
+			submit: (_k: string, _j: TexJobSpec, _p: number, _t: number, opts?: { onStart?: () => void }) => {
+				// Behind other diagrams for 30 ms, then started.
+				now += 30;
+				opts?.onStart?.();
+				return Promise.resolve({ svg: SVG, log: [], durationMs: 80, timings: engine });
+			},
+			release: () => undefined,
+		} as unknown as BlockDeps['queue'];
+		pipeline.during = () => void (now += 7);
+		try {
+			const child = new TikzBlock(container(), spec(), deps({ queue, now: () => now, report }));
+			child.onload();
+			await child.settled;
+		} finally {
+			pipeline.during = null;
+		}
+
+		expect(reports).toEqual([
+			{ state: 'ok', durationMs: 80, timings: { ...engine, queueMs: 30, postMs: 7 } },
+		]);
+	});
+
+	it('a diagram from a cache: no timings, since nothing was compiled', async () => {
+		const { reports, report } = reporting();
+		const child = new TikzBlock(container(), spec(), deps({ cache: fakeCache(artifact(SVG)), report }));
+		child.onload();
+		await child.settled;
+		expect(reports[0]?.timings).toBeUndefined();
 	});
 
 	it('a failure: what its card says, and the log', async () => {
