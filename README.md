@@ -303,6 +303,11 @@ Inspector; connect it to a Mac by cable; then in Safari on the Mac, Develop → 
 Obsidian window. Every mobile bug report on the original repository is untriageable for want of
 this paragraph, so if you are filing one, this is how to get something worth attaching.
 
+**Where can I ask something, or suggest a feature?** In
+[Discussions](https://github.com/JackVinati/tikzjax-next/discussions): Q&A for help with a diagram,
+Ideas for what the plugin should do next, where a thumbs-up counts as a vote. What is planned, and
+in what order, is on the wiki's [Roadmap](https://github.com/JackVinati/tikzjax-next/wiki/Roadmap).
+
 ## Coming from the original TikZJax
 
 The original plugin created a `<script type="text/tikz">` element and let a bundled script scan the
