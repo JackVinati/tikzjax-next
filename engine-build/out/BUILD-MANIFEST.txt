@@ -4,6 +4,7 @@ format inputs    cc4f39de3631fcb3cb2fbf66d3ab7c45 (sha256 over the 146 files lat
 tex banner       TeX 3.141592653 (TeX Live 2023/Debian)
 TEXMFDIST        /usr/share/texlive/texmf-dist
 web2js           0114ef5905dc387b70e72c654bcedd3b52b29fad
+wasm-opt         --mvp-features -O4 (binaryen 99.0.0), no asyncify
 tikzjax          461ac15f1c63351392115c4262d8179bc9922404
 memory pages     2500 (156 MiB)
 tex_files        245

@@ -42,7 +42,6 @@ npm run typecheck      # TypeScript 7
 npm run typecheck:legacy  # TypeScript 5, the one the store's review reads the code with
 npm test               # unit tests; `npm run test:coverage` adds coverage and its floors
 npm run smoke          # every fixture through the engine, headless
-npm run verify:fork    # our engine fork against the upstream it forked from, byte for byte
 npm run verify:golden  # every fixture against the output recorded in test/fixtures/golden
 npm run verify:worker  # the exact worker string that goes into main.js
 npm run build

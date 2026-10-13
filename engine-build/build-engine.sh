@@ -234,16 +234,142 @@ if (got !== '2026-1-1-0') { console.error('clock patch did not take: ' + got); p
 " || die "the library.js clock patch did not apply"
 ok "library.js clock pinned to 2026-01-01, so core.dump is reproducible"
 
+# ---------------------------------------------------------------------------------------------
+# NO ASYNCIFY, and the one jump that used it.
+#
+# Upstream optimises the compiled engine with `wasm-opt --asyncify`, which instruments every
+# function so that the stack can be unwound to the host and rewound later. Upstream's host unwinds
+# to fetch each TeX file over the network. engine-src/library.ts has every file in memory and never
+# unwinds, and the instrumentation alone cost 42% of TeX's time over the fixtures
+# (internal/DECISIONS.md D14), so the engine is optimised without it.
+#
+# One thing in the compiled TeX did use it. TeX's jump_out, where a fatal error, a capacity overflow
+# and a hundredth error all end up, is `goto end_of_TEX`: a jump out of every procedure at once to
+# the end of the main program, which WebAssembly has no instruction for. web2js compiles that jump,
+# and the INITEX-only `goto final_end` in pseudo_input, into an asyncify unwind. Without asyncify
+# its import would be left for the host to provide under asyncify's name, and an unwind that did not
+# happen would return into whatever called jump_out and let TeX carry on past a fatal error. So the
+# jump becomes a call to the host's `library.jumpOut`, which ends the run by throwing, followed by
+# `unreachable`, so that TeX traps rather than carries on should a host ever return from it.
+#
+# Both edits are to web2js's code generator, before it compiles anything. Each must find what it
+# replaces exactly once and leave its replacement in place, or the build stops.
+node - <<'JUMP' || die "the jump_out patch did not apply — re-read web2js's goto.js and program.js"
+const fs = require('fs');
+const edit = (file, before, after) => {
+    const path = `web2js/${file}`;
+    const text = fs.readFileSync(path, 'utf8');
+    const found = text.split(before).length - 1;
+    if (found !== 1) {
+        console.error(`${file}: expected what is replaced exactly once, found it ${found} times`);
+        process.exit(1);
+    }
+    const patched = text.replace(before, () => after);
+    if (!patched.includes(after) || patched.includes(before)) process.exit(1);
+    fs.writeFileSync(path, patched);
+};
+
+edit(
+    'pascal/statements/goto.js',
+    `            const jmpbuf = (pages - 100) * 1024 * 64;
+            const jmpbuf_end = pages * 1024 * 64;
+
+            return module.block(null, [
+                module.i32.store(jmpbuf, 0, module.i32.const(0), module.i32.const(jmpbuf + 8)),
+                module.i32.store(jmpbuf + 4, 0, module.i32.const(0), module.i32.const(jmpbuf_end)),
+                module.call('start_unwind', [module.i32.const(jmpbuf)], Binaryen.none),
+                module.return(this.label == 9999 ? module.i32.const(0) : Binaryen.none)
+            ]);`,
+    `            return module.block(null, [module.call('jumpOut', [], Binaryen.none), module.unreachable()]);`
+);
+
+edit(
+    'pascal/program.js',
+    `        module.addFunctionImport(
+            'start_unwind',
+            'asyncify',
+            'start_unwind',
+            Binaryen.createType([Binaryen.i32]),
+            Binaryen.none
+        );
+        module.addFunctionImport('stop_unwind', 'asyncify', 'stop_unwind', Binaryen.createType([]), Binaryen.none);
+        module.addFunctionImport(
+            'start_rewind',
+            'asyncify',
+            'start_rewind',
+            Binaryen.createType([Binaryen.i32]),
+            Binaryen.none
+        );
+        module.addFunctionImport('stop_rewind', 'asyncify', 'stop_rewind', Binaryen.createType([]), Binaryen.none);`,
+    `        module.addFunctionImport('jumpOut', 'library', 'jumpOut', Binaryen.createType([]), Binaryen.none);`
+);
+JUMP
+if grep -rq "start_unwind\|'asyncify'" web2js/pascal; then
+    die "web2js's code generator still mentions asyncify after the jump_out patch"
+fi
+
+# initex.js runs the engine with web2js's own library.js, which has no jumpOut, and an engine with an
+# import its host lacks does not instantiate. When the format is built, a jump out means TeX hit a
+# fatal error reading latex.ltx, so it stops the build with TeX's transcript above it.
+grep -q "^module.exports = {" web2js/library.js || die "web2js library.js is no longer a CommonJS object literal"
+cat >> web2js/library.js <<'JUMPOUT'
+
+// Appended by engine-build/build-engine.sh. The engine is built without asyncify, and calls this
+// where TeX's jump_out jumps to the end of the program (a fatal error).
+module.exports.jumpOut = () => {
+    throw new Error('TeX stopped at a fatal error while the format was being built; its transcript is above');
+};
+JUMPOUT
+node --input-type=commonjs -e "
+const lib = require(process.cwd() + '/web2js/library.js');
+try { lib.jumpOut(); } catch { process.exit(0); }
+process.exit(1);
+" || die "the library.js jumpOut patch did not apply"
+ok "a jump out of TeX calls library.jumpOut; nothing is left for asyncify"
+
+# Upstream's optimisation step, checked to be the asyncify one this replaces: if upstream changes how
+# it optimises the engine, that wants reading before it is replaced.
+UPSTREAM_OPT='wasm-opt --asyncify --pass-arg=asyncify-ignore-indirect --pass-arg=asyncify-imports@library.reset,library.getfilesize -O4 out.wasm -o tex.wasm'
+[ "$(node -p "require('./web2js/package.json').scripts['build:asyncify-wasm']")" = "$UPSTREAM_OPT" ] \
+    || die "web2js's build:asyncify-wasm is no longer the step this build replaces — re-read package.json"
+
 # Upstream's `npm run build` is four steps and the last one is the flaky one, so run them
 # separately: a failure then names the step it happened in instead of "the build".
-for step in build:parser build:wasm build:asyncify-wasm build:initex; do
+for step in build:parser build:wasm build:initex; do
     node -e "process.exit(require('./web2js/package.json').scripts['$step'] ? 0 : 1)" \
         || die "web2js has no '$step' script — its build was restructured; re-read package.json"
 done
 
-( cd web2js && npm run build:parser && npm run build:wasm && npm run build:asyncify-wasm )
+( cd web2js && npm run build:parser && npm run build:wasm )
+
+# In place of build:asyncify-wasm: the same -O4, and nothing beyond WebAssembly 1.0. The engine has
+# to compile in the WebViews minAppVersion admits, iOS 14.5's among them, and the later features
+# give this code nothing: binaryen 132 emits the same instructions with them enabled. --mvp-features
+# also makes wasm-opt refuse an input that uses one ("all used features should be allowed").
+# scripts/wasm-mvp.mjs checks the result again: the Engine workflow on this build, the tests on what
+# is committed. No -tnh: see D14.
+WASM_OPT=(--mvp-features -O4)
+( cd web2js && ./node_modules/.bin/wasm-opt "${WASM_OPT[@]}" out.wasm -o tex.wasm )
+BINARYEN=$(node -p "require('./web2js/node_modules/binaryen/package.json').version")
 
 [ -s web2js/tex.wasm ] || die "tex.wasm was not produced"
+node -e '
+const engine = new WebAssembly.Module(require("fs").readFileSync("web2js/tex.wasm"));
+const names = [
+    ...WebAssembly.Module.exports(engine).map((e) => e.name),
+    ...WebAssembly.Module.imports(engine).map((i) => `${i.module}.${i.name}`),
+];
+const left = names.filter((n) => /asyncify/.test(n));
+if (left.length) {
+    console.error(`tex.wasm still has ${left.join(", ")}`);
+    process.exit(1);
+}
+if (!names.includes("library.jumpOut")) {
+    console.error("tex.wasm does not import library.jumpOut, so a jump out of TeX has nowhere to go");
+    process.exit(1);
+}
+' || die "tex.wasm is not the engine without asyncify that this build makes"
+ok "tex.wasm imports library.jumpOut and has no asyncify left"
 [ -s web2js/tex.pool ] || die "tex.pool was not produced"
 ok "tex.wasm   $(stat -c%s web2js/tex.wasm) bytes  sha256 $(sha256sum web2js/tex.wasm | cut -c1-16)"
 ok "tex.pool   $(stat -c%s web2js/tex.pool) bytes  sha256 $(sha256sum web2js/tex.pool | cut -c1-16)"
@@ -254,9 +380,9 @@ ok "tex.pool   $(stat -c%s web2js/tex.pool) bytes  sha256 $(sha256sum web2js/tex
 # format is the signature of a lost write, and the good one here is 21427400 bytes.
 #
 # Retrying at all is safe because nothing downstream trusts the dump on faith: it must be exactly
-# pages x 65536 bytes, then 21 fixtures render through it, then verify-fork asserts the output is
-# byte-identical to upstream's engine. A dump that passes all three is a dump, whichever attempt
-# produced it.
+# pages x 65536 bytes, then every fixture renders through it, then verify-golden asserts that each
+# one's DVI, transcript and SVG are byte-identical to the golden corpus. A dump that passes all three
+# is a dump, whichever attempt produced it.
 DUMPED=
 for attempt in 1 2 3; do
     if ( cd web2js && npm run build:initex ) && [ -s web2js/core.dump ]; then
@@ -407,6 +533,7 @@ format inputs    ${FORMAT_INPUTS} (sha256 over the 146 files latex.ltx pulled in
 tex banner       $(tex --version | head -1)
 TEXMFDIST        $(kpsewhich --var-value TEXMFDIST)
 web2js           ${WEB2JS_REF}
+wasm-opt         ${WASM_OPT[*]} (binaryen ${BINARYEN}), no asyncify
 tikzjax          ${TIKZJAX_REF}
 memory pages     ${PAGES} ($(( PAGES * 65536 / 1048576 )) MiB)
 tex_files        ${GOT}

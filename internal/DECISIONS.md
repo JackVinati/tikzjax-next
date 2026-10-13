@@ -637,8 +637,8 @@ So what verify-fork proved is recorded instead. `test/fixtures/golden` holds wha
 produces through the fork for each fixture: the sha256 of the DVI TeX wrote (`dvi.sha256`), the
 transcript (`<name>.log`), and the SVG the patched dvi2html draws (`<name>.svg`) — 221 KB for the 26
 fixtures. `npm run verify:golden` renders every fixture through the committed engine and the fork and
-requires all three to be byte-identical. CI and the Engine workflow run it beside verify-fork for as
-long as the engine has asyncify, and in its place after.
+requires all three to be byte-identical. CI and the Engine workflow run it where they ran
+verify-fork, which went with asyncify (D14).
 
 The corpus was checked against upstream when it was recorded. On the 0.1.5 engine, upstream's
 `library.js`, given the fork's fixed date for TeX's clock (it reads `new Date()`, and TeX stamps the
@@ -667,6 +667,69 @@ longer exists fails until it is removed. The corpus has a `.gitattributes` of it
 Windows checkout does not give the transcripts CRLF endings.
 
 `engine-src/upstream/` stays as it is: it is what the fork's list of changes is written against.
+
+---
+
+## D14 — The engine is built without asyncify, and held to WebAssembly 1.0
+
+**Amends D10's item 2, which took the asyncify round trip out of file loading but left the
+instrumentation in.**
+
+Upstream's build optimises the compiled engine with `wasm-opt --asyncify`. Asyncify rewrites every
+function so that the whole stack can be unwound to the host and later rewound, and upstream's host
+unwinds to fetch each TeX file. Since D10 our host never unwinds: every file is in memory. But the
+instrumentation stayed in every function, and every call in TeX paid for it.
+
+`build-engine.sh` now optimises with `wasm-opt --mvp-features -O4` (binaryen 99.0.0, web2js's own)
+in place of upstream's `build:asyncify-wasm`, which it checks is still the step it replaces.
+Measured in Node 22.19 on the Windows desktop the engine is maintained on, TeX's own time
+(`executeAsync`, nothing else) over the 26 fixtures, the minimum of three runs of each, summed:
+
+| | 0.1.5 | without asyncify |
+|---|---:|---:|
+| TeX time, 26 fixtures | 4,572 ms | 2,641 ms (−42%; −33% to −45% per fixture) |
+| `tex.wasm` | 526,378 B | 356,290 B |
+| `tex.wasm.gz` | 121,527 B | 77,263 B |
+| `core.dump` | `86e786be…` | the same bytes |
+
+That is V8. Nothing has been measured on an iPhone, and JavaScriptCore's costs are not V8's. The dump
+being byte-identical says asyncify never touched TeX's memory: the format and the dump run computed
+the same thing with it and without. Every fixture's DVI, transcript and SVG are byte-identical too
+(D13).
+
+**The one jump that used it.** TeX's `jump_out`, where a fatal error, a capacity overflow and a
+hundredth error all end up, is `goto end_of_TEX`: a jump out of every procedure at once, which
+WebAssembly has no instruction for. web2js compiles it into an asyncify unwind. Upstream's host then
+waits for `tex_final_end`, which that jump skips, so a run that reached it never ended: "TeX capacity
+exceeded", an emergency stop in nonstop mode, a hundred errors, each waited for the plugin's timeout
+and was reported as slow rather than with TeX's message. The build now has web2js compile the jump
+into a call to `library.jumpOut` followed by `unreachable`, and `jumpOut` throws; `executeAsync`
+catches exactly that, ends the run and flushes what TeX was printing. The `runaway-macro` fixture,
+a macro that expands to itself, ended smoke with "unsettled top-level await" on the 0.1.5 engine; it
+now ends in 40 ms with "TeX capacity exceeded, sorry [input stack size=5000]", which the worker
+reports as a capacity error. What the jump does not do is TeX's `close_files_and_terminate`, so the
+transcript stops at the error's context, and a DVI begun before the jump would lack its postamble.
+That needs a page shipped before a fatal error, which a picture, shipped at `\end{document}`, does
+not do; web2c's `jump_out` closes the files first, and a change file could do the same here.
+
+**WebAssembly 1.0, and nothing later.** The engine has to compile in every WebView minAppVersion
+1.7.2 admits, iOS 14.5's and Chromium 106's among them, and later features give this code nothing:
+built with sign extension, bulk memory, SIMD and the rest enabled, binaryen 132's -O4 emits the same
+instructions (measured 2026-10-12). So `--mvp-features` is pinned in the build, where it also makes
+wasm-opt refuse an input that uses a later feature, and `scripts/wasm-mvp.mjs`, which decodes every
+section and instruction, holds the committed `tex.wasm.gz` to it in the tests and the freshly built
+one in the Engine workflow. Two flags are left out on purpose: `--all-features`, with which binaryen
+132 writes an import encoding V8 rejects, and `-tnh` (traps never happen), which was not measurably
+faster and lets binaryen assume that no instruction ever traps, so that a fault which stops the run
+today, an access out of bounds say, could be optimised into one that runs on.
+
+Optimising the same `out.wasm` with binaryen 132 instead of web2js's 99 measured 4% less TeX time
+(2,453 against 2,563 ms over 27 fixtures, the same method), and running 99's -O4 twice or its -O3
+nothing. That would add a build dependency web2js does not pin, so it is left for later
+(`TODO.md`).
+
+Every cached diagram is compiled once more after the update, because ENGINE_ID, the hash of the
+worker bundle, changes with `tex.wasm`.
 
 ---
 

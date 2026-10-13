@@ -23,6 +23,10 @@
  *     in a Worker and in the Node test harness.
  *  6. Missing files are reported, not swallowed, so the plugin can say "package X is not bundled"
  *     instead of showing a mystery failure (upstream #81).
+ *  7. The engine is built without asyncify (internal/DECISIONS.md D14), so nothing here unwinds or
+ *     rewinds: a run is TeX's main program, start to end. TeX's jump out of every procedure on a
+ *     fatal error, which asyncify made, is a call to jumpOut, which ends the run there. Upstream's
+ *     host waited for a `tex_final_end` that jump skips, so such a run never ended.
  */
 
 import { tfmData } from '@drgrice1/dvi2html';
@@ -50,8 +54,6 @@ let files: TexFile[] = [];
 let memory: ArrayBuffer | null = null;
 let inputBuffer: string | null = null;
 let callback: (() => void) | null = null;
-let wasmExports: WebAssembly.Exports | null = null;
-let finished: { promise: Promise<void>; resolve: () => void } | null = null;
 
 // ---------------------------------------------------------------------------------------------
 // Injected environment (change 1, 4, 5, 6)
@@ -111,14 +113,6 @@ export const clearMissing = () => {
 
 // ---------------------------------------------------------------------------------------------
 
-const deferredPromise = () => {
-	let resolve!: () => void;
-	const promise = new Promise<void>((res) => {
-		resolve = res;
-	});
-	return { promise, resolve };
-};
-
 export const deleteEverything = () => {
 	files = [];
 	filesystem = {};
@@ -127,8 +121,6 @@ export const deleteEverything = () => {
 	callback = null;
 	showConsole = false;
 	consoleBuffer = '';
-	finished = null;
-	wasmExports = null;
 	// inflatedCache is NOT cleared (change 3): the pgf tree costs ~100 ms to re-inflate and is
 	// identical on every run.
 };
@@ -268,13 +260,37 @@ export const setInput = (input: string, cb?: () => void) => {
 	if (cb) callback = cb;
 };
 
-export const executeAsync = async (exports: WebAssembly.Exports): Promise<void> => {
-	wasmExports = exports;
-	finished = deferredPromise();
-	(wasmExports.main as () => void)();
-	(wasmExports.asyncify_stop_unwind as () => void)();
-	return finished.promise;
+/** What jumpOut throws. Its own class, so that a trap in the engine is never taken for one. */
+class JumpOut extends Error {}
+
+/**
+ * Where TeX jumps from inside a procedure to the end of its program: jump_out's `goto end_of_TEX`,
+ * which a fatal error, a capacity overflow and a hundredth error all reach. WebAssembly has no jump
+ * out of a function, so the build makes the jump a call to this, followed by `unreachable`
+ * (engine-build/build-engine.sh), and it throws, which takes the stack down to executeAsync.
+ */
+export const jumpOut = (): never => {
+	throw new JumpOut('TeX jumped to the end of its program');
 };
+
+/**
+ * Runs TeX's main program, to its end or to a jump out. Synchronous since the engine has no
+ * asyncify (change 7): once main returns, TeX has finished. It still returns a promise, which is
+ * the worker's contract, and the promise fails only when the engine does, by a trap or by an
+ * exception from this host.
+ */
+export const executeAsync = (exports: WebAssembly.Exports): Promise<void> =>
+	new Promise<void>((resolve) => {
+		try {
+			(exports.main as () => void)();
+		} catch (error) {
+			if (!(error instanceof JumpOut)) throw error;
+			// The program ends here rather than at TeX's final_end, which would have flushed the line
+			// it was printing: the error's context, which the transcript needs.
+			tex_final_end();
+		}
+		resolve();
+	});
 
 // --- clock (change 4) -------------------------------------------------------------------------
 
@@ -475,5 +491,4 @@ export const put = (descriptor: number, pointer: number, length: number) => {
 
 export const tex_final_end = () => {
 	if (consoleBuffer.length) writeToConsole('\n');
-	finished?.resolve();
 };

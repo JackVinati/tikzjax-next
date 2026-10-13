@@ -34,7 +34,6 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "smoke": "node scripts/smoke.mjs",
-    "verify:fork": "node scripts/verify-fork.mjs",
     "verify:golden": "node scripts/verify-golden.mjs",
     "verify:worker": "node scripts/verify-worker.mjs",
     "scan:native": "node scripts/scan-native-unicode.mjs",

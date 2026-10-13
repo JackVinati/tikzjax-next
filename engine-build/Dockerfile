@@ -18,7 +18,7 @@ FROM ubuntu:24.04
 
 ARG TEXLIVE=apt
 
-# Node runs the engine BUILD only — web2js's tangle/compile/asyncify/initex and tikzjax's font and
+# Node runs the engine BUILD only — web2js's tangle/compile/optimise/initex and tikzjax's font and
 # tex_files pipeline — and none of it ships. It is pinned to an exact release, taken from
 # nodejs.org's own archive and checked against its published SHA-256, the way bakoma.zip is below:
 # that archive keeps every release forever, where a distribution repository drops old packages and

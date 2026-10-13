@@ -4,10 +4,11 @@
  *
  *   node scripts/verify-worker.mjs
  *
- * verify-fork.mjs proves engine-src/library.ts matches upstream. This proves the whole artifact
- * does: base64 decode, pako inflate, WebAssembly compile, the conditional \begin{document}
- * wrapping, \nonstopmode, error classification and the message protocol. Everything between the
- * source and the SVG, in the form the user will actually install.
+ * verify-golden.mjs holds the engine and engine-src/library.ts to the recorded golden corpus. This
+ * proves the whole artifact renders what they do: base64 decode, pako inflate, WebAssembly
+ * compile, the conditional \begin{document} wrapping, \nonstopmode, error classification and the
+ * message protocol. Everything between the source and the SVG, in the form the user will actually
+ * install.
  *
  * The worker is evaluated in this realm with `self` shimmed rather than in a vm context, because
  * a second realm gives WebAssembly a different Uint8Array and the instantiation fails in ways

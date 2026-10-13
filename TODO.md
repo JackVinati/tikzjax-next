@@ -57,8 +57,10 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
   `tikzjax.txt` and patch the extracted string. D10 replaced all of it: the engine is now built
   from pinned upstream sources in a container (`engine-build/`) and the worker is our own
   TypeScript (`engine-src/worker.ts`), so there is no blob to cut open and no patch to keep
-  matching. Every fix the patches were for is in the fork, and `npm run verify:fork` proves the
-  fork renders identically to upstream where it did not mean to differ.
+  matching. Every fix the patches were for is in the fork, and `npm run verify:fork` proved the
+  fork renders identically to upstream where it did not mean to differ. Since 0.2.0 upstream's
+  host cannot run our engine, and `npm run verify:golden` holds every fixture to the output
+  recorded from the last engine it could (D13).
   - [x] **P0** no `//invalid.site/img-not-found.png` — an outbound request on every failed render, from an offline-first plugin
   - [x] **P1** no `.set(ye.slice(0))` — −68.75 MiB transient per render
   - [x] **P2** `WebAssembly.compile` hoisted — no recompiling the wasm every render
@@ -70,6 +72,10 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] `\nonstopmode` injection — TeX used to reach the interactive `? ` prompt and suspend the asyncify'd wasm forever. **Root of #18 #23 #27 #39 #51 #82 #85 #89** (~22 reporters)
 - [x] Generated inventory (bundled files, package versions, capabilities) — drives the settings table, the pre-flight lint and the error-card hints
 - [x] Delete `loadTikZJax` / `unloadTikZJax` / `loadTikZJaxAllWindows` / `getAllWindows` and the `window-open` handler
+- [x] No asyncify (0.2.0): the engine is optimised with `wasm-opt --mvp-features -O4` instead of upstream's asyncify step, 42% less TeX time over the fixtures in Node, and the same `core.dump` byte for byte (D14). TeX's jump out of every procedure on a fatal error is a call to `library.jumpOut`, which ends the run
+- [x] WebAssembly 1.0 only (0.2.0): `--mvp-features` in the build, and `scripts/wasm-mvp.mjs` decodes the committed engine in the tests and the freshly built one in the Engine workflow (D14)
+- [ ] **open** — after a jump out, TeX's `close_files_and_terminate` does not run, so the transcript stops at the error and a DVI begun before it would have no postamble. web2c's `jump_out` closes the files first; a change file appended to web2js's `changes/change-order` could do the same. No picture reaches it today: a fatal error comes before the one page is shipped
+- [ ] **open** — binaryen 132's -O4 measured 4% less TeX time than web2js's binaryen 99 on the same `out.wasm` (D14). It means installing a pinned binaryen in the engine image
 
 ## 3 · Block lifecycle
 
@@ -115,6 +121,7 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] `Overfull \hbox` never produces an error card
 - [x] Error card: message, offending line with a caret, capability-driven hint, collapsible log, Copy log / Retry / Docs — **closes #81 #100**. Since 0.1.5 the line is right behind a preamble of several lines, and a line in a preamble file is shown from that file
 - [x] Session-only poison set; never persisted
+- [x] A fatal error fails at once (0.2.0). "TeX capacity exceeded", an emergency stop and a hundredth error all end in TeX's `jump_out`, which the engine made with asyncify; the run then never ended, and the diagram waited for its timeout. Now the run ends there and the card shows TeX's message (`test/fixtures/tex/runaway-macro.tex`, D14)
 
 ## 6 · Mobile
 

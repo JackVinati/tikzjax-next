@@ -11,10 +11,12 @@
  * argument that a failure would then be upstream's rather than ours — but the fork now deliberately
  * FIXES upstream behaviour (a font outside dvi2html's built-in metric table threw out of openSync,
  * across the wasm frames, and killed the run; a single \mathfrak took the engine down). Measuring
- * against an engine we no longer ship would report our fixes as failures. `verify-fork.mjs` is what
- * proves fork and upstream agree wherever upstream works at all.
+ * against an engine we no longer ship would report our fixes as failures. Upstream's host cannot run
+ * this engine at all since it was built without asyncify; `verify-golden.mjs` holds every fixture to
+ * the output recorded from the last engine on which fork and upstream were shown to agree.
  *
- * It is also the harness the golden corpus uses: same inputs, same engine, byte-comparable output.
+ * What it writes to engine-build/out/smoke is the reference verify-worker compares the shipped worker
+ * with: same inputs, same engine, byte-comparable output.
  */
 import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
@@ -95,11 +97,16 @@ async function texify(source, dataset = {}) {
 	// itself — not the { module, instance } pair you get when passing bytes. Upstream passes
 	// bytes and recompiles 526 KB of wasm on every single render; compiling once is the win
 	// internal/DECISIONS.md D10 item 3 describes, and this is what it looks like.
-	const instance = await WebAssembly.instantiate(code, { library, env: { memory } });
-	await library.executeAsync(instance.exports);
-
-	const dvi = library.readFileSync('input.dvi').buffer;
-	library.deleteEverything();
+	let dvi;
+	try {
+		const instance = await WebAssembly.instantiate(code, { library, env: { memory } });
+		await library.executeAsync(instance.exports);
+		dvi = library.readFileSync('input.dvi').buffer;
+	} finally {
+		// After a run that wrote no DVI too, or the next fixture would start with this one's files
+		// still in the table of files TeX has opened.
+		library.deleteEverything();
+	}
 
 	let html = '';
 	const sink = new Writable({

@@ -153,15 +153,13 @@ jobs:
         # would otherwise notice.
         run: npm run smoke
 
-      - name: The fork still matches upstream
-        # engine-src/library.ts is a fork of a WebAssembly host. It is only defensible if it can
-        # show it changed nothing observable, everywhere it did not mean to.
-        run: npm run verify:fork
-
       - name: Every fixture renders what the golden corpus recorded
-        # Recorded from the 0.1.5 engine, whose output verify:fork had shown to be upstream's. A
-        # rebuilt engine that changes any fixture's DVI, transcript or SVG fails here, unless the
-        # commit that changed it recorded the new output and said why (internal/DECISIONS.md D13).
+        # engine-src/library.ts is a fork of a WebAssembly host, and the engine is built differently
+        # from upstream's. Both are only defensible if they can show they changed nothing observable
+        # where they did not mean to. The corpus was recorded from the 0.1.5 engine, whose output
+        # verify-fork had shown to be upstream's; a rebuilt engine that changes any fixture's DVI,
+        # transcript or SVG fails here, unless the commit that changed it recorded the new output and
+        # said why (internal/DECISIONS.md D13).
         run: npm run verify:golden
 
       - name: The shipped worker renders identically

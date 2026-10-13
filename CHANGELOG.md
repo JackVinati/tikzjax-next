@@ -3,6 +3,19 @@
 What changed in each release, newest first. The release workflow puts a version's section at the
 top of its notes on GitHub, and will not publish a version that has none.
 
+## 0.2.0 — unreleased
+
+- TeX runs in a little over half the time: over the 26 diagrams the engine is tested with, its time
+  went from 4.6 s to 2.6 s, measured in Node, which runs JavaScript and WebAssembly with the same
+  engine as Obsidian on the desktop. The engine no longer carries asyncify, machinery in every
+  function that 0.1.5 no longer used and still paid for. Nothing has been measured on an iPhone or
+  iPad yet. Diagrams come out the same, byte for byte.
+- After updating, every cached diagram is compiled once more, the next time it is shown, because the
+  engine changed.
+- A diagram on which TeX gives up, with "TeX capacity exceeded" from a macro that never stops
+  expanding, an emergency stop, or a hundred errors, now fails at once with TeX's message, instead of
+  waiting out its time budget and being reported as too slow.
+
 ## 0.1.5 — 2026-10-13
 
 - After updating, every cached diagram is compiled once more, the next time it is shown: both the

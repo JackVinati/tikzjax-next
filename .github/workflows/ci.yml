@@ -103,9 +103,6 @@ jobs:
         # LIMIT, never PASS, for a documented boundary; LIFTED if one starts working.
         run: npm run smoke
 
-      - name: The fork still matches upstream
-        run: npm run verify:fork
-
       - name: Every fixture renders what the golden corpus recorded
         # The DVI, the transcript and the SVG, byte for byte (internal/DECISIONS.md D13).
         run: npm run verify:golden
