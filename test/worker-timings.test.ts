@@ -86,9 +86,12 @@ describe("the worker's timings", () => {
 	}, 60_000);
 
 	it('come with a failure too, which spent its time all the same', async () => {
-		// No page of output, so no DVI to draw.
-		const reply = await send('\\relax');
+		// TeX stops at the missing file before any page, so there is no DVI to draw, and no time
+		// spent drawing one. Not `\relax`, which this used to send: \end{document} ships an empty
+		// page, the worker draws it, and the time that takes rounds to 0 or 1 ms by chance.
+		const reply = await send('\\input{nosuchfile}');
 		expect(reply.type).toBe('error');
+		expect(reply.log).toContain('No pages of output.');
 		expectSane(reply);
 		expect(reply.timings?.passes).toBe(1);
 		expect(reply.timings?.svgMs).toBe(0);
