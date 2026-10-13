@@ -463,8 +463,8 @@ D10 says there is no blob to patch, and there is not: the shipped worker is our 
 BUILD still runs upstream's `web2js` and `tikzjax` repositories to produce the engine, and two of
 their files are wrong for what we ask of them. Both are patched in `build-engine.sh`, each guarded
 by a grep before and a grep after, so a silent no-op fails the build rather than shipping something
-subtly broken. A third patch, added in 0.1.5, is to an npm package the worker bundles, and is
-applied by the bundler (3, below).
+subtly broken. Two more, added in 0.1.5, are to an npm package the worker bundles, and are applied
+by the bundler (3 and 4, below).
 
 **1. `tikzjax/genTexFiles.js` reads every bundled file as UTF-8.**
 
@@ -512,6 +512,29 @@ the worker, smoke, verify-fork and scan-native. All 17 SVGs that rendered before
 after it, and all 112 fonts in dvi2html's table end on a character of real width, so none reads a
 character that is not there. The upstream patch is prepared; when a release includes it, this one
 goes.
+
+**4. `@drgrice1/dvi2html` has no glyph for some characters it has metrics for.**
+
+It draws character c of a font as a codepoint of that font's BaKoMa face, looked up in a table its
+`tools/glyphs.js` generates by matching each BaKoMa glyph's name with the name `dvips-all.enc` gives
+the character. Where the two names differ the character has no entry, and `putText` fails on it with
+"Cannot read properties of undefined (reading 'toString')". Of the characters its 112 fonts have
+metrics for, 302 have no entry: character 32 of the roman, bold, slanted, italic and sans text
+fonts, the stroke LaTeX's `\L` and `\l` set over an L and an l, so every Ł and ł failed; character
+36 of the text italics, which is £ there where the upright fonts have $; the symbols of `lasy`; and
+some of `cmtex` and `cmvtt`.
+
+BaKoMa puts character c of every face at one codepoint: U+F0A1 + c below 10, U+F0A3 + c up to 32,
+U+F000 + c up to 126, U+F0C4 for 127. Measured against the shipped faces, the table points at the
+same glyph as that rule for 13,120 of the 13,128 characters it has — the eight others are in
+`cmtex` and `cmvtt`, and stay as the table has them — and each of the 302 is in its face at that
+codepoint. The same plugin makes the lookup fall back to it, only where the table has no entry, so
+a character that drew before draws exactly as it did. It is guarded like 3: exactly one match
+before, present after. All 21 SVGs that rendered before are byte-identical after it, and the
+`l-stroke` fixture draws Ł and ł in roman, bold, italic and sans. In typewriter type TeX itself sets
+`cmtt`'s character 32 for the stroke, which in that font is the visible space `␣`: that is in the
+DVI, so the converter is right to draw it. The fix belongs in `tools/glyphs.js`, where it would
+settle the eight as well, and goes upstream in the same PR as 3.
 
 **Why patch rather than fork these two as well.** They run at build time, in a container, and their
 output is checked by everything downstream: the dump has to be exactly `pages × 65536` bytes, 21

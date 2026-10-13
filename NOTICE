@@ -43,9 +43,11 @@ drgrice1/web2js                                               GPL-3.0
 
 @drgrice1/dvi2html                                            GPL-3.0
   https://github.com/drgrice1/dvi2html
-  Converts TeX's DVI output to SVG. Bundled from npm with one build-time
-  patch: its TFM reader reads the last character of every font
-  (scripts/dvi2html-patch.mjs; offered upstream).
+  Converts TeX's DVI output to SVG. Bundled from npm with two build-time
+  patches (scripts/dvi2html-patch.mjs), both to be offered upstream: its TFM
+  reader reads the last character of every font, and its glyph lookup falls
+  back to the BaKoMa face's own codepoint for a character its table has no
+  entry for (the stroke of LaTeX's \L and \l, the italic pound sign).
 
 TeX                                                           Knuth licence
   Copyright (C) 1982 Donald E. Knuth.
