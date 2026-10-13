@@ -312,40 +312,20 @@ function compareVersions(a: string, b: string): number {
 const MAX_REPORTED_CHARS = 5;
 
 /**
- * Characters above Latin-1 that this engine cannot typeset — which is not every character above
- * Latin-1.
- *
- * The source reaches TeX as UTF-8 (engine-src/worker.ts writes input.tex through TextEncoder), and
- * the format's LaTeX reads UTF-8 by default: it reassembles each character from its bytes and
- * builds a great many of them out of Computer Modern glyphs and accents — Dvořák, Erdős, İstanbul,
- * the ﬁ ligature, and the curly quotes, dashes and ellipsis that iOS substitutes as you type. This
- * rule used to warn about every codepoint above U+00FF on the theory that an 8-bit engine prints
- * them all as garbage, which put a false warning under those diagrams, and on a phone under nearly
- * every one.
- *
- * Which characters are native is measured from the engine build, not written down here:
- * scripts/scan-native-unicode.mjs renders each one through the committed engine and writes
- * ./native-unicode. It is the same reason `caps` is generated — a hand-kept list would be true of
- * one engine and quietly wrong after the next rebuild. What remains genuinely fails: TeX leaves
- * Greek, Cyrillic and CJK out with "Unicode character … not set up for use with LaTeX", and €, ™
- * and → compile into a TS1 font the SVG converter cannot draw, which loses the whole diagram.
- *
- * Latin-1 is covered too, because the scan measured it and most of it is native but not all: ° and
- * × need the same TS1 font as €, and ä, ö, ü — any letter with a dieresis — fail inside the SVG
- * converter, which has no metrics for the accent. The cause there is the converter, and \"u
- * written by hand fails the same way, so the warning cannot offer a spelling that works. It says
- * so instead, before the user meets a blank diagram: the alternative was silence here and a card
- * that, until the worker's message was fixed, named a font called "metric".
+ * The worker bridges non-native label text. Warn only in structural positions where substituting
+ * an SVG text marker cannot help. The native set is still measured, including Latin-1: neither a
+ * font fallback nor inputenc makes a non-native character usable as a TeX identifier.
  */
 function checkEncoding(text: string, out: Diagnostic[]): void {
 	const offenders = new Map<string, number>();
+	const structural = structuralUnicodePositions(text);
 
 	let i = 0;
 	for (const ch of text) {
 		// `for..of` iterates codepoints, so an astral character is one entry rather than two
 		// surrogate halves — otherwise the report would name characters that do not exist.
 		const cp = ch.codePointAt(0) ?? 0;
-		if (cp > 0x7f && !isNativeUnicode(cp) && !offenders.has(ch)) offenders.set(ch, i);
+		if (structural[i] && cp > 0x7f && !isNativeUnicode(cp) && !offenders.has(ch)) offenders.set(ch, i);
 		i += ch.length;
 	}
 	if (offenders.size === 0) return;
@@ -358,36 +338,119 @@ function checkEncoding(text: string, out: Diagnostic[]): void {
 
 	out.push({
 		kind: 'warning',
-		message: `Characters this engine cannot typeset: ${listed.join(', ')}${rest > 0 ? ` and ${rest} more` : ''}.`,
+		message: `Unicode outside supported label text: ${listed.join(', ')}${rest > 0 ? ` and ${rest} more` : ''}.`,
 		line: lineOf(text, first),
-		// No inputenc here, although the old hint offered it: the format already reads UTF-8, and
-		// what stops these characters is that nothing defines them, which inputenc does not change.
-		// The examples are ones this engine draws; `\"o` and `\textdegree` were in this hint, and on
-		// this engine neither renders.
-		hint: encodingHint([...offenders.keys()]),
+		hint:
+			'The Unicode bridge handles literal label text, not node or coordinate names, option keys, ' +
+			'\\label/\\ref identifiers, \\verb/\\detokenize arguments or macro names. ' +
+			'Use ASCII in these positions and put Unicode in the displayed label.',
 	});
 }
 
-/**
- * Advice that is true for the characters actually found. A dieresis has no spelling that works on
- * this engine, so offering `\"u` — the old hint did — would send the user from one blank diagram to
- * another; ° and × do have math equivalents that render.
- */
-function encodingHint(found: string[]): string {
-	const dieresis = found.some((ch) => ch.normalize('NFD').includes('̈'));
-	const parts = [
-		'The engine typesets most accented letters, curly quotes and dashes itself, but not these: TeX either ' +
-			'leaves each one out with an error or produces a diagram the SVG converter cannot draw.',
-	];
-	if (dieresis) {
-		parts.push(
-			'Letters with a dieresis (ä, ö, ü) cannot be drawn at all yet, however they are written — \\"u fails the same way.',
-		);
+/** Mark syntax, retaining offsets for line diagnostics; this is a lint, not a TeX parser. */
+function structuralUnicodePositions(text: string): Uint8Array {
+	const marked = new Uint8Array(text.length);
+	const mark = (start: number, end: number) => marked.fill(1, start, end);
+
+	// An odd number of backslashes introduces a command; even ones introduce a line break.
+	for (const m of text.matchAll(/\\+[A-Za-z@\u0080-\u{10FFFF}]+/gu)) {
+		const slashes = /^\\+/.exec(m[0])?.[0].length ?? 0;
+		if (slashes % 2 === 0) continue;
+		mark(m.index, m.index + m[0].length);
 	}
-	parts.push(
-		'Where TeX has a command, write that instead: $^\\circ$, $\\times$, $\\Omega$, $\\rightarrow$.',
-	);
-	return parts.join(' ');
+	for (const m of text.matchAll(/\\(?:label|ref|pageref|eqref|autoref|detokenize)\s*\{/g)) {
+		if (isEscaped(text, m.index)) continue;
+		let end = m.index + m[0].length;
+		let depth = 1;
+		while (end < text.length && depth > 0) {
+			if (!isEscaped(text, end)) {
+				if (text[end] === '{') depth++;
+				if (text[end] === '}') depth--;
+			}
+			end++;
+		}
+		mark(m.index, end);
+	}
+	for (const m of text.matchAll(/\\verb\*?([^A-Za-z\s])/g)) {
+		if (isEscaped(text, m.index)) continue;
+		const start = m.index + m[0].length;
+		const end = text.indexOf(m[1] ?? '', start);
+		mark(start, end === -1 ? text.length : end);
+	}
+
+	// Node names and path coordinates occur outside label braces. In option lists only keys (and
+	// node-reference values) are structural; label values and tikz-cd's quoted labels remain text.
+	let braces = 0;
+	let coordinate = -1;
+	const keyLists = new Set<number>();
+	for (const m of text.matchAll(/\\(?:tikzset|pgfkeys|pgfplotsset)\s*\{/g)) {
+		if (!isEscaped(text, m.index)) keyLists.add(m.index + m[0].length - 1);
+	}
+	const options: Array<{ start: number; keyEnd: number; depth: number; close: string; quoted: boolean }> =
+		[];
+	const markOption = (end: number) => {
+		const option = options[options.length - 1];
+		if (option === undefined || text.slice(option.start, end).trimStart().startsWith('"')) return;
+		mark(option.start, option.keyEnd < 0 ? end : option.keyEnd);
+		if (option.keyEnd < 0) return;
+		const key = text.slice(option.start, option.keyEnd).trim();
+		if (/^(?:name|alias|at|fit)$/.test(key)) mark(option.keyEnd + 1, end);
+		else if (/^(?:above|below|left|right)(?: (?:left|right))?$/.test(key)) {
+			const reference = /\bof\s+/.exec(text.slice(option.keyEnd + 1, end));
+			if (reference) mark(option.keyEnd + 1 + reference.index + reference[0].length, end);
+		}
+	};
+	for (let i = 0; i < text.length; i++) {
+		if (isEscaped(text, i)) continue;
+		const ch = text[i];
+		const option = options[options.length - 1];
+		if (option !== undefined && braces === option.depth && ch === '"') option.quoted = !option.quoted;
+		if (option?.quoted) continue;
+		if (ch === '{') {
+			const style =
+				option !== undefined &&
+				option.keyEnd >= 0 &&
+				/\/\.(?:style|append style|prefix style)\s*$/.test(text.slice(option.start, option.keyEnd));
+			braces++;
+			if (keyLists.has(i) || style)
+				options.push({ start: i + 1, keyEnd: -1, depth: braces, close: '}', quoted: false });
+			continue;
+		}
+		if (ch === '}') {
+			if (option?.close === '}' && braces === option.depth) {
+				markOption(i);
+				options.pop();
+			}
+			braces = Math.max(0, braces - 1);
+			continue;
+		}
+		if (option !== undefined && braces === option.depth) {
+			if (ch === '=' && option.keyEnd < 0) option.keyEnd = i;
+			else if (ch === ',' || ch === option.close) {
+				markOption(i);
+				if (ch === option.close) options.pop();
+				else {
+					option.start = i + 1;
+					option.keyEnd = -1;
+				}
+			}
+		}
+		if (braces > 0) continue;
+		if (ch === '(') coordinate = i + 1;
+		else if (ch === ')' && coordinate >= 0) {
+			mark(coordinate, i);
+			coordinate = -1;
+		} else if (ch === '[') {
+			options.push({ start: i + 1, keyEnd: -1, depth: braces, close: ']', quoted: false });
+		}
+	}
+	return marked;
+}
+
+function isEscaped(source: string, at: number): boolean {
+	let slashes = 0;
+	for (let i = at - 1; i >= 0 && source[i] === '\\'; i--) slashes++;
+	return slashes % 2 === 1;
 }
 
 function codepoint(ch: string): string {

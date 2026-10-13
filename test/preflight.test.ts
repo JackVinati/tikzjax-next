@@ -70,7 +70,7 @@ describe('preflight', () => {
 \\usetikzlibrary{arrows.meta}
 \\pgfplotsset{compat=1.18}
 \\pgfmathsetmacro{\\epsilon}{0.2}
-\\node {ζ};`;
+\\node (ζ) {label};`;
 		const found = preflight(source, baked(), caps());
 
 		expect(found.length).toBe(6);
@@ -297,87 +297,71 @@ describe('preflight', () => {
 		});
 	});
 
-	describe('characters the engine cannot typeset (#19 #36 #53)', () => {
-		it('reports the offending characters and where they start', () => {
-			const found = preflight('\\begin{document}\n\\node {Ω and →};', baked(), caps());
-			expect(found).toHaveLength(1);
-			expect(found[0]?.line).toBe(2);
-			expect(found[0]?.message).toContain('U+03A9');
-			expect(found[0]?.message).toContain('U+2192');
-		});
-
-		// Latin-1 is measured like everything else: é renders, ° and ä do not — ° needs a TS1 font the
-		// SVG converter cannot draw, and the converter has no metrics for the dieresis accent at all.
-		it('accepts the Latin-1 letters the engine draws', () => {
-			expect(preflight('\\node {café à ça, résumé};', baked(), caps())).toEqual([]);
-		});
-
-		it('names ° and × with the math spelling that does render', () => {
-			const found = preflight('\\node {45° and 2×3};', baked(), caps());
-			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain('U+00B0');
-			expect(found[0]?.message).toContain('U+00D7');
-			expect(found[0]?.hint).toContain('$^\\circ$');
-			expect(found[0]?.hint).toContain('$\\times$');
-			expect(found[0]?.hint).not.toContain('dieresis');
-		});
-
-		it('says plainly that a dieresis cannot be drawn, rather than suggesting \\"u', () => {
-			const found = preflight('\\node {Müller}; \\node {Ärger};', baked(), caps());
-			expect(found).toHaveLength(1);
-			expect(found[0]?.hint).toContain('dieresis');
-			expect(found[0]?.hint).toContain('\\"u fails the same way');
-		});
-
-		it('counts an astral character once, not as two surrogate halves', () => {
-			const found = preflight('\\node {\u{1F600}};', baked(), caps());
-			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain('U+1F600');
-			expect(found[0]?.message).not.toContain('U+D83D');
-		});
-
-		it('ignores characters inside a comment, which TeX discards', () => {
-			expect(preflight('% résumé — αβγ\n\\draw (0,0);', baked(), caps())).toEqual([]);
-		});
-
-		// Each of these was measured rendering cleanly on the committed engine. The curly quotes, the
-		// dash and the ellipsis are what iOS's smart punctuation types in place of the ASCII ones, so a
-		// warning on them sat under nearly every diagram written on a phone.
-		it.each(['Dvořák', 'Erdős', 'İstanbul', 'it’s “ok”', '2010–2020', 'wait…', 'ﬁ'])(
-			'says nothing about %s, which the engine typesets itself',
+	describe('Unicode outside bridged label text (#19 #36 #53)', () => {
+		it.each(['开始', 'Привет', 'Ωμέγα', '😀', 'Müller Ärger', '45° and 2×3', 'Dvořák it’s 2010–2020'])(
+			'accepts the label %s without an encoding warning',
 			(label) => {
 				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
 			},
 		);
 
 		it.each([
-			['开始', 'U+5F00'],
-			['Привет', 'U+041F'],
-			['Ωμέγα', 'U+03A9'],
-		])('still warns about %s, which TeX leaves out with an error', (label, first) => {
-			const found = preflight(`\\node {${label}};`, baked(), caps());
+			String.raw`\node (开始) {中文};`,
+			String.raw`\coordinate (开始) at (0,0);`,
+			String.raw`\draw (开始) -- (end);`,
+			String.raw`\node[开始=red] {中文};`,
+			String.raw`\node[name=开始] {中文};`,
+			String.raw`\node[alias=开始] {中文};`,
+			String.raw`\node[at={(开始)}] {中文};`,
+			String.raw`\node[below=of 开始] {中文};`,
+			String.raw`\node[fit={(开始) (end)}] {中文};`,
+			String.raw`\label{开始}\ref{开始}`,
+			String.raw`\detokenize{foo{开始}}`,
+			String.raw`\verb|开始|`,
+			String.raw`\verb*+开始+`,
+			String.raw`\def\开始{x}`,
+		])('warns about unsupported syntax in %s', (text) => {
+			const found = preflight(text, baked(), caps());
 			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain(first);
+			expect(found[0]?.message).toContain('U+5F00');
+			expect(found[0]?.hint).toContain('ASCII');
 		});
 
-		it('names only the characters that fail, not the native ones beside them', () => {
-			const found = preflight('\\node {Dvořák → Erdős};', baked(), caps());
+		it('reports the structural position rather than earlier bridged labels', () => {
+			const found = preflight('\\node {开始};\n\\node (开始) {Ω and →};', baked(), caps());
 			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain('U+2192');
-			expect(found[0]?.message).not.toContain('U+0159');
-			expect(found[0]?.message).not.toContain('U+0151');
+			expect(found[0]?.line).toBe(2);
+			expect(found[0]?.message).not.toContain('U+03A9');
+			expect(found[0]?.message).not.toContain('U+2192');
 		});
 
-		// The old hint offered `\usepackage[utf8]{inputenc}` to "reassemble" the bytes, but the format
-		// already reads UTF-8 — what stops these characters is that nothing defines them. And it
-		// suggested \"o and \textdegree, neither of which renders on this engine.
-		it('suggests only rewrites that render here, and never inputenc', () => {
-			const withInputenc = caps({ files: new Set(['inputenc.sty']) });
-			const hint = preflight('\\node {Ω};', baked(), withInputenc)[0]?.hint ?? '';
-			expect(hint).toContain('$\\Omega$');
-			expect(hint).not.toContain('inputenc');
-			expect(hint).not.toContain('\\"o');
-			expect(hint).not.toContain('\\textdegree');
+		it('counts astral characters once and limits the list of offenders', () => {
+			const found = preflight('\\node (😀开始结束甲乙) {};', baked(), caps());
+			expect(found[0]?.message).toContain('U+1F600');
+			expect(found[0]?.message).not.toContain('U+D83D');
+			expect(found[0]?.message).toContain('and 2 more');
+		});
+
+		it('ignores comments and Unicode in option values, quoted labels and label parentheses', () => {
+			const text =
+				'% \\node (开始) {};\n' +
+				'\\node[draw,label={中文},text=red] {开始 (结束) \\%中文}; \\arrow["中文"];';
+			expect(preflight(text, baked(), caps())).toEqual([]);
+		});
+
+		it('checks nested style keys without warning about nested label values', () => {
+			const found = preflight('\\tikzset{foo/.style={draw,开始=red,label={中文}}}', baked(), caps());
+			expect(found).toHaveLength(1);
+			expect(found[0]?.message).toContain('U+5F00');
+			expect(found[0]?.message).not.toContain('U+4E2D');
+			expect(preflight('\\tikzset{foo/.style={draw,label={中文}}}', baked(), caps())).toEqual([]);
+		});
+
+		it('retains the measured distinction for Latin-1 and native punctuation', () => {
+			expect(preflight('\\node (café) {中文};', baked(), caps())).toEqual([]);
+			const found = preflight('\\node (Müller) {45°};', baked(), caps());
+			expect(found[0]?.message).toContain('U+00FC');
+			expect(found[0]?.message).not.toContain('U+00B0');
 		});
 	});
 

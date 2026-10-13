@@ -151,6 +151,10 @@ plain TikZ, `pgfplots` including its libraries, `circuitikz`, `chemfig`, `tikz-c
 | `chemfig`'s `\schemestart` loses bonds | The bonds are already missing in the DVI, before any JavaScript runs. |
 | `tikz-feynman` | LuaTeX only. `tikz-feynhand` is bundled and works. |
 | Unicode in control-sequence names and structural arguments | The engine is 8-bit. Literal Unicode text in diagram labels is bridged into the output SVG and supports CJK, Cyrillic, IPA and emoji; TeX syntax itself must remain ASCII. |
+| Unicode label layout | Long CJK text in a `text width` node cannot wrap. Bold and italic are not preserved. Proxy widths count codepoints rather than grapheme clusters, so ZWJ emoji reserve several em. |
+| Unicode font portability | Restored text uses the platform `sans-serif` font; exported SVGs do not embed that font. |
+| Unicode from preamble files | Only literal block source is bridged; Unicode introduced through a preamble file is not. |
+| Dieresis written as a TeX accent (`\"u`) | Literal `ü` is bridged, but the accent command still uses metrics the SVG converter does not have. |
 | Obsidian Sync Standard does not sync `main.js` | It is 11.7 MB, and that plan caps a file at 5 MB. The plugin still installs from the community browser or a release on every device; only syncing the plugin folder itself is affected. The size is the TeX engine — a 156 MiB core dump, gzipped and base64'd — and shrinking it means a smaller engine, not tighter code. |
 | Obsidian Publish | Publish runs no community plugins. Save the diagram as an SVG attachment, or finalize the note, and the result publishes as ordinary content. |
 

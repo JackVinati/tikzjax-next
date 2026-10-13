@@ -525,10 +525,26 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 		// `transcript` here is that pass's own, not a later run's.
 		return { type: 'error', id, ...diagnose(transcript, missing), log, missing, durationMs };
 	}
+	let svg: string;
+	try {
+		svg = restoreUnicode(reported.svg, unicode.runs);
+	} catch (error) {
+		return {
+			type: 'error',
+			id,
+			kind: 'empty-output',
+			message: error instanceof Error ? error.message : String(error),
+			log,
+			missing,
+			durationMs,
+			firstError: diagnostics.firstError,
+			line: diagnostics.line,
+		};
+	}
 	return {
 		type: 'ok',
 		id,
-		svg: restoreUnicode(reported.svg, unicode.runs),
+		svg,
 		log,
 		missing,
 		durationMs,

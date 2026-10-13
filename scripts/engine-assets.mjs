@@ -19,9 +19,9 @@ export const engineOutDir = (root) => join(root, 'engine-build', 'out');
  * rendered bytes without changing the id, and every cached diagram built by the old code would have
  * gone on being served after a fix. A list that has to be kept in step with imports is the bug.
  *
- * The original three come first in their original order and anything else follows sorted, so for
- * today's tree the id is byte-for-byte what it was and no user's cache is invalidated by this change
- * alone. engine-src/upstream/ is a directory, the pristine reference copy, and is never bundled.
+ * The original three come first in their original order and other engine files follow sorted.
+ * The worker also reads the generated native Unicode table outside engine-src, so include it.
+ * engine-src/upstream/ is a directory, the pristine reference copy, and is never bundled.
  */
 export function engineSources(root) {
 	const legacyOrder = ['library.ts', 'worker.ts', 'protocol.ts'];
@@ -29,8 +29,12 @@ export function engineSources(root) {
 		.filter((e) => e.isFile() && e.name.endsWith('.ts'))
 		.map((e) => e.name);
 	return [
-		...legacyOrder.filter((f) => present.includes(f)),
-		...present.filter((f) => !legacyOrder.includes(f)).sort(),
+		...legacyOrder.filter((f) => present.includes(f)).map((f) => join('engine-src', f)),
+		...present
+			.filter((f) => !legacyOrder.includes(f))
+			.sort()
+			.map((f) => join('engine-src', f)),
+		join('src', 'source', 'native-unicode.ts'),
 	];
 }
 
@@ -84,7 +88,7 @@ function readVersions(out) {
 	return packages;
 }
 
-export function buildEngineAssets(root) {
+export function buildEngineAssets(root, nativeUnicodeSource) {
 	const out = engineOutDir(root);
 	const dist = join(out, 'dist');
 
@@ -113,7 +117,16 @@ export function buildEngineAssets(root) {
 		// main.js, which is the one thing a reproducible build has to rule out. It also meant a user
 		// switching between a locally built plugin and a released one recompiled every diagram for no
 		// reason, since the id is a cache-key input.
-		hash.update(readFileSync(join(root, 'engine-src', file), 'utf8').replace(/\r\n/g, '\n'));
+		const native = file === join('src', 'source', 'native-unicode.ts');
+		let source = (
+			native && nativeUnicodeSource !== undefined
+				? nativeUnicodeSource
+				: readFileSync(join(root, file), 'utf8')
+		).replace(/\r\n/g, '\n');
+		// The generated table records this very hash. Exclude only that stamp to avoid a cycle;
+		// its ranges and executable code still invalidate cached diagrams when they change.
+		if (native) source = source.replace(/^ \* Engine    ENGINE_ID [0-9a-f]+$/m, ' * Engine    ENGINE_ID');
+		hash.update(source);
 	}
 	const engineId = hash.digest('hex');
 

@@ -482,7 +482,8 @@ export function isNativeUnicode(codepoint: number): boolean {
 `;
 }
 
-const engineId = buildEngineAssets(root).engineId;
+// Hash the newly measured table, not a stale copy on disk, with a placeholder for its own stamp.
+const engineId = buildEngineAssets(root, renderModule('0'.repeat(64))).engineId;
 const generated = renderModule(engineId);
 
 console.log(

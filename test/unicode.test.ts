@@ -18,7 +18,7 @@ describe('8-bit TeX Unicode bridge', () => {
 		expect(result.source.match(/\\hbox to1em/g)).toHaveLength(1);
 	});
 
-	it('leaves Latin-1 and comments byte-for-byte unchanged', () => {
+	it('leaves native characters and comments byte-for-byte unchanged', () => {
 		const source = '% 中文说明\n\\node {café \\% 中文};';
 		const result = bridgeUnicode(source);
 
@@ -27,29 +27,70 @@ describe('8-bit TeX Unicode bridge', () => {
 		expect(result.source).toContain('café');
 	});
 
-	it('does no work when a source is already 8-bit-safe', () => {
-		const source = '\\node {café};';
+	it('does no work when every character renders natively', () => {
+		const source = '\\node[draw]{Dvořák it’s 2010–2020 café Erdős İstanbul … ﬁ ﬂ};';
 		expect(bridgeUnicode(source)).toEqual({ source, preamble: '', runs: [] });
+	});
+
+	it('bridges unsupported Latin-1 while retaining native characters between runs', () => {
+		const result = bridgeUnicode('\\node {Müller 45° äöü ×};');
+		expect(result.runs).toEqual(['ü', '°', 'äöü', '×']);
+		expect(result.source.match(/\\hbox to1em/g)).toHaveLength(6);
+	});
+
+	it('leaves Unicode macro names alone after an odd number of backslashes', () => {
+		for (const count of [1, 3]) {
+			const source = `\\def${'\\'.repeat(count)}开始{x}`;
+			expect(bridgeUnicode(source)).toEqual({ source, preamble: '', runs: [] });
+		}
+		expect(bridgeUnicode('\\\\开始').runs).toEqual(['开始']);
 	});
 
 	it('restores text and keeps the converter geometry and paint', () => {
 		const svg =
-			'<svg><g data-tikzjax-unicode="0">' +
+			'<svg><g data-tikzjax-unicode="0" data-quad="10.0pt">' +
 			'<text x="12" y="34" font-family="cmr10" font-size="10" fill="#c00">M</text>' +
 			'<text x="22" y="34" font-family="cmr10" font-size="10" fill="#c00">M</text>' +
 			'</g></svg>';
 
 		expect(restoreUnicode(svg, ['开始'])).toBe(
-			'<svg><g data-tikzjax-unicode="0"><text x="12" y="34" font-family="sans-serif" font-size="10" fill="#c00">开始</text></g></svg>',
+			'<svg><g data-tikzjax-unicode="0" data-quad="10.0pt"><text x="22" y="34" font-family="sans-serif" font-size="10" fill="#c00" text-anchor="middle">开始</text></g></svg>',
 		);
 	});
 
 	it('restores every occurrence when TeX expands the same text more than once', () => {
-		const marker = '<g data-tikzjax-unicode="0"><text font-family="cmr10" font-size="10">M</text></g>';
+		const marker =
+			'<g data-tikzjax-unicode="0" data-quad="10pt"><text x="0" font-family="cmr10" font-size="10">M</text></g>';
 		expect(restoreUnicode(marker + marker, ['Ω'])).toBe(
-			'<g data-tikzjax-unicode="0"><text font-family="sans-serif" font-size="10">Ω</text></g>'.repeat(
+			'<g data-tikzjax-unicode="0" data-quad="10pt"><text x="5" font-family="sans-serif" font-size="10" text-anchor="middle">Ω</text></g>'.repeat(
 				2,
 			),
 		);
+	});
+
+	it.each(['Привет', 'Ωμέγα', 'ɪˈpɑ', '😀'])(
+		'centres %s using the TeX quad and codepoint count',
+		(text) => {
+			const svg =
+				'<svg><g data-tikzjax-unicode="0" data-quad="12.5pt"><text x="-10" y="20" transform="rotate(30)">M</text></g></svg>';
+			const restored = restoreUnicode(svg, [text]);
+			expect(restored).toContain(`x="${-10 + ([...text].length * 12.5) / 2}"`);
+			expect(restored).toContain('text-anchor="middle"');
+			expect(restored).toContain('transform="rotate(30)"');
+		},
+	);
+
+	it('escapes XML and replaces forbidden scalars without breaking astral characters', () => {
+		const svg = '<g data-tikzjax-unicode="0" data-quad="10pt"><text x="0">M</text></g>';
+		const restored = restoreUnicode(svg, ['<&>\uFFFE\uFFFF\uD800x\uDC00\u0001😀']);
+		expect(restored).toContain('&lt;&amp;&gt;\uFFFD\uFFFD\uFFFDx\uFFFD\uFFFD😀</text>');
+	});
+
+	it('fails instead of returning broken group markup or an unrecoverable marker', () => {
+		expect(() => restoreUnicode('<svg><g></svg>', ['开始'])).toThrow('unbalanced');
+		expect(() => restoreUnicode('<g data-tikzjax-unicode="0" data-quad="10pt"></g>', ['开始'])).toThrow(
+			'position',
+		);
+		expect(restoreUnicode('<svg><g></svg>', [])).toBe('<svg><g></svg>');
 	});
 });
