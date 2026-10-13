@@ -36,15 +36,29 @@ function readText(path: string): string {
 	return new Function(`${out.text}\nreturn TEXT;`)() as string;
 }
 
-/** `virtual:engine-assets` with one bundled TeX file whose base64 contents are `texFile`. */
-const stubAssets = (texFile = 'AAAA'): Plugin => ({
+/** The core dump as the worker carries it: its size, its non-zero runs, and their bytes. */
+interface StubDump {
+	size: number;
+	runs: number[];
+	gz: string;
+}
+
+const STUB_DUMP: StubDump = { size: 65536, runs: [16, 4], gz: 'AAAA' };
+
+/**
+ * `virtual:engine-assets` with one bundled TeX file whose base64 contents are `texFile`, and the
+ * core dump `dump`.
+ */
+const stubAssets = (texFile = 'AAAA', dump = STUB_DUMP): Plugin => ({
 	name: 'stub-assets',
 	setup(build) {
 		build.onResolve({ filter: /^virtual:engine-assets$/ }, () => ({ path: 'assets', namespace: 'stub' }));
 		build.onLoad({ filter: /^assets$/, namespace: 'stub' }, () => ({
 			contents: [
 				`export const TEX_WASM_GZ = '';`,
-				`export const CORE_DUMP_GZ = '';`,
+				`export const CORE_DUMP_SIZE = ${dump.size};`,
+				`export const CORE_DUMP_RUNS = ${JSON.stringify(dump.runs)};`,
+				`export const CORE_DUMP_GZ = ${JSON.stringify(dump.gz)};`,
 				`export const TEX_FILES = ${JSON.stringify({ 'pgf.sty': texFile })};`,
 				`export const ENGINE_ID = ${JSON.stringify(ENGINE_ID_PLACEHOLDER)};`,
 				`export const INVENTORY = ${JSON.stringify({ engineId: ENGINE_ID_PLACEHOLDER })};`,
@@ -105,6 +119,22 @@ describe('ENGINE_ID', () => {
 		const before = await buildWorker(ROOT, { plugins: [stubAssets('AAAA')] });
 		const after = await buildWorker(ROOT, { plugins: [stubAssets('AAAB')] });
 		expect(after.engineId).not.toBe(before.engineId);
+	});
+
+	it('moves when the core dump changes, in its bytes, where they go, or its size', async () => {
+		// The dump ships as its non-zero runs (scripts/engine-assets.mjs `packCoreDump`), so the
+		// whole of it is the three of these together: zeros that became something, or something that
+		// moved, change the runs, and zeros added at the end change only the size.
+		const ids = new Set<string>();
+		for (const dump of [
+			STUB_DUMP,
+			{ ...STUB_DUMP, gz: 'AAAB' },
+			{ ...STUB_DUMP, runs: [17, 4] },
+			{ ...STUB_DUMP, size: 131072 },
+		]) {
+			ids.add((await buildWorker(ROOT, { plugins: [stubAssets('AAAA', dump)] })).engineId);
+		}
+		expect(ids.size).toBe(4);
 	});
 
 	it('moves when an npm package bundled into the worker changes', async () => {

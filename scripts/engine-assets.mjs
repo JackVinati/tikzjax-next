@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { join, resolve } from 'node:path';
 import esbuild from 'esbuild';
+import { gzip } from 'pako';
 import { dvi2htmlPatch } from './dvi2html-patch.mjs';
 
 export const engineOutDir = (root) => join(root, 'engine-build', 'out');
@@ -25,8 +26,87 @@ export function engineIsBuilt(root) {
  * because the archive is what ships.
  */
 export function readCoreDump(root) {
-	const dump = gunzipSync(readFileSync(join(engineOutDir(root), 'core.dump.gz')));
+	return inflated(readFileSync(join(engineOutDir(root), 'core.dump.gz')));
+}
+
+function inflated(archive) {
+	const dump = gunzipSync(archive);
 	return new Uint8Array(dump.buffer, dump.byteOffset, dump.length);
+}
+
+/**
+ * A run of zeros at least this long ends one of the dump's runs; a shorter one stays inside it.
+ *
+ * Splitting at every zero byte would cut the dump into thousands of runs to save a few zeros. With
+ * 4 KiB the committed dump is 28 runs and 21.5 MiB, against 10.9 MiB of bytes that are literally
+ * not zero: TeX's arrays are full of short zero stretches.
+ */
+const DUMP_GAP = 4096;
+
+/**
+ * The core dump as the worker carries it: the stretches of it that are not zero, back to back in
+ * `bytes`, and `runs`, an offset and a length for each, in order.
+ *
+ * 134 of the dump's 156.25 MiB are zero, and the memory a TeX run starts from is zero wherever the
+ * worker writes nothing (engine-src/core-dump.ts), so the zeros need not ship. They used to: the
+ * whole dump went into main.js gzipped, and every boot inflated all 156.25 MiB of it, half a
+ * second on the desktop and the worker's largest allocation, to keep 21.5 MiB of it.
+ *
+ * Each run starts at a byte that is not zero and ends after the last one that is, so the dump is
+ * `size` zeros with the runs written over them, and nothing is lost.
+ */
+export function packCoreDump(dump, gap = DUMP_GAP) {
+	const runs = [];
+	const n = dump.length;
+	let i = 0;
+	let total = 0;
+	while (i < n) {
+		while (i < n && dump[i] === 0) i++;
+		if (i === n) break;
+
+		const start = i;
+		let end;
+		for (;;) {
+			while (i < n && dump[i] !== 0) i++;
+			end = i;
+			while (i < n && dump[i] === 0 && i - end < gap) i++;
+			// The end of the dump, or a gap long enough to end the run on.
+			if (i === n || i - end >= gap) break;
+		}
+		runs.push(start, end - start);
+		total += end - start;
+	}
+
+	const bytes = new Uint8Array(total);
+	let at = 0;
+	for (let r = 0; r < runs.length; r += 2) {
+		bytes.set(dump.subarray(runs[r], runs[r] + runs[r + 1]), at);
+		at += runs[r + 1];
+	}
+	return { size: n, runs, bytes };
+}
+
+/** One encoding per dump, however many times a process builds the worker: a test does it a dozen. */
+const encodings = new Map();
+
+/**
+ * The committed core dump, packed (packCoreDump) and gzipped, as the worker string carries it.
+ *
+ * Gzipped by pako, not by node:zlib. What deflate emits is not fixed by any standard, only what it
+ * inflates to, and node:zlib is whichever zlib the running Node bundles, so another Node release
+ * could make another main.js from the same commit. pako is pinned in the lockfile and is the same
+ * JavaScript wherever it runs.
+ */
+export function encodeCoreDump(root) {
+	const archive = readFileSync(join(engineOutDir(root), 'core.dump.gz'));
+	const key = createHash('sha256').update(archive).digest('hex');
+	let encoding = encodings.get(key);
+	if (encoding === undefined) {
+		const { size, runs, bytes } = packCoreDump(inflated(archive));
+		encoding = { size, runs, gz: gzip(bytes, { level: 9 }) };
+		encodings.set(key, encoding);
+	}
+	return encoding;
 }
 
 /**
@@ -89,7 +169,7 @@ export function buildEngineAssets(root) {
 	const dist = join(out, 'dist');
 
 	const wasmGz = readFileSync(join(out, 'tex.wasm.gz'));
-	const dumpGz = readFileSync(join(out, 'core.dump.gz'));
+	const dump = encodeCoreDump(root);
 
 	const texFiles = {};
 	for (const entry of readdirSync(join(dist, 'tex_files')).sort()) {
@@ -116,7 +196,9 @@ export function buildEngineAssets(root) {
 
 	const source =
 		`export const TEX_WASM_GZ = ${JSON.stringify(wasmGz.toString('base64'))};\n` +
-		`export const CORE_DUMP_GZ = ${JSON.stringify(dumpGz.toString('base64'))};\n` +
+		`export const CORE_DUMP_SIZE = ${dump.size};\n` +
+		`export const CORE_DUMP_RUNS = ${JSON.stringify(dump.runs)};\n` +
+		`export const CORE_DUMP_GZ = ${JSON.stringify(Buffer.from(dump.gz).toString('base64'))};\n` +
 		`export const TEX_FILES = ${JSON.stringify(texFiles)};\n` +
 		`export const ENGINE_ID = ${JSON.stringify(ENGINE_ID_PLACEHOLDER)};\n` +
 		`export const INVENTORY = ${JSON.stringify(inventory)};\n`;
@@ -126,7 +208,7 @@ export function buildEngineAssets(root) {
 		inventory,
 		stats: {
 			wasmGz: wasmGz.length,
-			dumpGz: dumpGz.length,
+			dumpGz: dump.gz.length,
 			texFiles: names.length,
 			texFilesBytes: Object.values(texFiles).reduce((n, b) => n + b.length, 0),
 		},

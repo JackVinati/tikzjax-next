@@ -8,10 +8,10 @@
  * CHANGES FROM UPSTREAM (internal/DECISIONS.md D10):
  *  - assets are injected at build time instead of fetched from a urlRoot;
  *  - the WebAssembly.Module is compiled ONCE, not on every render;
- *  - no `coredump.slice(0)` — at pages=2500 that copy is 156.25 MiB per render — and the dump is
- *    inflated into one buffer rather than glued together from chunks into a second (./inflate);
- *  - each run's fresh Memory gets only the dump's non-zero runs, since it is zero everywhere else
- *    already (./core-dump);
+ *  - no `coredump.slice(0)` — at pages=2500 that copy is 156.25 MiB per render — and the dump
+ *    ships as its non-zero runs, packed by the build, which are all that is inflated at boot and
+ *    all that a run's fresh Memory has written into it, since it is zero everywhere else already
+ *    (./core-dump, ./inflate);
  *  - \begin{document} wrapping is conditional (upstream nests it into every existing vault), and the
  *    input is assembled in ./document, with a TS1 shim for a block that can use one (./ts1-shim);
  *  - \nonstopmode, so a TeX error is logged instead of blocking on the interactive `? ` prompt;
@@ -37,8 +37,16 @@ import * as library from './library';
 import { describeConvertError } from './convert-error';
 import { buildInput } from './document';
 import { inflateExactly } from './inflate';
-import { nonZeroRuns, startingMemory } from './core-dump';
-import { CORE_DUMP_GZ, ENGINE_ID, INVENTORY, TEX_FILES, TEX_WASM_GZ } from 'virtual:engine-assets';
+import { checkCoreDump, packedLength, startingMemory, unpackCoreDump } from './core-dump';
+import {
+	CORE_DUMP_GZ,
+	CORE_DUMP_RUNS,
+	CORE_DUMP_SIZE,
+	ENGINE_ID,
+	INVENTORY,
+	TEX_FILES,
+	TEX_WASM_GZ,
+} from 'virtual:engine-assets';
 import type { ErrorMessage, OkMessage, RenderOptions, TexErrorKind, WorkerRequest } from './protocol';
 
 // --- base64 -------------------------------------------------------------------------------------
@@ -73,15 +81,21 @@ library.setBundledFiles(bundled, (gz) => ungzip(gz));
 const texModule = new WebAssembly.Module(ungzip(fromBase64(TEX_WASM_GZ)));
 
 /**
- * Inflated straight into one buffer of the size the Memory needs, and asserted to be exactly that
- * size: a short dump would leave live TeX state uninitialised — a corruption that would surface
- * much later as garbage output rather than as a failure here. Not `ungzip`, which glues 64 KiB
- * chunks into a copy and so holds the 156 MiB dump twice at boot (./inflate).
+ * The dump's non-zero runs, 21.5 MiB of its 156.25, which the build packed back to back
+ * (scripts/engine-assets.mjs `packCoreDump`): they are all a run's fresh Memory needs written into
+ * it (./core-dump). Inflating the whole dump took half a second of every boot on the desktop.
  *
- * Then cut, once, into the stretches that are not zero, which are all a run's fresh Memory needs
- * written into it (./core-dump). They are views of the inflated buffer, not copies.
+ * Inflated straight into one buffer of the size the runs add up to, and asserted to be exactly that
+ * size. Not `ungzip`, which glues 64 KiB chunks into a copy and so holds the bytes twice (./inflate).
+ * The dump has to fill the Memory exactly, or live TeX state would start at zero — a corruption
+ * that would surface much later as garbage output — so that is checked here, at boot.
  */
-const coreDump = nonZeroRuns(inflateExactly(fromBase64(CORE_DUMP_GZ), library.pages * 65536));
+const coreDump = unpackCoreDump(
+	CORE_DUMP_SIZE,
+	CORE_DUMP_RUNS,
+	inflateExactly(fromBase64(CORE_DUMP_GZ), packedLength(CORE_DUMP_RUNS)),
+);
+checkCoreDump(coreDump, library.pages);
 
 // --- transcript analysis --------------------------------------------------------------------------
 

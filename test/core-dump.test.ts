@@ -1,13 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { nonZeroRuns, restoreCoreDump, startingMemory } from '../engine-src/core-dump';
-import { readCoreDump } from '../scripts/engine-assets.mjs';
+import {
+	packedLength,
+	restoreCoreDump,
+	startingMemory,
+	unpackCoreDump,
+	type CoreDump,
+} from '../engine-src/core-dump';
+import { inflateExactly } from '../engine-src/inflate';
+import { encodeCoreDump, packCoreDump, readCoreDump } from '../scripts/engine-assets.mjs';
 
 /*
  * Every TeX run starts from the core dump: the whole 2500-page WebAssembly.Memory as it stood once
  * the format was loaded. The worker used to copy all 156.25 MiB of it into each run's fresh Memory,
- * 27 ms a render on the desktop. 134 MiB of it is zero, and a fresh Memory is zero already (the
- * WebAssembly spec fills new pages with zeros), so only the stretches that are not zero need
- * writing. These hold the memory a job starts from to the dump, byte for byte.
+ * 27 ms a render on the desktop, and to inflate all of it at every boot. 134 MiB of it is zero, and
+ * a fresh Memory is zero already (the WebAssembly spec fills new pages with zeros), so the build
+ * ships only the stretches that are not zero and the worker writes only those. These hold the
+ * memory a job starts from to the dump, byte for byte, through the build's packing and the
+ * worker's unpacking both.
  */
 
 /** Relative to the project root, which is where vitest runs (vitest.config.ts lives there). */
@@ -34,20 +43,31 @@ function dumpWith(pages: number, set: Record<number, number>): Uint8Array {
 	return dump;
 }
 
+/** The dump as the build packs it and the worker unpacks it. */
+function shipped(dump: Uint8Array, gap?: number): CoreDump {
+	const packed = packCoreDump(dump, gap);
+	return unpackCoreDump(packed.size, packed.runs, packed.bytes);
+}
+
 /** What a job would start from: a fresh Memory with the dump's runs set into it. */
 function started(dump: Uint8Array, gap?: number): Uint8Array {
-	const pages = dump.length / PAGE;
-	return new Uint8Array(startingMemory(nonZeroRuns(dump, gap), pages).buffer);
+	return new Uint8Array(startingMemory(shipped(dump, gap), dump.length / PAGE).buffer);
 }
 
 const spans = (dump: Uint8Array, gap?: number): [number, number][] =>
-	nonZeroRuns(dump, gap).runs.map((run) => [run.offset, run.offset + run.bytes.length]);
+	shipped(dump, gap).runs.map((run) => [run.offset, run.offset + run.bytes.length]);
 
 describe('the memory a job starts from', () => {
-	it('is the committed core dump, byte for byte', () => {
+	it('is the committed core dump, byte for byte, from what the worker string carries', () => {
 		const dump = readCoreDump(ROOT);
 		expect(dump.length).toBe(2500 * PAGE);
-		const memory = started(dump);
+
+		// The gzip the build puts into the worker, inflated and unpacked as the worker boots.
+		const encoded = encodeCoreDump(ROOT);
+		const bytes = inflateExactly(encoded.gz, packedLength(encoded.runs));
+		const memory = new Uint8Array(
+			startingMemory(unpackCoreDump(encoded.size, encoded.runs, bytes), 2500).buffer,
+		);
 		expect(memory.length).toBe(dump.length);
 		expect(firstDifference(memory, dump)).toBe(-1);
 	});
@@ -86,7 +106,7 @@ describe('the memory a job starts from', () => {
 	});
 });
 
-describe('the runs the dump is cut into', () => {
+describe('the runs the build cuts the dump into', () => {
 	it('are exact at both ends: from a non-zero byte to the byte after the last one', () => {
 		const dump = dumpWith(1, { 10: 1, 20: 2 });
 		expect(spans(dump, 4)).toEqual([
@@ -118,19 +138,48 @@ describe('the runs the dump is cut into', () => {
 		expect(spans(dump, PAGE)).toEqual([[0, PAGE]]);
 	});
 
-	it('are views of the dump, not copies of it', () => {
-		const dump = dumpWith(1, { 100: 7 });
-		const [run] = nonZeroRuns(dump).runs;
-		expect(run?.bytes.buffer).toBe(dump.buffer);
+	it('hold their bytes back to back, and nothing else', () => {
+		const packed = packCoreDump(dumpWith(1, { 10: 1, 11: 2, 4000: 3 }), 16);
+		expect(packed.runs).toEqual([10, 2, 4000, 1]);
+		expect([...packed.bytes]).toEqual([1, 2, 3]);
+		expect(packedLength(packed.runs)).toBe(3);
 	});
 
 	it('leave out most of the committed dump', () => {
-		// 21.5 MiB of 156.25: what each render writes, and with the dump shipped as these runs, what
-		// the worker inflates at boot.
-		const { runs } = nonZeroRuns(readCoreDump(ROOT));
-		const written = runs.reduce((n, run) => n + run.bytes.length, 0);
-		expect(written).toBeLessThan(32 * 1048576);
-		expect(runs.length).toBeLessThan(100);
+		// 21.5 MiB of 156.25: what the worker inflates at boot and writes into each run's memory.
+		const { runs, gz } = encodeCoreDump(ROOT);
+		expect(packedLength(runs)).toBeLessThan(32 * 1048576);
+		expect(runs.length / 2).toBeLessThan(100);
+		expect(gz.length).toBeLessThan(6 * 1048576);
+	});
+});
+
+describe('unpackCoreDump', () => {
+	it('makes views of the bytes it is given, not copies', () => {
+		const bytes = Uint8Array.of(1, 2, 3);
+		const dump = unpackCoreDump(PAGE, [10, 2, 4000, 1], bytes);
+		expect(dump.runs.map((run) => [run.offset, [...run.bytes]])).toEqual([
+			[10, [1, 2]],
+			[4000, [3]],
+		]);
+		expect(dump.runs[0]?.bytes.buffer).toBe(bytes.buffer);
+	});
+
+	it('refuses runs that overlap, run backwards or are empty', () => {
+		const bytes = new Uint8Array(4);
+		expect(() => unpackCoreDump(PAGE, [10, 2, 11, 2], bytes)).toThrow('out of order');
+		expect(() => unpackCoreDump(PAGE, [10, 2, 5, 2], bytes)).toThrow('out of order');
+		expect(() => unpackCoreDump(PAGE, [10, 0, 20, 4], bytes)).toThrow('out of order');
+		expect(() => unpackCoreDump(PAGE, [10, 2, 20], bytes)).toThrow('without a length');
+	});
+
+	it('refuses a run past the end of the dump, or of the bytes', () => {
+		expect(() => unpackCoreDump(PAGE, [PAGE - 1, 2], new Uint8Array(2))).toThrow('past its end');
+		expect(() => unpackCoreDump(PAGE, [0, 3], new Uint8Array(2))).toThrow('past its end');
+	});
+
+	it('refuses bytes the runs do not account for', () => {
+		expect(() => unpackCoreDump(PAGE, [0, 2], new Uint8Array(3))).toThrow('hold 2 B of 3');
 	});
 });
 
@@ -138,14 +187,14 @@ describe('restoreCoreDump', () => {
 	it('writes the runs and nothing else, leaving the rest to the zeros a fresh Memory has', () => {
 		const dump = dumpWith(1, { 10: 1, 11: 2, 4000: 3 });
 		const target = new Uint8Array(PAGE).fill(0xaa);
-		restoreCoreDump(target.buffer, nonZeroRuns(dump, 16));
+		restoreCoreDump(target.buffer, shipped(dump, 16));
 		expect([...target.subarray(8, 14)]).toEqual([0xaa, 0xaa, 1, 2, 0xaa, 0xaa]);
 		expect(target[4000]).toBe(3);
 		expect(target.filter((byte) => byte === 0xaa).length).toBe(PAGE - 3);
 	});
 
 	it('refuses a dump that is not the size of the memory', () => {
-		const dump = nonZeroRuns(new Uint8Array(PAGE));
+		const dump = shipped(new Uint8Array(PAGE));
 		expect(() => startingMemory(dump, 2)).toThrow(`the core dump is ${PAGE} B, the memory ${2 * PAGE} B`);
 	});
 });

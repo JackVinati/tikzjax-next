@@ -14,7 +14,11 @@
 declare module 'virtual:engine-assets' {
 	/** gzipped tex.wasm, base64. */
 	export const TEX_WASM_GZ: string;
-	/** gzipped core.dump, base64. The whole 2500-page WebAssembly.Memory image. */
+	/** core.dump's length: the whole 2500-page WebAssembly.Memory image, zeros included. */
+	export const CORE_DUMP_SIZE: number;
+	/** core.dump's non-zero runs, in order: an offset and a length for each, flat. */
+	export const CORE_DUMP_RUNS: readonly number[];
+	/** The runs' bytes back to back, gzipped, base64 (scripts/engine-assets.mjs `packCoreDump`). */
 	export const CORE_DUMP_GZ: string;
 	/** TeX input filename -> gzipped contents, base64. */
 	export const TEX_FILES: Record<string, string>;

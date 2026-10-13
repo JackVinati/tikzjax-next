@@ -9,8 +9,9 @@
  *
  * 134 MiB of the dump is zero — TeX's arrays are sized for the largest document it will take, and
  * a diagram fills a corner of them — and a fresh Memory is zero already: the WebAssembly spec fills
- * new pages with zeros. So the dump is kept as the stretches of it that are not zero, and only those
- * are written: 21.5 MiB, about 5 ms, and the pages TeX never touches are never touched at all.
+ * new pages with zeros. So only the stretches that are not zero are written: 21.5 MiB, about 5 ms,
+ * and the pages TeX never touches are never touched at all. The build cuts the dump into those
+ * stretches and ships nothing else (scripts/engine-assets.mjs `packCoreDump`).
  *
  * A module of its own so the reset can be tested against the dump without booting an engine.
  */
@@ -28,39 +29,39 @@ export interface CoreDump {
 	runs: readonly DumpRun[];
 }
 
+/** How many bytes the runs hold between them: `runs` is an offset and a length for each, flat. */
+export function packedLength(runs: readonly number[]): number {
+	let total = 0;
+	for (let r = 1; r < runs.length; r += 2) total += runs[r] ?? 0;
+	return total;
+}
+
 /**
- * A run of zeros at least this long ends a run; a shorter one stays inside it.
+ * The dump the build packed: `size` bytes, zero but for `runs`, whose bytes lie back to back in
+ * `bytes`. The runs are views of `bytes`, not copies.
  *
- * Splitting at every zero byte would cut the dump into thousands of runs to save writing a few
- * zeros. With 4 KiB the committed dump is 28 runs and 21.5 MiB, against 10.9 MiB of bytes that are
- * literally not zero: TeX's arrays are full of short zero stretches.
+ * Checked rather than trusted, because nothing downstream could tell. A run past the end of the
+ * memory would throw at the first render instead of at boot, and runs that overlap or leave bytes
+ * over would start every run from a dump that is not the one the format left.
  */
-export const DUMP_GAP = 4096;
-
-/**
- * The dump's non-zero runs, as views of `dump` itself. Each starts at a byte that is not zero and
- * ends after the last byte that is not, so nothing outside them is anything but zero.
- */
-export function nonZeroRuns(dump: Uint8Array, gap = DUMP_GAP): CoreDump {
-	const runs: DumpRun[] = [];
-	const n = dump.length;
-	let i = 0;
-	while (i < n) {
-		while (i < n && dump[i] === 0) i++;
-		if (i === n) break;
-
-		const start = i;
-		let end: number;
-		for (;;) {
-			while (i < n && dump[i] !== 0) i++;
-			end = i;
-			while (i < n && dump[i] === 0 && i - end < gap) i++;
-			// The end of the dump, or a gap long enough to end the run on.
-			if (i === n || i - end >= gap) break;
-		}
-		runs.push({ offset: start, bytes: dump.subarray(start, end) });
+export function unpackCoreDump(size: number, runs: readonly number[], bytes: Uint8Array): CoreDump {
+	if (runs.length % 2 !== 0) throw new Error('the core dump has a run without a length');
+	const unpacked: DumpRun[] = [];
+	let end = 0;
+	let at = 0;
+	for (let r = 0; r < runs.length; r += 2) {
+		const offset = runs[r] ?? -1;
+		const length = runs[r + 1] ?? -1;
+		if (!Number.isInteger(offset) || !Number.isInteger(length) || offset < end || length < 1)
+			throw new Error(`the core dump's run at ${offset} is out of order or empty`);
+		if (offset + length > size || at + length > bytes.length)
+			throw new Error(`the core dump's run at ${offset} runs past its end`);
+		unpacked.push({ offset, bytes: bytes.subarray(at, at + length) });
+		end = offset + length;
+		at += length;
 	}
-	return { size: n, runs };
+	if (at !== bytes.length) throw new Error(`the core dump's runs hold ${at} B of ${bytes.length}`);
+	return { size, runs: unpacked };
 }
 
 /**
@@ -73,14 +74,18 @@ export function restoreCoreDump(target: ArrayBuffer, dump: CoreDump): void {
 }
 
 /**
- * A new Memory of `pages` pages holding the dump: what a TeX run starts from.
- *
- * The size is checked rather than trusted. A dump shorter than the memory would leave live TeX
- * state at zero, a corruption that would surface much later as garbage output rather than here.
+ * Whether the dump fills a memory of `pages` pages exactly, which it must. A dump shorter than the
+ * memory would leave live TeX state at zero, a corruption that would surface much later as garbage
+ * output rather than as an error.
  */
-export function startingMemory(dump: CoreDump, pages: number): WebAssembly.Memory {
+export function checkCoreDump(dump: CoreDump, pages: number): void {
 	const size = pages * 65536;
 	if (dump.size !== size) throw new Error(`the core dump is ${dump.size} B, the memory ${size} B`);
+}
+
+/** A new Memory of `pages` pages holding the dump: what a TeX run starts from. */
+export function startingMemory(dump: CoreDump, pages: number): WebAssembly.Memory {
+	checkCoreDump(dump, pages);
 	const memory = new WebAssembly.Memory({ initial: pages, maximum: pages });
 	restoreCoreDump(memory.buffer, dump);
 	return memory;
