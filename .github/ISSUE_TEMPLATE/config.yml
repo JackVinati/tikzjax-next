@@ -1,5 +1,11 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Question about a diagram
+    url: https://github.com/JackVinati/tikzjax-next/discussions/categories/q-a
+    about: Not sure it is a bug? Ask in Discussions first.
+  - name: Idea for the plugin
+    url: https://github.com/JackVinati/tikzjax-next/discussions/categories/ideas
+    about: Post it in Discussions, where others can vote for it.
   - name: Security vulnerability
     url: https://github.com/JackVinati/tikzjax-next/security/advisories/new
     about: Please report it privately, not as an issue. SECURITY.md says what counts.
