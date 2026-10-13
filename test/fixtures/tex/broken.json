@@ -1,4 +1,8 @@
 {
   "expect": "failure",
+  "reply": {
+    "type": "ok",
+    "firstError": "Undefined control sequence."
+  },
   "note": "must produce a diagnosable \"! Undefined control sequence\", not a hang (upstream #81)."
 }
