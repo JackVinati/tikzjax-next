@@ -294,6 +294,12 @@ describe('asReadingView', () => {
 		expect(asReadingView('```tikz', '  \\draw (0,0);')).toBe('  \\draw (0,0);');
 	});
 
+	it("reads past a task item's checkbox, whatever its status, and takes off the item's indentation", () => {
+		expect(asReadingView('- [/] ```tikz', '  \\draw (0,0);')).toBe('\\draw (0,0);');
+		expect(asReadingView('1. [x] ```tikz', '   \\draw (0,0);')).toBe('\\draw (0,0);');
+		expect(asReadingView('- [ ]  ```tikz', '   \\draw (0,0);')).toBe('\\draw (0,0);');
+	});
+
 	it('is null for a line that does not open a tikz fence, and for a fence in a quote', () => {
 		expect(asReadingView('- item', '  \\draw (0,0);')).toBeNull();
 		expect(asReadingView('  ```js', '  x = 1')).toBeNull();
@@ -648,6 +654,12 @@ describe("a fence on a list item's marker line ends with its item", () => {
 			text: '> - ```tikz\n>   \\draw (0,0);\n> - next\n>\n> ```tikz\n> \\draw (1,1);\n> ```\n',
 			reading: ['\\draw (0,0);', '\\draw (1,1);'],
 			finalized: [],
+		},
+		{
+			name: 'a task item, then the next task',
+			text: '- [ ] ```tikz\n  \\draw (0,0);\n- [ ] next\n\n```tikz\n\\draw (1,1);\n```\n',
+			reading: ['\\draw (0,0);', '\\draw (1,1);'],
+			finalized: ['\\draw (1,1);'],
 		},
 		{
 			name: 'a blank line, then text at the margin',

@@ -74,6 +74,17 @@ export const BLOCKS: readonly ObsidianBlock[] = [
 		livePreview: 'lines',
 	},
 	{
+		// Both views take the checkbox off before they look for a fence, and the lines below lose
+		// the item's two columns only.
+		name: "a fence on a task item's marker line",
+		note:
+			'- [ ] ```tikz\n  \\begin{tikzpicture}\n    \\draw (0,0) -- (1,0);\n  \\end{tikzpicture}\n' +
+			'  ```\n- [x] Done.\n',
+		marker: '(1,0)',
+		reading: '\\begin{tikzpicture}\n  \\draw (0,0) -- (1,0);\n\\end{tikzpicture}',
+		livePreview: 'lines',
+	},
+	{
 		name: 'a blockquote',
 		note:
 			'> A quoted diagram:\n>\n> ```tikz\n> \\begin{tikzpicture}\n' +

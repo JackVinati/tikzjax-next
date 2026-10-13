@@ -118,6 +118,8 @@ const FENCE_OPEN = /^([ \t]*)(`{3,}|~{3,})(.*)$/;
 const QUOTE_MARKER = /^[ \t]*>[ ]?/;
 /** A list item's marker and the space after it, as it stands in front of a fence on its line. */
 const LIST_MARKER = /^([ \t]*)([*+-]|\d{1,9}[.)])([ \t]+)/;
+/** A task item's checkbox after the marker, whatever its status, and the space after it. */
+const TASK_BOX = /^\[.\][ \t]/;
 /** A line that starts a list item of its own, empty or not. */
 const ITEM_START = /^[ \t]*(?:[*+-]|\d+[.)])(?:[ \t]|$)/;
 /** Besides a fence and a new item, what ends a list item: a heading, a rule or a `%%` comment. */
@@ -204,7 +206,14 @@ interface Opener extends Fence {
 	item: number | null;
 }
 
-/** `matchOpener` for a fence in a blockquote, or on a list item's marker line, as well. */
+/**
+ * `matchOpener` for a fence in a blockquote, or on a list item's marker line, as well.
+ *
+ * On a task item's line the checkbox stands between the marker and the fence. Reading view takes
+ * it off the item's text before it looks for a fence (remark-parse 8 in the 1.14.4 bundle, with
+ * `/^\[(.)][ \t]/`), and Live Preview off the line before it reads the fence's language. It is
+ * not indentation: the lines below lose the item's own, so the checkbox does not count in `width`.
+ */
 function matchContainedOpener(text: string): Opener | null {
 	let rest = text;
 	let quotes = 0;
@@ -214,7 +223,8 @@ function matchContainedOpener(text: string): Opener | null {
 	}
 	const marker = LIST_MARKER.exec(rest);
 	const length = marker?.[0].length ?? 0;
-	const fence = matchOpener(rest.slice(length));
+	const box = marker ? (TASK_BOX.exec(rest.slice(length))?.[0] ?? '') : '';
+	const fence = matchOpener(rest.slice(length + box.length));
 	if (!fence) return null;
 	return {
 		...fence,
