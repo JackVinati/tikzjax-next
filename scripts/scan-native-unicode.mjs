@@ -471,7 +471,17 @@ export function isNativeUnicode(codepoint: number): boolean {
 `;
 }
 
-const { engineId } = await buildWorker(root);
+// Hash the newly measured table, not a stale copy on disk, with a placeholder for its own stamp.
+const measuredTable = {
+	name: 'measured-native-table',
+	setup(build) {
+		build.onLoad({ filter: /[\\/]src[\\/]source[\\/]native-unicode\.ts$/ }, () => ({
+			contents: renderModule('0'.repeat(64)),
+			loader: 'ts',
+		}));
+	},
+};
+const { engineId } = await buildWorker(root, { plugins: [measuredTable] });
 const generated = renderModule(engineId);
 
 console.log(

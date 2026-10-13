@@ -18,6 +18,8 @@ import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 
 import { join, basename } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import assert from 'node:assert/strict';
+import { Window } from 'happy-dom';
 import { buildWorker, engineIsBuilt } from './engine-assets.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -312,4 +314,49 @@ if (names.includes('broken')) {
 	);
 }
 
+// Smoke and verify-fork exercise the bare engine, so these literal Unicode fixtures live apart
+// from that corpus. A worker with the bridge reverted must fail this check.
+const window = new Window();
+for (const twoPass of [false, true]) {
+	const reply = await send({
+		type: 'render',
+		id: ++id,
+		source: readFileSync(join(root, 'test', 'fixtures', 'worker', 'unicode-labels.tex'), 'utf8'),
+		options: { captureLog: true, twoPass },
+	});
+	try {
+		assert.equal(reply.type, 'ok', reply.message);
+		assert.equal(reply.firstError, undefined);
+		if (twoPass) assert.ok(reply.log.some((line) => line.includes('(tikzjax) second pass:')));
+		for (const label of ['开始', 'Привет', '😀', 'äöü', '°', '×', 'Ωμέγα', '中文'])
+			assert.ok(reply.svg.includes(label), label);
+		const doc = new window.DOMParser().parseFromString(reply.svg, 'image/svg+xml');
+		assert.equal(doc.documentElement.localName, 'svg');
+		assert.equal(doc.querySelector('parsererror'), null);
+		const markers = doc.querySelectorAll('g[data-tikzjax-unicode]');
+		assert.equal(markers.length, 10);
+		for (const marker of markers) {
+			assert.equal(marker.children.length, 1);
+			assert.equal(marker.firstElementChild.localName, 'text');
+			assert.equal(marker.firstElementChild.getAttribute('text-anchor'), 'middle');
+			assert.ok(!/[\uF000-\uF8FF]/u.test(marker.textContent), 'leftover proxy glyph');
+		}
+		writeFileSync(join(RESULTS, `unicode-labels-${twoPass ? 'two' : 'one'}-pass.svg`), reply.svg);
+		console.log(`OK    Unicode labels (${twoPass ? 'two' : 'one'} pass)`);
+	} catch (error) {
+		failures++;
+		console.error(`FAIL  Unicode labels: ${error.message}`);
+	}
+}
+const broken = await send({
+	type: 'render',
+	id: ++id,
+	source: readFileSync(join(root, 'test', 'fixtures', 'worker', 'unicode-broken-marker.tex'), 'utf8'),
+	options: { captureLog: true },
+});
+if (broken.type !== 'error' || !broken.message.includes('unbalanced') || !broken.log?.length) {
+	failures++;
+	console.error('FAIL  Broken Unicode markers must return an error with the TeX log.');
+} else console.log('OK    Broken Unicode markers report an error with the TeX log.');
+await window.happyDOM.close();
 process.exit(failures ? 1 : 0);

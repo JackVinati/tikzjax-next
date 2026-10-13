@@ -614,10 +614,26 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 			timings,
 		};
 	}
+	let svg: string;
+	try {
+		svg = restoreUnicode(reported.svg, unicode.runs);
+	} catch (error) {
+		return {
+			type: 'error',
+			id,
+			kind: 'empty-output',
+			message: error instanceof Error ? error.message : String(error),
+			log,
+			missing,
+			durationMs,
+			firstError: diagnostics.firstError,
+			line: diagnostics.line,
+		};
+	}
 	return {
 		type: 'ok',
 		id,
-		svg: restoreUnicode(reported.svg, unicode.runs),
+		svg,
 		log,
 		missing,
 		durationMs,

@@ -70,7 +70,7 @@ describe('preflight', () => {
 \\usetikzlibrary{arrows.meta}
 \\pgfplotsset{compat=1.18}
 \\pgfmathsetmacro{\\epsilon}{0.2}
-\\node {ζ};`;
+\\node (ζ) {label};`;
 		const found = preflight(source, baked(), caps());
 
 		expect(found.length).toBe(6);
@@ -300,134 +300,71 @@ describe('preflight', () => {
 		});
 	});
 
-	describe('characters the engine cannot typeset (#19 #36 #53)', () => {
-		it('reports the offending characters and where they start', () => {
-			const found = preflight('\\begin{document}\n\\node {Ω and ¥};', baked(), caps());
+	describe('Unicode outside bridged label text (#19 #36 #53)', () => {
+		it.each(['开始', 'Привет', 'Ωμέγα', '😀', 'Müller Ärger', '45° and 2×3', 'Dvořák it’s 2010–2020'])(
+			'accepts the label %s without an encoding warning',
+			(label) => {
+				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
+			},
+		);
+
+		it.each([
+			String.raw`\node (开始) {中文};`,
+			String.raw`\coordinate (开始) at (0,0);`,
+			String.raw`\draw (开始) -- (end);`,
+			String.raw`\node[开始=red] {中文};`,
+			String.raw`\node[name=开始] {中文};`,
+			String.raw`\node[alias=开始] {中文};`,
+			String.raw`\node[at={(开始)}] {中文};`,
+			String.raw`\node[below=of 开始] {中文};`,
+			String.raw`\node[fit={(开始) (end)}] {中文};`,
+			String.raw`\label{开始}\ref{开始}`,
+			String.raw`\detokenize{foo{开始}}`,
+			String.raw`\verb|开始|`,
+			String.raw`\verb*+开始+`,
+			String.raw`\def\开始{x}`,
+		])('warns about unsupported syntax in %s', (text) => {
+			const found = preflight(text, baked(), caps());
+			expect(found).toHaveLength(1);
+			expect(found[0]?.message).toContain('U+5F00');
+			expect(found[0]?.hint).toContain('ASCII');
+		});
+
+		it('reports the structural position rather than earlier bridged labels', () => {
+			const found = preflight('\\node {开始};\n\\node (开始) {Ω and →};', baked(), caps());
 			expect(found).toHaveLength(1);
 			expect(found[0]?.line).toBe(2);
-			expect(found[0]?.message).toContain('U+03A9');
-			expect(found[0]?.message).toContain('U+00A5');
-		});
-
-		// Latin-1 is measured like everything else: é renders natively.
-		it('accepts the Latin-1 letters the engine draws', () => {
-			expect(preflight('\\node {café à ça, résumé};', baked(), caps())).toEqual([]);
-		});
-
-		// ° and its kind are not native — the bare engine sets them in TS1, which the SVG converter
-		// cannot draw — but the worker redefines them to math-font glyphs (engine-src/ts1-shim.ts)
-		// for any block that uses one, so they render, and a warning would be false.
-		it.each(['45° and 2×3', 'a → b ← c', '±0.5', '5 µm', '§ 3, ¶ 2', '• item', '℃', '™', '†'])(
-			'says nothing about %s, which the worker draws from the math fonts',
-			(label) => {
-				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
-			},
-		);
-
-		// £, €, © and the rest have no math glyph either; the worker builds them from the Computer
-		// Modern text fonts instead, as LaTeX did before they moved to TS1.
-		it.each(['£5', '€5', '© 2026', 'Acme®', '1ª 2º', '\\pounds 5, \\copyright, \\$5'])(
-			'says nothing about %s, which the worker builds from the text fonts',
-			(label) => {
-				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
-			},
-		);
-
-		it.each([
-			['¥', 'U+00A5'],
-			['¢', 'U+00A2'],
-			['‰', 'U+2030'],
-		])('still warns about %s, which stays in TS1 and has no stand-in', (label, codepoint) => {
-			const found = preflight(`\\node {${label}};`, baked(), caps());
-			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain(codepoint);
-		});
-
-		// A dieresis used to lose the whole diagram: dvi2html's TFM reader stopped one character
-		// short of the end of every font, and in cmr10 that character is the accent. The build
-		// patches the reader (scripts/dvi2html-patch.mjs), and the scan measures them native now.
-		it.each(['Müller', 'Ärger', 'Grüße aus Köln', 'naïve', 'Zoë', 'Ÿ', 'n\\"aive \\"u'])(
-			'says nothing about %s, which renders since the converter was fixed',
-			(label) => {
-				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
-			},
-		);
-
-		// Ł and ł compiled cleanly and then lost the diagram inside the converter, whose glyph map
-		// had no entry for the stroke they are built with. The build gives it one, and the scan
-		// measures them native now.
-		it.each(['Łódź', 'Wrocław', 'Białystok', 'ŁUKASZ'])(
-			'says nothing about %s, which renders since the converter was fixed',
-			(label) => {
-				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
-			},
-		);
-
-		it('names a symbol it cannot draw with the math spelling that does render', () => {
-			const found = preflight('\\node {x ∈ ℝ, n → ∞};', baked(), caps());
-			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain('U+2208');
-			expect(found[0]?.message).toContain('U+211D');
-			expect(found[0]?.message).toContain('U+221E');
+			expect(found[0]?.message).not.toContain('U+03A9');
 			expect(found[0]?.message).not.toContain('U+2192');
-			expect(found[0]?.hint).toContain('$\\in$');
-			expect(found[0]?.hint).toContain('$\\infty$');
-			expect(found[0]?.hint).not.toContain('dieresis');
 		});
 
-		it('counts an astral character once, not as two surrogate halves', () => {
-			const found = preflight('\\node {\u{1F600}};', baked(), caps());
-			expect(found).toHaveLength(1);
+		it('counts astral characters once and limits the list of offenders', () => {
+			const found = preflight('\\node (😀开始结束甲乙) {};', baked(), caps());
 			expect(found[0]?.message).toContain('U+1F600');
 			expect(found[0]?.message).not.toContain('U+D83D');
+			expect(found[0]?.message).toContain('and 2 more');
 		});
 
-		it('ignores characters inside a comment, which TeX discards', () => {
-			expect(preflight('% résumé — αβγ\n\\draw (0,0);', baked(), caps())).toEqual([]);
+		it('ignores comments and Unicode in option values, quoted labels and label parentheses', () => {
+			const text =
+				'% \\node (开始) {};\n' +
+				'\\node[draw,label={中文},text=red] {开始 (结束) \\%中文}; \\arrow["中文"];';
+			expect(preflight(text, baked(), caps())).toEqual([]);
 		});
 
-		// Each of these was measured rendering cleanly on the committed engine. The curly quotes, the
-		// dash and the ellipsis are what iOS's smart punctuation types in place of the ASCII ones, so a
-		// warning on them sat under nearly every diagram written on a phone.
-		it.each(['Dvořák', 'Erdős', 'İstanbul', 'it’s “ok”', '2010–2020', 'wait…', 'ﬁ'])(
-			'says nothing about %s, which the engine typesets itself',
-			(label) => {
-				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
-			},
-		);
-
-		it.each([
-			['开始', 'U+5F00'],
-			['Привет', 'U+041F'],
-			['Ωμέγα', 'U+03A9'],
-		])('still warns about %s, which TeX leaves out with an error', (label, first) => {
-			const found = preflight(`\\node {${label}};`, baked(), caps());
+		it('checks nested style keys without warning about nested label values', () => {
+			const found = preflight('\\tikzset{foo/.style={draw,开始=red,label={中文}}}', baked(), caps());
 			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain(first);
+			expect(found[0]?.message).toContain('U+5F00');
+			expect(found[0]?.message).not.toContain('U+4E2D');
+			expect(preflight('\\tikzset{foo/.style={draw,label={中文}}}', baked(), caps())).toEqual([]);
 		});
 
-		it('names only the characters that fail, not the native or drawable ones beside them', () => {
-			const found = preflight('\\node {Dvořák ¥ Erdős → 90° €5 Łódź};', baked(), caps());
-			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain('U+00A5');
-			expect(found[0]?.message).not.toContain('U+0159');
-			expect(found[0]?.message).not.toContain('U+0151');
-			expect(found[0]?.message).not.toContain('U+2192');
+		it('retains the measured distinction for Latin-1 and native punctuation', () => {
+			expect(preflight('\\node (café) {中文};', baked(), caps())).toEqual([]);
+			const found = preflight('\\node (Müller) {45°};', baked(), caps());
+			expect(found[0]?.message).toContain('U+00FC');
 			expect(found[0]?.message).not.toContain('U+00B0');
-			expect(found[0]?.message).not.toContain('U+20AC');
-			expect(found[0]?.message).not.toContain('U+0141');
-		});
-
-		// The old hint offered `\usepackage[utf8]{inputenc}` to "reassemble" the bytes, but the format
-		// already reads UTF-8 — what stops these characters is that nothing defines them. And it
-		// suggested \"o and \textdegree, neither of which renders on this engine.
-		it('suggests only rewrites that render here, and never inputenc', () => {
-			const withInputenc = caps({ files: new Set(['inputenc.sty']) });
-			const hint = preflight('\\node {Ω};', baked(), withInputenc)[0]?.hint ?? '';
-			expect(hint).toContain('$\\Omega$');
-			expect(hint).not.toContain('inputenc');
-			expect(hint).not.toContain('\\"o');
-			expect(hint).not.toContain('\\textdegree');
 		});
 	});
 
