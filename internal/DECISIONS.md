@@ -733,6 +733,59 @@ worker bundle, changes with `tex.wasm`.
 
 ---
 
+## D15 — TeX hashes control sequences into 131,071 slots, not 1,777
+
+**Amends D8's finding 3: `memory.ch` sizes TeX's tables, and one of its numbers was left behind.**
+
+web2js's `changes/memory.ch` gives TeX room for 600,000 control sequences (`hash_size`) and leaves
+`hash_prime`, the number of slots a name is hashed into, at tex.web's 1,777. TeX chains a name whose
+slot is taken into a free slot elsewhere in the table, so the 33,822 names in the dump hung in chains
+19 long, and finding a name visited 11.3 slots on average, comparing names as it went. A fixture's
+run ends with between 34,075 names (`runaway-macro`) and 51,463 (`circuitikz`).
+
+`build-engine.sh` now sets `hash_prime` in `memory.ch`'s replacement text before the build, leaving
+the text it replaces, which has to match tex.web, alone. Each candidate was built and measured: the
+chains over the dump each build produced, TeX's time over the nine fixtures that take longest (the
+minimum of nine runs each, Node 22.19, the machine of D14, all candidates in one process), the
+archive, and the part of the dump that is not zero, counted in 4 KiB blocks:
+
+| hash_prime | slots visited to find a name | longest chain | TeX time, 9 largest | core.dump.gz | dump not zero |
+|---:|---:|---:|---:|---:|---:|
+| 1,777 | 11.31 | 59 | 2,055 ms | 5,938,537 B | 21.59 MiB |
+| 65,521 | 2.15 | 26 | 2,041 ms (−0.7%) | 5,977,785 B | 21.91 MiB |
+| **131,071** | 2.04 | 27 | 2,022 ms (−1.6%) | 5,993,857 B | 22.39 MiB |
+| 262,139 | 1.97 | 25 | 2,027 ms (−1.4%) | 6,010,960 B | 23.38 MiB |
+| 510,007 | 1.94 | 26 | 2,033 ms (−1.1%) | 6,026,862 B | 25.27 MiB |
+
+The gain is small and the runs are noisy: an earlier run of the same comparison gave 2,087, 2,039,
+2,033 and 2,025 ms for 1,777, 65,521, 131,071 and 510,007, and over all 27 fixtures 131,071 measured
+1.7% and 3.6% less than 1,777 in two runs. The primes above 1,777 differ from each other by less
+than one run differs from the next.
+
+TeX's hash is `h = 2h + c` over the name's characters, so names whose characters trade off against
+each other hash alike whatever the prime. That is why the longest chain stays at 25 to 27 for every
+prime from 65,521 up, and why the slots visited level off near two: past about 65,521 a larger prime
+buys nothing measurable. What it does cost is memory. The names spread over `hash_prime` × 8 bytes
+of the table, which the archive carries (in `main.js`, as base64) and a reset that writes only the
+dump's non-zero bytes copies on every render. 131,071 (2^17 − 1) takes the gain for 0.8 MiB and 55 KB,
+where tex.web's 85% of `hash_size`, 510,007, would take 3.7 MiB and 88 KB for the same time, and it
+leaves room for a document that defines twice the names `circuitikz` does.
+
+`hash_size` stays at 600,000. It is more than ten times the most names any fixture defines, and it
+sizes the hash table and the part of `eqtb` that belongs to control sequences, which is the memory
+layout the dump is cut to. Where each name sits in the table moves; the table does not. Every
+fixture's DVI, transcript and SVG are byte-identical (D13), the dump's bytes are not, and ENGINE_ID
+moves with them, in the release that already recompiles every diagram for D14. Two Docker builds
+produced the same 411 files.
+
+With D14, in one run of all three engines over the 26 fixtures 0.1.5 had (the minimum of three runs
+each, summed): 0.1.5 4,632 ms, without asyncify 2,560 ms, with this as well 2,481 ms, 46% less than
+0.1.5 and 38 to 49% less per fixture. `tex.wasm.gz` is 77,265 B where it was 121,527, `core.dump.gz`
+5,993,857 B where it was 5,938,537, and `main.js` 12,334,806 B where it was 12,320,058: the
+engine's archive lost 44 KB and the dump's gained 55 KB, both carried as base64.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

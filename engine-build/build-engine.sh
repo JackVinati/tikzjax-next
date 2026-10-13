@@ -327,6 +327,57 @@ process.exit(1);
 " || die "the library.js jumpOut patch did not apply"
 ok "a jump out of TeX calls library.jumpOut; nothing is left for asyncify"
 
+# ---------------------------------------------------------------------------------------------
+# TEX'S HASH TABLE, spread out.
+#
+# web2js's changes/memory.ch gives TeX room for 600,000 control sequences (hash_size) but leaves
+# hash_prime at tex.web's 1777. TeX hashes a name to one of hash_prime slots and chains a name whose
+# slot is taken into a free one elsewhere, so with 1777 the 33,822 names in the dump hang in chains
+# 19 long, and finding a name visits 11.3 slots on average, comparing names as it goes.
+#
+# 131071 (2^17 - 1) brings that to 2.0. A larger prime buys almost nothing more, because TeX's hash,
+# h = 2h + c over the name, gives names whose characters trade off against each other the same value
+# whatever the prime: at 510007, tex.web's 85% of hash_size, it is 1.9, and the longest chain is 26
+# either way. TeX time measured the same for both. What a larger prime does cost is memory: the slots
+# that hold names spread over hash_prime x 8 bytes, which is what the core dump's archive and a
+# reset that writes only the dump's non-zero bytes both pay for (internal/DECISIONS.md D15). The
+# table's size and place in memory stay as they were; only where each name sits in it moves, so the
+# dump's bytes change and TeX's output does not.
+#
+# memory.ch names hash_prime twice: in its @x part, which has to match tex.web as it stands, and in
+# the @y part that replaces it. Only the second changes, and only if it reads exactly as expected.
+HASH_PRIME=131071
+HASH_PRIME="$HASH_PRIME" node - <<'HASH' || die "the hash_prime patch did not apply — re-read web2js's changes/memory.ch"
+const fs = require('fs');
+const path = 'web2js/changes/memory.ch';
+const prime = process.env.HASH_PRIME;
+const before = `@d hash_size=600000 {maximum number of control sequences; it should be at most
+  about |(mem_max-mem_min)/10|}
+@d hash_prime=1777 {a prime number equal to about 85\\pct! of |hash_size|}
+`;
+const after = before.replace(
+    /@d hash_prime=1777 .*\n/,
+    `@d hash_prime=${prime} {a prime number; see engine-build/build-engine.sh}\n`
+);
+const text = fs.readFileSync(path, 'utf8');
+const found = text.split(before).length - 1;
+if (found !== 1) {
+    console.error(`memory.ch: expected its hash_size and hash_prime lines exactly once, found them ${found} times`);
+    process.exit(1);
+}
+const at = text.indexOf(before);
+if (text.lastIndexOf('@y', at) < text.lastIndexOf('@x', at)) {
+    console.error('memory.ch: the hash_prime to change is not in a replacement (@y) part');
+    process.exit(1);
+}
+fs.writeFileSync(path, text.replace(before, () => after));
+HASH
+[ "$(grep -c "^@d hash_prime=$HASH_PRIME " web2js/changes/memory.ch)" = 1 ] \
+    || die "memory.ch does not set hash_prime to $HASH_PRIME after the patch"
+[ "$(grep -c '^@d hash_prime=1777 ' web2js/changes/memory.ch)" = 1 ] \
+    || die "memory.ch no longer matches tex.web's hash_prime in its @x part"
+ok "hash_prime $HASH_PRIME of hash_size 600000"
+
 # Upstream's optimisation step, checked to be the asyncify one this replaces: if upstream changes how
 # it optimises the engine, that wants reading before it is replaced.
 UPSTREAM_OPT='wasm-opt --asyncify --pass-arg=asyncify-ignore-indirect --pass-arg=asyncify-imports@library.reset,library.getfilesize -O4 out.wasm -o tex.wasm'
@@ -536,6 +587,7 @@ web2js           ${WEB2JS_REF}
 wasm-opt         ${WASM_OPT[*]} (binaryen ${BINARYEN}), no asyncify
 tikzjax          ${TIKZJAX_REF}
 memory pages     ${PAGES} ($(( PAGES * 65536 / 1048576 )) MiB)
+hash_prime       ${HASH_PRIME} (hash_size 600000)
 tex_files        ${GOT}
 node             $(node --version)
 MANIFEST
