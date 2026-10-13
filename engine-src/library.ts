@@ -27,6 +27,8 @@
  *     rewinds: a run is TeX's main program, start to end. TeX's jump out of every procedure on a
  *     fatal error, which asyncify made, is a call to jumpOut, which ends the run there. Upstream's
  *     host waited for a `tex_final_end` that jump skips, so such a run never ended.
+ *  8. getfilesize answers -1 for a file it does not have, where upstream answered 0, and the engine's
+ *     \filesize then prints nothing, as pdfTeX's does (internal/DECISIONS.md D16).
  */
 
 import { tfmData } from '@drgrice1/dvi2html';
@@ -45,6 +47,8 @@ interface TexFile {
 	descriptor?: number;
 	stdin?: boolean;
 	stdout?: boolean;
+	/** Opened for writing, so the file exists from now on in this run (getfilesize). */
+	written?: boolean;
 }
 
 /** Files written during this run, plus per-run copies of bundled files. Cleared between runs. */
@@ -106,6 +110,19 @@ const resolveBundled = (filename: string): Uint8Array | undefined => {
 	return data;
 };
 
+/**
+ * A font's metrics from dvi2html's built-in table, or undefined for a font the table does not have,
+ * for which dvi2html throws.
+ */
+const builtinMetrics = (filename: string): Uint8Array | undefined => {
+	if (!filename.endsWith('.tfm')) return undefined;
+	try {
+		return Uint8Array.from(tfmData(filename.replace(/\.tfm$/, '')) as ArrayLike<number>);
+	} catch {
+		return undefined;
+	}
+};
+
 /** Names TeX asked for and we could not supply. Drives the plugin's "not bundled" error copy. */
 export const clearMissing = () => {
 	/* the sink owns accumulation; this exists so callers can reset per job */
@@ -164,15 +181,11 @@ const openSync = (filename: string, mode: 'r' | 'w'): number => {
 		// dead engine. Drawing them is a separate gap: dvi2html's own table has neither family,
 		// and of their faces only the Euler ones ship — rsfs has metrics and no web font at all
 		// (upstream #55, #84, #113).
-		try {
-			buffer = Uint8Array.from(tfmData(filename.replace(/\.tfm$/, '')) as ArrayLike<number>);
-		} catch {
-			buffer = resolveBundled(filename);
-			if (!buffer) {
-				missingSink?.(filename);
-				files.push({ filename, erstat: 1, eof: true });
-				return files.length - 1;
-			}
+		buffer = builtinMetrics(filename) ?? resolveBundled(filename);
+		if (!buffer) {
+			missingSink?.(filename);
+			files.push({ filename, erstat: 1, eof: true });
+			return files.length - 1;
 		}
 	} else if (mode === 'r') {
 		buffer = resolveBundled(filename);
@@ -206,6 +219,7 @@ const openSync = (filename: string, mode: 'r' | 'w'): number => {
 		eoln: false,
 		content: buffer ?? new Uint8Array(),
 		descriptor: files.length,
+		written: mode === 'w',
 	});
 
 	return files.length - 1;
@@ -387,15 +401,27 @@ export const rewrite = (length: number, pointer: number): number => {
 	return openSync(filename, 'w');
 };
 
+/**
+ * \filesize's answer (change 8): the size of the file in bytes, as TeX would read it, or -1 when
+ * there is none, for which \filesize prints nothing, as pdfTeX's does.
+ *
+ * Upstream answered 0 for a file it did not have, and LaTeX's \IfFileExists takes any answer that is
+ * not empty for a file that exists: every missing package, every \input of a missing file and every
+ * probe for an optional .cfg was found, and then read as an empty file. The name is looked up rather
+ * than opened, as upstream did, so asking adds nothing to the run's table of files. A file TeX wrote
+ * earlier in the run exists, and openSync gives it back empty, so its size here is 0.
+ */
 export const getfilesize = (length: number, pointer: number): number => {
 	let filename = readFilename(length, pointer);
 	if (filename.startsWith('{')) filename = filename.replace(/^\{/, '').replace(/\}.*/, '');
 	filename = filename.replace(/ +$/g, '').replace(/^\*/, '');
 	if (filename === 'TeXformats:TEX.POOL') filename = 'tex.pool';
 
-	if (openSync(filename, 'r') !== -1)
-		return filesystem[filename]?.length ?? resolveBundled(filename)?.length ?? 0;
-	return 0;
+	const bytes = filesystem[filename] ?? builtinMetrics(filename) ?? resolveBundled(filename);
+	if (bytes) return bytes.length;
+	if (files.some((f) => f.filename === filename && f.written)) return 0;
+	if (ERRSTAT_EXTENSIONS.test(filename) && !JOB_LOCAL.test(filename)) missingSink?.(filename);
+	return -1;
 };
 
 export const close = (descriptor: number) => {

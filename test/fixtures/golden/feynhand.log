@@ -17,7 +17,8 @@ L3 programming layer <2024-01-22>
 (pgflibrarypatterns.code.tex)) (tikzlibrarypositioning.code.tex)
 (tikzlibraryshapes.geometric.code.tex (pgflibraryshapes.geometric.code.tex))
 (tikzfeynhand.keys.code.tex)) (tikzlibrarygraphs.code.tex))
-("l3backend-dvips.def") (TeXinputs:"input.aux")
+("l3backend-dvips.def")
+No file input.aux.
 Package tikz-feynhand Warning: Consider loading TikZ-Feynhand with \usepackage[
 compat=1.1.0]{tikz-feynhand} so that you can be warned if TikZ-Feynhand changes
 . on input line 1.

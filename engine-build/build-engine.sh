@@ -384,10 +384,11 @@ ok "hash_prime $HASH_PRIME of hash_size 600000"
 # web2js builds TeX from tex.web and the change files listed in changes/change-order, which tie
 # applies one after the other, each to TeX as the ones before it left it (internal/DECISIONS.md D8).
 # engine-build/changes holds ours, for what LaTeX expects of the engine and web2js's do not give it:
-# the \ifincsname primitive (D16). Each goes at the end of the list, so it changes TeX as web2js
-# changed it, and tie stops the build if a change no longer finds the text it replaces. A change
-# file of web2js's own by the same name is not overwritten.
-OUR_CHANGES=(ifincsname.ch)
+# the \ifincsname primitive, and a \filesize that prints nothing for a file that does not exist
+# (D16). Each goes at the end of the list, so it changes TeX as web2js changed it, and tie stops the
+# build if a change no longer finds the text it replaces. A change file of web2js's own by the same
+# name is not overwritten.
+OUR_CHANGES=(ifincsname.ch filesize-missing.ch)
 for ch in "${OUR_CHANGES[@]}"; do
     [ -s "$SRC/changes/$ch" ] || die "the image has no engine-build/changes/$ch — rebuild it (npm run engine:image)"
     [ ! -e "web2js/changes/$ch" ] || die "web2js has a change file of its own named $ch — read it before adding ours"
@@ -397,6 +398,45 @@ done
 [ "$(tail -n ${#OUR_CHANGES[@]} web2js/changes/change-order | tr '\n' ' ')" = "$(printf 'changes/%s ' "${OUR_CHANGES[@]}")" ] \
     || die "our change files are not the last in web2js's change-order"
 ok "change files after web2js's: ${OUR_CHANGES[*]}"
+
+# web2js's library.js is the host the format is built with, and its getfilesize answered 0 for a
+# file kpathsea could not find, as engine-src/library.ts did. filesize-missing.ch has \filesize
+# print nothing for -1, so this host answers -1 too, and the format is built with \filesize as the
+# plugin runs it. It changes the format: expl3 decides the platform by asking for nul: and /dev/null,
+# and utf8.def asks for three .dfu files TeX Live does not have (D16).
+node - <<'FILESIZE' || die "the library.js getfilesize patch did not apply — re-read web2js's library.js"
+const fs = require('fs');
+const path = 'web2js/library.js';
+const before = `        filename = kpse.findFile(filename, format);
+
+        if (filename) {
+            try {
+                return fs.statSync(filename).size;
+            } catch {
+                return 0;
+            }
+        }
+
+        return 0;
+    },`;
+const after = before.replace(/return 0;/g, 'return -1;');
+const text = fs.readFileSync(path, 'utf8');
+const found = text.split(before).length - 1;
+if (found !== 1) {
+    console.error(`library.js: expected getfilesize's lookup exactly once, found it ${found} times`);
+    process.exit(1);
+}
+fs.writeFileSync(path, text.replace(before, () => after));
+FILESIZE
+node --input-type=commonjs -e "
+const lib = require(process.cwd() + '/web2js/library.js');
+const name = 'no-such-file-anywhere.tex';
+const memory = new WebAssembly.Memory({ initial: 1 });
+new Uint8Array(memory.buffer).set(Buffer.from(name));
+lib.setMemory(memory.buffer);
+process.exit(lib.getfilesize(name.length, 0) === -1 ? 0 : 1);
+" || die "web2js's library.js still gives a size for a file that does not exist"
+ok "library.js getfilesize answers -1 for a file that does not exist"
 
 # Upstream's optimisation step, checked to be the asyncify one this replaces: if upstream changes how
 # it optimises the engine, that wants reading before it is replaced.
@@ -415,10 +455,11 @@ done
 
 # tie stops on a change that does not match, so this is the other half: that each of ours is in the
 # TeX that was compiled. web2js/tex.web is the merged source build:tie wrote and build:tangle read.
-for marker in 'primitive("ifincsname",if_test,if_in_csname_code);'; do
+for marker in 'primitive("ifincsname",if_test,if_in_csname_code);' \
+              'filesize_code: if cur_val>=0 then print_int(cur_val);'; do
     grep -qF "$marker" web2js/tex.web || die "the TeX compiled lacks a change of ours: $marker"
 done
-ok "the TeX compiled carries \\ifincsname"
+ok "the TeX compiled carries \\ifincsname and \\filesize's nothing for a missing file"
 
 # In place of build:asyncify-wasm: the same -O4, and nothing beyond WebAssembly 1.0. The engine has
 # to compile in the WebViews minAppVersion admits, iOS 14.5's among them, and the later features

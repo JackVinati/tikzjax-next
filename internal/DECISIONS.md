@@ -827,6 +827,36 @@ bundled. All 27 fixtures that were there before give the same DVI, transcript an
 `core.dump.gz` 5,994,457 B; ENGINE_ID moves, in the release that already recompiles every diagram.
 Two Docker builds produced the same 411 files.
 
+**`\filesize` of a file that does not exist is empty.** web2js's `filesize.ch` prints whatever the
+host's `getfilesize` returns, and both hosts, web2js's `library.js` that the format is built with
+and `engine-src/library.ts`, returned 0 for a file they did not have. pdfTeX prints nothing. The
+LaTeX of TeX Live 2023 has `\IfFileExists` ask `\filesize`, through expl3's `\file_full_name:n`, and
+take any answer that is not empty for a file that exists, so on this engine every file existed: a missing
+package was found and read as an empty file, and so was every `\input` of a missing file and every
+probe for an optional file. The hosts now answer -1 for a file they do not have, and
+`filesize-missing.ch` has `\filesize` print the size only when there is one. `library.ts` looks the
+name up, in the run's own files, dvi2html's font metrics and the bundle, rather than opening it as
+upstream did, so asking puts nothing in the run's table of files; a file TeX wrote earlier in the
+run exists, with size 0, because that is how the host reads it back.
+
+A missing package now stops TeX at once, as it does on any TeX: LaTeX reports "File `x.sty' not
+found", asks for another name, and TeX in nonstop mode cannot read one, so it ends with an
+emergency stop, and the card shows LaTeX's message. 0.1.5 drew such a diagram, with the package
+read as empty, and anything the package would have defined was an undefined control sequence
+further on. A diagram that loads a package it does not use, `inputenc` or `fontenc` say, rendered in
+0.1.5 and fails now, as pre-flight's warning on that line ("will fail") has said all along. Every
+transcript changes in one place: LaTeX looks for `input.aux` at `\begin{document}`, and where it
+used to find an empty file under the `TeXinputs:` area it now says "No file input.aux.", as LaTeX
+does on a first run anywhere; the TS1 fixtures no longer read a missing `omscmr.fd`. Every DVI and
+SVG is as it was.
+
+The format changes as well. While it is built, expl3 sets `\c_sys_platform_str` by asking whether
+`nul:` and `/dev/null` exist; with `nul:` found it said `unknown`, and now says `unix`, as on any
+Linux TeX. `utf8.def` no longer reads `omlenc.dfu`, `omxenc.dfu` and `uenc.dfu` as empty files,
+because they do not exist, and expl3's cache of files it has found no longer lists them,
+`l3bitset.sty` or `nul:`. pgf 3.1.12, which TeX Live 2026 brings, decides how to load a library
+with `\IfFileExists`, so this has to come before that engine (`TODO.md`, E1).
+
 ---
 
 ## Open, still needing a human

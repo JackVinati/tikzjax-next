@@ -25,8 +25,8 @@ Package pgfplots: loading complementary utilities for your pgf version...
 (tikzlibrarydecorations.pathreplacing.code.tex
 (pgflibrarydecorations.pathreplacing.code.tex))
 (tikzlibrarypgfplots.contourlua.code.tex)) (tikzlibraryplotmarks.code.tex
-(pgflibraryplotmarks.code.tex))) ("l3backend-dvips.def") (TeXinputs:"input.aux"
-)
+(pgflibraryplotmarks.code.tex))) ("l3backend-dvips.def")
+No file input.aux.
 Package pgfplots notification 'compat/show suggested version=true': you might b
 enefit from \pgfplotsset{compat=1.18} (current compat level: 1.16).
 [1] (input.aux) )

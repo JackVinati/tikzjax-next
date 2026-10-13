@@ -286,8 +286,10 @@ installation. Restrict the `domain`, or skip the region around the asymptote.
 **Can I use `tikz-feynman`?** It needs LuaTeX, which this engine is not. `tikz-feynhand` is bundled:
 it is derived from `tikz-feynman`, with the vertices placed by hand. `%!tikz packages=tikz-feynhand`.
 
-**Is package X available?** See [What is bundled](#what-is-bundled). If it is not there, open an
-issue with the package request form and a diagram that needs it.
+**Is package X available?** See [What is bundled](#what-is-bundled). A package that is not there
+stops the diagram with LaTeX's own "File `X.sty' not found", even one the diagram never uses:
+`inputenc` and `fontenc` are not needed here, so remove those lines. For a package you do need,
+open an issue with the package request form and a diagram that needs it.
 
 **Can I use the diagrams outside Obsidian?** Copy or save one as SVG with the commands above, or
 finalize the note: each diagram becomes an SVG attachment and the source stays in the note, so it

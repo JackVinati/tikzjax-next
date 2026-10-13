@@ -1,0 +1,9 @@
+\edef\missing{\filesize{nosuchfile.tex}}
+\edef\present{\filesize{pgfplots.sty}}
+\ifx\missing\empty\else\errmessage{\string\filesize\space of a file that does not exist gave "\missing"}\fi
+\ifnum0\present>0 \else\errmessage{\string\filesize\space of pgfplots.sty gave "\present"}\fi
+\IfFileExists{nosuchfile.sty}{\errmessage{\string\IfFileExists\space found nosuchfile.sty}}{}
+\IfFileExists{pgfplots.sty}{}{\errmessage{\string\IfFileExists\space did not find pgfplots.sty}}
+\begin{tikzpicture}
+\node {pgfplots.sty is \present\ bytes};
+\end{tikzpicture}

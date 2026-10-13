@@ -3,6 +3,8 @@ This is e-TeX, Version 3.141592653-2.6 (preloaded format=latex 2026.1.1)
 (input.tex
 LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
-("l3backend-dvips.def") (TeXinputs:"input.aux") [1] (input.aux) )
+("l3backend-dvips.def")
+No file input.aux.
+[1] (input.aux) )
 Output written on input.dvi (1 page, 2156 bytes).
 Transcript written on input.log.

@@ -30,7 +30,7 @@ Package pgfplots: loading complementary utilities for your pgf version...
 (pgflibraryintersections.code.tex)) (tikzlibrarydecorations.softclip.code.tex
 (pgflibraryfillbetween.code.tex)))
 (tikzlibrarypgfplots.decorations.softclip.code.tex)) ("l3backend-dvips.def")
-(TeXinputs:"input.aux")
+No file input.aux.
 Package pgfplots notification 'compat/show suggested version=true': you might b
 enefit from \pgfplotsset{compat=1.18} (current compat level: 1.16).
 [1] (input.aux) )

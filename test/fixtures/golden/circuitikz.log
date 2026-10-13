@@ -11,6 +11,7 @@ L3 programming layer <2024-01-22>
  (pgfcircbipoles.tex) (pgfcirctripoles.tex) (pgfcircquadpoles.tex)
 (pgfcircmultipoles.tex) (pgfcirclabel.tex) (pgfcircvoltage.tex)
 (pgfcirccurrent.tex) (pgfcircflow.tex)) ("l3backend-dvips.def")
-(TeXinputs:"input.aux") [1] (input.aux) )
+No file input.aux.
+[1] (input.aux) )
 Output written on input.dvi (1 page, 6788 bytes).
 Transcript written on input.log.

@@ -1,0 +1,11 @@
+{
+  "dataset": { "texPackages": { "nosuchpackage": "" } },
+  "expect": "failure",
+  "reply": {
+    "type": "error",
+    "kind": "missing-file",
+    "message": "nosuchpackage.sty",
+    "firstError": "LaTeX Error: File `nosuchpackage.sty' not found."
+  },
+  "note": "A package the engine does not have. LaTeX says so and asks for another name, which TeX in nonstop mode cannot read, so it stops at once with an emergency stop. Until 0.2.0 the engine's \\filesize said 0 for a file that does not exist, so LaTeX found the package, read it as an empty file and drew the diagram, and anything the package defines was an undefined control sequence further on."
+}

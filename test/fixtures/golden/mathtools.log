@@ -6,6 +6,8 @@ L3 programming layer <2024-01-22>
 ("mathtools.sty" ("calc.sty") ("mhsetup.sty") ("amsmath.sty"
 For additional information on amsmath, use the `?' option.
 ("amstext.sty" ("amsgen.sty")) ("amsbsy.sty") ("amsopn.sty")))
-("l3backend-dvips.def") (TeXinputs:"input.aux") [1] (input.aux) )
+("l3backend-dvips.def")
+No file input.aux.
+[1] (input.aux) )
 Output written on input.dvi (1 page, 1428 bytes).
 Transcript written on input.log.

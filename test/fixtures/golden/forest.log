@@ -13,7 +13,8 @@ L3 programming layer <2024-01-22>
 (tikzlibrarycalc.code.tex) (pgflibraryintersections.code.tex
 (pgflibraryfpu.code.tex)) ("pgfopts.sty") ("etoolbox.sty") ("elocalloc.sty")
 ("environ.sty" ("trimspaces.sty")) ("xparse.sty" ("expl3.sty"
-("l3backend-dvips.def"))) ("inlinedef.sty")) (TeXinputs:"input.aux") [1]
-(input.aux) )
+("l3backend-dvips.def"))) ("inlinedef.sty"))
+No file input.aux.
+[1] (input.aux) )
 Output written on input.dvi (1 page, 7948 bytes).
 Transcript written on input.log.

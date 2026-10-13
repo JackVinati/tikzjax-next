@@ -19,6 +19,12 @@ top of its notes on GitHub, and will not publish a version that has none.
 - `~` is a non-breaking space, as in LaTeX. Until now every `~` in a diagram gave three TeX errors
   and drew a stray tilde before its space, because the engine lacked the `\ifincsname` primitive
   LaTeX's `~` asks for. A node with `Fig.~1` now comes out as TeX Live's own `latex` sets it.
+- A package or file the engine does not have stops the diagram at once, with LaTeX's "File
+  `x.sty' not found" on the error card. Until now the engine told LaTeX that every file existed,
+  and read a missing one as empty: the diagram went on, and anything the package defines failed
+  further down as an undefined control sequence. This includes a package the diagram never uses,
+  such as `inputenc` or `fontenc`, which this engine does not need: remove the line, as the
+  pre-flight warning on it says.
 
 ## 0.1.5 — 2026-10-13
 
