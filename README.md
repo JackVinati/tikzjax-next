@@ -343,7 +343,7 @@ it: **TypeScript 7**, esbuild 0.28, ESLint 10 with oxlint for the fast loop, Vit
 Obsidian 1.14 typings — while running on Obsidian 1.7.2 and up, because the floor is set by the API
 the plugin actually calls rather than by the version it was written against. The TeX side is a real
 TeX Live: pgf/TikZ 3.1.10, pgfplots 1.18.1 with its libraries, circuitikz, chemfig and the expl3
-layer, built from source in a container rather than vendored as a 7 MB blob nobody can look inside.
+layer.
 
 For contrast, the state of the plugin this forks from: its lockfile no longer installed at all, and
 its build config listed twenty-one `@codemirror` packages of which thirteen had been folded into
