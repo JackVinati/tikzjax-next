@@ -1,0 +1,10 @@
+{
+  "expect": "failure",
+  "reply": {
+    "type": "error",
+    "kind": "missing-file",
+    "firstError": "LaTeX Error: File `nosuchfile.tex' not found.",
+    "line": 3
+  },
+  "note": "\\batchmode, then an \\input of a file that does not exist, which ends the run. TeX says so in its transcript file only, and the file keeps the blank lines the terminal drops: LaTeX's message and its help put TeX's l.3 nine lines below the error, past where the worker looked for the line, so the card named no line. The worker reads the file without its blank lines now, as it reads the terminal."
+}

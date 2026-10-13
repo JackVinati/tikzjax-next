@@ -532,7 +532,13 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	// the file is read too, and if it has one, its lines join the log, after pass one's, under a line
 	// that says where they come from.
 	if (transcript.firstError === undefined && firstTranscriptFile !== undefined) {
-		const lines = new TextDecoder().decode(firstTranscriptFile).split('\n');
+		// Without its blank lines, as the terminal comes (library.ts writeToConsole). The file keeps
+		// them, and between a LaTeX error and TeX's `l.NN` they pushed the line past where
+		// readTranscript looks for it, so the card named no line.
+		const lines = new TextDecoder()
+			.decode(firstTranscriptFile)
+			.split('\n')
+			.filter((line) => line.length > 0);
 		const fromFile = readTranscript(lines);
 		if (fromFile.firstError !== undefined) {
 			transcript = fromFile;
