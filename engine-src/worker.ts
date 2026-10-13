@@ -419,11 +419,14 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	let reported: PassResult;
 	/** Whether the diagram being reported is pass two's. Decides whose transcript describes it. */
 	let adoptedSecondPass = false;
+	/** What the first pass wrote to TeX's transcript file, `input.log`, when the log is kept. */
+	let firstTranscriptFile: Uint8Array | undefined;
 	try {
 		library.writeFileSync(`${FIRST_JOB}.tex`, input);
 		const first = await runPass(FIRST_JOB);
 		firstEnd = log.length;
 		reported = first;
+		if (logging) firstTranscriptFile = readIfWritten(`${FIRST_JOB}.log`);
 
 		// A second pass is attempted only after a first pass that produced a drawable diagram: if
 		// pass one failed, ITS transcript is the answer, and re-running would only replace one
@@ -466,7 +469,29 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 
 	const durationMs = Math.round(performance.now() - started);
 	const gotSvg = reported.svg.includes('<svg');
-	const transcript = readTranscript(log.slice(0, firstEnd));
+	let transcript = readTranscript(log.slice(0, firstEnd));
+
+	// \batchmode sends everything TeX says after it to the transcript file and nothing to the
+	// terminal, so a diagram that put TeX in batch mode and then failed came back with no error at
+	// all, and a hundredth error read as "TeX produced no output". When the terminal shows no error,
+	// the file is read too, and if it has one, its lines join the log, after pass one's, under a line
+	// that says where they come from.
+	if (transcript.firstError === undefined && firstTranscriptFile !== undefined) {
+		const lines = new TextDecoder().decode(firstTranscriptFile).split('\n');
+		const fromFile = readTranscript(lines);
+		if (fromFile.firstError !== undefined) {
+			transcript = fromFile;
+			// Appended line by line rather than spread into one call: a traced run's file can hold
+			// more lines than JavaScriptCore takes arguments.
+			const later = log.splice(firstEnd);
+			log.push(
+				`(tikzjax) TeX said nothing more on the terminal; its transcript file, ${FIRST_JOB}.log, reads:`,
+			);
+			for (const line of lines) log.push(line);
+			firstEnd = log.length;
+			for (const line of later) log.push(line);
+		}
+	}
 
 	// Pass one's transcript is what gets reported. A second pass that fails differently — or that
 	// blames a line inside `input2.tex` — must not mask what the first run said. Pass two is

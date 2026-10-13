@@ -11,10 +11,12 @@
  * argument that a failure would then be upstream's rather than ours — but the fork now deliberately
  * FIXES upstream behaviour (a font outside dvi2html's built-in metric table threw out of openSync,
  * across the wasm frames, and killed the run; a single \mathfrak took the engine down). Measuring
- * against an engine we no longer ship would report our fixes as failures. `verify-fork.mjs` is what
- * proves fork and upstream agree wherever upstream works at all.
+ * against an engine we no longer ship would report our fixes as failures. Upstream's host cannot run
+ * this engine at all since it was built without asyncify; `verify-golden.mjs` holds every fixture to
+ * the output recorded from the last engine on which fork and upstream were shown to agree.
  *
- * It is also the harness the golden corpus uses: same inputs, same engine, byte-comparable output.
+ * What it writes to engine-build/out/smoke is the reference verify-worker compares the shipped worker
+ * with: same inputs, same engine, byte-comparable output.
  */
 import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
@@ -38,6 +40,8 @@ if (!engineFilesPresent(OUT) || !existsSync(join(DIST, 'tex_files'))) {
 
 // The fork takes its log sink by injection rather than reaching for postMessage.
 let transcript = [];
+/** The run's transcript file, input.log, by lines. */
+let transcriptFile = [];
 
 // The fork and dvi2html bundled together, dvi2html with the patch the shipped worker carries — so
 // these references draw what the plugin draws, and verify-worker can compare against them byte
@@ -78,6 +82,7 @@ library.setMissingFileSink((name) => missed.push(name));
  */
 async function texify(source, dataset = {}) {
 	transcript = [];
+	transcriptFile = [];
 	missed = [];
 
 	const input = library.buildInput(source, dataset).text;
@@ -95,11 +100,23 @@ async function texify(source, dataset = {}) {
 	// itself — not the { module, instance } pair you get when passing bytes. Upstream passes
 	// bytes and recompiles 526 KB of wasm on every single render; compiling once is the win
 	// internal/DECISIONS.md D10 item 3 describes, and this is what it looks like.
-	const instance = await WebAssembly.instantiate(code, { library, env: { memory } });
-	await library.executeAsync(instance.exports);
-
-	const dvi = library.readFileSync('input.dvi').buffer;
-	library.deleteEverything();
+	let dvi;
+	try {
+		const instance = await WebAssembly.instantiate(code, { library, env: { memory } });
+		await library.executeAsync(instance.exports);
+		dvi = library.readFileSync('input.dvi').buffer;
+	} finally {
+		// TeX's transcript file, read before the run's files go: after \batchmode TeX says nothing
+		// more on the terminal, and its errors are only here.
+		try {
+			transcriptFile = new TextDecoder().decode(library.readFileSync('input.log')).split('\n');
+		} catch {
+			transcriptFile = [];
+		}
+		// After a run that wrote no DVI too, or the next fixture would start with this one's files
+		// still in the table of files TeX has opened.
+		library.deleteEverything();
+	}
 
 	let html = '';
 	const sink = new Writable({
@@ -143,7 +160,8 @@ for (const name of names) {
 	const ms = Date.now() - started;
 
 	const log = result?.log ?? transcript;
-	const texError = log.find((l) => l.startsWith('! '));
+	// The transcript file when the terminal shows no error, as the worker reads it.
+	const texError = log.find((l) => l.startsWith('! ')) ?? transcriptFile.find((l) => l.startsWith('! '));
 	const wroteDvi = log.some((l) => l.includes('Output written on'));
 	const expectFailure = meta.expect === 'failure';
 	// A documented boundary rather than a regression. It still RUNS — so the day the limit is
@@ -154,7 +172,10 @@ for (const name of names) {
 	// A run "succeeded" if TeX wrote a DVI and dvi2html produced an <svg>. Structural, not heuristic.
 	const gotSvg = !!result?.svg && result.svg.includes('<svg');
 	const succeeded = !error && wroteDvi && gotSvg;
-	const passed = expectFailure ? !!texError : expectUnsupported ? true : succeeded;
+	// A diagram that draws while TeX reports an error is not a pass. Under \nonstopmode TeX goes on
+	// past most errors and still writes a page, so a drawing alone said nothing about whether TeX
+	// understood the source: every ~ drew a stray tilde and passed, with three errors in its log.
+	const passed = expectFailure ? !!texError : expectUnsupported ? true : succeeded && !texError;
 
 	if (result?.svg) writeFileSync(join(RESULTS, `${name}.svg`), result.svg);
 	writeFileSync(join(RESULTS, `${name}.log`), log.join('\n'));

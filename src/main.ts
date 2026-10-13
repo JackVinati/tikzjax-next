@@ -357,8 +357,8 @@ export default class TikzjaxNextPlugin extends Plugin {
 	 * One TeX job. The queue owns the slot, the clock and the abort; the host owns the worker.
 	 *
 	 * A timeout still terminates the worker rather than merely abandoning the wait, because that is
-	 * the only thing that actually stops a TeX run: an asyncify continuation that has suspended
-	 * cannot be resumed. The host does it, on the abort, and only to the worker that job is in —
+	 * the only thing that actually stops a TeX run: it is synchronous inside the worker, and one that
+	 * loops never yields. The host does it, on the abort, and only to the worker that job is in —
 	 * this used to kill whichever worker was current, interrupting jobs that had nothing to do with
 	 * the timeout and, after a kill during boot, the next job's fresh worker.
 	 */

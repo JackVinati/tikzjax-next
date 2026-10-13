@@ -621,6 +621,303 @@ output, and the repository can now prove that is what the output is.
 
 ---
 
+## D13 — A golden corpus carries what verify-fork proved
+
+**Amends D10, D11 and D12, which rest the claim that the fork changed nothing on `verify-fork`.**
+
+`scripts/verify-fork.mjs` rendered every fixture twice, through upstream's `library.js` exactly as
+shipped and through `engine-src/library.ts`, both driving the same `tex.wasm`, and required the two
+SVGs to be byte-identical. That is what let D10's changes be called a refactor. It needed upstream's
+host to be able to run our engine, and upstream's host loads every file by unwinding the wasm stack
+with asyncify and rewinding it when the file has arrived. Asyncify cost this engine nearly half of
+its TeX time, and an engine built without it has no unwind for upstream's host to call: the
+comparison would have nothing on one side.
+
+So what verify-fork proved is recorded instead. `test/fixtures/golden` holds what the 0.1.5 engine
+produces through the fork for each fixture: the sha256 of the DVI TeX wrote (`dvi.sha256`), the
+transcript (`<name>.log`), and the SVG the patched dvi2html draws (`<name>.svg`), 115 KB for 27
+fixtures. `npm run verify:golden` renders every fixture through the committed engine and the fork and
+requires all three to be byte-identical. CI and the Engine workflow run it where they ran
+verify-fork, which went with asyncify (D14).
+
+The corpus was checked against upstream when it was recorded. On the 0.1.5 engine, upstream's
+`library.js`, given the fork's fixed date for TeX's clock (it reads `new Date()`, and TeX stamps the
+date into the DVI), produces the same DVI and the same SVG as the corpus for the 24 fixtures
+verify-fork compared, and the same transcript for 22 of them. In `ts1-currency` and `ts1-small-caps`
+the transcript names a file neither host has, `omscmr.fd`, differently: upstream treats a missing
+`.fd` as an empty file and prints `("omscmr.fd")`; the fork reports it missing (its change 6), so TeX
+tries again under its `TeXinputs:` area, which the fork answers with an empty file as upstream does,
+and prints that name. `mathfrak` and `mathscr`, which upstream's host does not survive, are recorded
+from the fork alone, as verify-fork's skip list already had it.
+
+So the chain is: on 0.1.5 the fork matched upstream; the corpus is 0.1.5's output; every later
+engine and host has to match the corpus. Two things differ from verify-fork:
+
+- A fixture added later has no upstream reference. Its golden output is recorded from the engine of
+  the day, and proves only that nothing changed after that.
+- It is stricter. verify-fork drew both sides through the same converter, so a dvi2html change that
+  altered every SVG passed it; here it fails, and the DVI checksum says whether the engine or the
+  converter moved. Every fixture is compared, the two documented limits included, where verify-fork
+  skipped them.
+
+An intended change to a fixture's output is recorded with `npm run verify:golden -- --update` in the
+commit that makes it, and that commit says why; the corpus's diff is then exactly the change. A
+fixture with no golden output fails until it is recorded, and golden output for a fixture that no
+longer exists fails until it is removed. The corpus has a `.gitattributes` of its own, `-text`, so a
+Windows checkout does not give the transcripts CRLF endings, and the fixtures are read with LF line
+endings whatever the checkout. A Windows checkout gives them CRLF, and TeX sees the CR: it is printed
+in `broken`'s error context as `^^M`, and it makes the `expl3` diagram 3.33 pt wider, a DVI of its
+own. Recorded from CRLF sources, the corpus failed on an LF checkout, which is what CI has. With LF
+sources the 0.1.5 engine through the fork matches the corpus for all 26 fixtures it finishes, and
+through upstream's host for the same 24 and 22 as above.
+
+`engine-src/upstream/` stays as it is: it is what the fork's list of changes is written against.
+
+---
+
+## D14 — The engine is built without asyncify, and held to WebAssembly 1.0
+
+**Amends D10's item 2, which took the asyncify round trip out of file loading but left the
+instrumentation in.**
+
+Upstream's build optimises the compiled engine with `wasm-opt --asyncify`. Asyncify rewrites every
+function so that the whole stack can be unwound to the host and later rewound, and upstream's host
+unwinds to fetch each TeX file. Since D10 our host never unwinds: every file is in memory. But the
+instrumentation stayed in every function, and every call in TeX paid for it.
+
+`build-engine.sh` now optimises with `wasm-opt --mvp-features -O4` (binaryen 99.0.0, web2js's own)
+in place of upstream's `build:asyncify-wasm`, which it checks is still the step it replaces.
+Measured in Node 22.19 on the Windows desktop the engine is maintained on, TeX's own time
+(`executeAsync`, nothing else) over the 26 fixtures, the minimum of three runs of each, summed:
+
+| | 0.1.5 | without asyncify |
+|---|---:|---:|
+| TeX time, 26 fixtures | 4,572 ms | 2,641 ms (−42%; −33% to −45% per fixture) |
+| `tex.wasm` | 526,378 B | 356,290 B |
+| `tex.wasm.gz` | 121,527 B | 77,263 B |
+| `core.dump` | `86e786be…` | the same bytes |
+
+That is V8. Nothing has been measured on an iPhone, and JavaScriptCore's costs are not V8's. The dump
+being byte-identical says asyncify never touched TeX's memory: the format and the dump run computed
+the same thing with it and without. Every fixture's DVI, transcript and SVG are byte-identical too
+(D13).
+
+**The one jump that used it.** TeX's `jump_out`, where a fatal error, a capacity overflow and a
+hundredth error all end up, is `goto end_of_TEX`: a jump out of every procedure at once, which
+WebAssembly has no instruction for. web2js compiles it into an asyncify unwind. Upstream's host then
+waits for `tex_final_end`, which that jump skips, so a run that reached it never ended: "TeX capacity
+exceeded", an emergency stop in nonstop mode, a hundred errors, each waited for the plugin's timeout
+and was reported as slow rather than with TeX's message. The build now has web2js compile the jump
+into a call to `library.jumpOut` followed by `unreachable`, and `jumpOut` throws; `executeAsync`
+catches exactly that, ends the run and flushes what TeX was printing. The `runaway-macro` fixture,
+a macro that expands to itself, ended smoke with "unsettled top-level await" on the 0.1.5 engine; it
+now ends in 40 ms with "TeX capacity exceeded, sorry [input stack size=5000]", which the worker
+reports as a capacity error. What the jump does not do is TeX's `close_files_and_terminate`, so the
+transcript stops at the error's context, and a DVI begun before the jump would lack its postamble.
+That needs a page shipped before a fatal error, which a picture, shipped at `\end{document}`, does
+not do; web2c's `jump_out` closes the files first, and a change file could do the same here. D17
+does.
+
+**WebAssembly 1.0, and nothing later.** The engine has to compile in every WebView minAppVersion
+1.7.2 admits, iOS 14.5's and Chromium 106's among them, and later features give this code nothing:
+built with sign extension, bulk memory, SIMD and the rest enabled, binaryen 132's -O4 emits the same
+instructions (measured 2026-10-12). So `--mvp-features` is pinned in the build, where it also makes
+wasm-opt refuse an input that uses a later feature, and `scripts/wasm-mvp.mjs`, which decodes every
+section and instruction, holds the committed `tex.wasm.gz` to it in the tests and the freshly built
+one in the Engine workflow. Two flags are left out on purpose: `--all-features`, with which binaryen
+132 writes an import encoding V8 rejects, and `-tnh` (traps never happen), which was not measurably
+faster and lets binaryen assume that no instruction ever traps, so that a fault which stops the run
+today, an access out of bounds say, could be optimised into one that runs on.
+
+Optimising the same `out.wasm` with binaryen 132 instead of web2js's 99 measured 4% less TeX time
+(2,453 against 2,563 ms over 27 fixtures, the same method), and running 99's -O4 twice or its -O3
+nothing. That would add a build dependency web2js does not pin, so it is left for later
+(`TODO.md`).
+
+Every cached diagram is compiled once more after the update, because ENGINE_ID, the hash of the
+worker bundle, changes with `tex.wasm`.
+
+---
+
+## D15 — TeX hashes control sequences into 131,071 slots, not 1,777
+
+**Amends D8's finding 3: `memory.ch` sizes TeX's tables, and one of its numbers was left behind.**
+
+web2js's `changes/memory.ch` gives TeX room for 600,000 control sequences (`hash_size`) and leaves
+`hash_prime`, the number of slots a name is hashed into, at tex.web's 1,777. TeX chains a name whose
+slot is taken into a free slot elsewhere in the table, so the 33,822 names in the dump hung in chains
+19 long, and finding a name visited 11.3 slots on average, comparing names as it went. A fixture's
+run ends with between 34,075 names (`runaway-macro`) and 51,463 (`circuitikz`).
+
+`build-engine.sh` now sets `hash_prime` in `memory.ch`'s replacement text before the build, leaving
+the text it replaces, which has to match tex.web, alone. Each candidate was built and measured: the
+chains over the dump each build produced, TeX's time over the nine fixtures that take longest (the
+minimum of nine runs each, Node 22.19, the machine of D14, all candidates in one process), the
+archive, and the part of the dump that is not zero, counted in 4 KiB blocks:
+
+| hash_prime | slots visited to find a name | longest chain | TeX time, 9 largest | core.dump.gz | dump not zero |
+|---:|---:|---:|---:|---:|---:|
+| 1,777 | 11.31 | 59 | 2,055 ms | 5,938,537 B | 21.59 MiB |
+| 65,521 | 2.15 | 26 | 2,041 ms (−0.7%) | 5,977,785 B | 21.91 MiB |
+| **131,071** | 2.04 | 27 | 2,022 ms (−1.6%) | 5,993,857 B | 22.39 MiB |
+| 262,139 | 1.97 | 25 | 2,027 ms (−1.4%) | 6,010,960 B | 23.38 MiB |
+| 510,007 | 1.94 | 26 | 2,033 ms (−1.1%) | 6,026,862 B | 25.27 MiB |
+
+The gain is small and the runs are noisy: an earlier run of the same comparison gave 2,087, 2,039,
+2,033 and 2,025 ms for 1,777, 65,521, 131,071 and 510,007, and over all 27 fixtures 131,071 measured
+1.7% and 3.6% less than 1,777 in two runs. The primes above 1,777 differ from each other by less
+than one run differs from the next.
+
+TeX's hash is `h = 2h + c` over the name's characters, so names whose characters trade off against
+each other hash alike whatever the prime. That is why the longest chain stays at 25 to 27 for every
+prime from 65,521 up, and why the slots visited level off near two: past about 65,521 a larger prime
+buys nothing measurable. What it does cost is memory. The names spread over `hash_prime` × 8 bytes
+of the table, which the archive carries (in `main.js`, as base64) and a reset that writes only the
+dump's non-zero bytes copies on every render. 131,071 (2^17 − 1) takes the gain for 0.8 MiB and 55 KB,
+where tex.web's 85% of `hash_size`, 510,007, would take 3.7 MiB and 88 KB for the same time, and it
+leaves room for a document that defines twice the names `circuitikz` does.
+
+`hash_size` stays at 600,000. It is more than ten times the most names any fixture defines, and it
+sizes the hash table and the part of `eqtb` that belongs to control sequences, which is the memory
+layout the dump is cut to. Where each name sits in the table moves; the table does not. Every
+fixture's DVI, transcript and SVG are byte-identical (D13), the dump's bytes are not, and ENGINE_ID
+moves with them, in the release that already recompiles every diagram for D14. Two Docker builds
+produced the same 411 files.
+
+With D14, in one run of all three engines over the 26 fixtures 0.1.5 had (the minimum of three runs
+each, summed): 0.1.5 4,632 ms, without asyncify 2,560 ms, with this as well 2,481 ms, 46% less than
+0.1.5 and 38 to 49% less per fixture. `tex.wasm.gz` is 77,265 B where it was 121,527, `core.dump.gz`
+5,993,857 B where it was 5,938,537, and `main.js` 12,334,806 B where it was 12,320,058: the
+engine's archive lost 44 KB and the dump's gained 55 KB, both carried as base64.
+
+---
+
+## D16 — Change files of our own give TeX what LaTeX asks of it
+
+**Amends D8, which takes the change files web2js applies as the whole of this engine's TeX.**
+
+web2js builds TeX from `tex.web` and fifteen change files, e-TeX's and fourteen of its own, which
+add the primitives expl3 needs (D8). LaTeX asks the engine for more than that, and where a
+primitive is missing it either fails or quietly takes an older path. `engine-build/changes` holds
+change files of ours. `build-engine.sh` appends them to web2js's `changes/change-order`, so tie
+applies each to TeX as web2js's left it and stops the build if a change no longer finds the text
+it replaces, and then checks that the merged source carries each of them. The Dockerfile copies
+them into the image, and BUILD-MANIFEST names them.
+
+**`\ifincsname`.** pdfTeX's conditional, true while TeX expands what stands between `\csname` or
+`\ifcsname` and the `\endcsname` that ends it. LaTeX defines `~` as `\ifincsname` … `\else
+\nobreakspace \fi`, so on this engine every `~` was "Undefined control sequence", "Extra \else" and
+"Extra \fi", and drew the tilde, character 126 of the text font, ahead of its space: the `tilde`
+fixture came out 5.85 pt wider than it should. `ifincsname.ch` is pdfTeX's code for it, as
+`pdftex.web` has it: a flag, saved and set before `\csname` and `\ifcsname` expand their tokens and
+restored after, so a `\csname` inside another leaves the outer one's flag as it found it. With it,
+the `tilde` fixture's DVI is byte-identical to the one TeX Live 2023's `latex` (pdfTeX in DVI mode)
+writes for the same body behind the preamble the dump was made with, with `SOURCE_DATE_EPOCH` set
+to the engine's fixed date (run in the engine image); the engine before it differed in the width of
+the page.
+
+The format changes with it. LaTeX's `utf8.def` asks whether `\ifincsname` exists and, on an engine
+without it, loads `utf8-2018.def` instead, the UTF-8 support LaTeX had before 2019, kept for old
+e-pTeX builds. This engine had been loading that. Now it loads `utf8.def`'s own code, as pdfTeX
+does, in which a UTF-8 character is a `\protected` macro that gives its own bytes inside a
+`\csname`. The format is built from 145 files rather than 146, and BUILD-MANIFEST counts them now
+instead of saying 146. expl3 copies the primitive to `\tex_ifincsname:D` and uses it nowhere; of the
+other packages in TeX Live 2023 that test it (kvsetkeys, kvdefinekeys, babel, hologo, thmtools),
+none is bundled. All 27 fixtures that were there before give the same DVI, transcript and SVG
+(D13), and `scan:native` finds the same characters native. `tex.wasm` is 356,483 B, 77,339 gzipped,
+and `core.dump.gz` 5,994,457 B; ENGINE_ID moves, in the release that already recompiles every
+diagram. Two Docker builds produced the same 411 files.
+
+**`\filesize` of a file that does not exist is empty.** web2js's `filesize.ch` prints whatever the
+host's `getfilesize` returns, and both hosts, web2js's `library.js` that the format is built with
+and `engine-src/library.ts`, returned 0 for a file they did not have. pdfTeX prints nothing. The
+LaTeX of TeX Live 2023 has `\IfFileExists` ask `\filesize`, through expl3's `\file_full_name:n`,
+and take any answer that is not empty for a file that exists, so on this engine every file
+existed: a missing package was found and read as an empty file, and so was every `\input` of a
+missing file and every probe for an optional file. The hosts now answer -1 for a file they do not
+have, and `filesize-missing.ch` has `\filesize` print the size only when there is one. `library.ts`
+looks the name up, in the run's own files, dvi2html's font metrics and the bundle, rather than
+opening it as upstream did, so asking puts nothing in the run's table of files; a file TeX wrote
+earlier in the run exists, with size 0, because that is how the host reads it back.
+
+A missing package now stops TeX at once, as it does on any TeX: LaTeX reports "File `x.sty' not
+found", asks for another name, and TeX in nonstop mode cannot read one, so it ends with an
+emergency stop, and the card shows LaTeX's message. 0.1.5 drew such a diagram, with the package
+read as empty, and anything the package would have defined was an undefined control sequence
+further on. A diagram that loads a package it does not use, `inputenc` or `fontenc` say, rendered in
+0.1.5 and fails now, as pre-flight's warning on that line ("will fail") has said all along. Every
+transcript changes in one place: LaTeX looks for `input.aux` at `\begin{document}`, and where it
+used to find an empty file under the `TeXinputs:` area it now says "No file input.aux.", as LaTeX
+does on a first run anywhere; the TS1 fixtures no longer read a missing `omscmr.fd`. Every DVI and
+SVG is as it was.
+
+The format changes as well. While it is built, expl3 sets `\c_sys_platform_str` by asking whether
+`nul:` and `/dev/null` exist; with `nul:` found it said `unknown`, and now says `unix`, as on any
+Linux TeX. `utf8.def` no longer reads `omlenc.dfu`, `omxenc.dfu` and `uenc.dfu` as empty files,
+because they do not exist, and expl3's cache of files it has found no longer lists them,
+`l3bitset.sty` or `nul:`. pgf 3.1.12, which TeX Live 2026 brings, decides how to load a library
+with `\IfFileExists`, so this has to come before that engine (`TODO.md`, E1).
+
+---
+
+## D17 — A fatal error ends the run the way TeX ends it
+
+**Amends D14, which ends the run at TeX's jump out and leaves TeX's own ending out.**
+
+Since D14 TeX's `jump_out` calls the host's `jumpOut`, which ends the run where it stands. In
+`tex.web` the jump goes to `end_of_TEX`, where `close_files_and_terminate` finishes the DVI file,
+says "No pages of output." or "Output written on …", and closes the transcript; the jump through
+`jumpOut` passed over all of it. TeX writes its DVI in halves of a 16,384-byte buffer, so a page it
+had shipped before the error, which in a diagram is smaller than that, never reached the file: the
+DVI came out empty and the diagram failed, where any other TeX draws the page. The transcript
+ended at the error.
+
+Section 81 of `tex.web` says what a compiler with no jump out of a procedure should do: have
+`jump_out` call `close_files_and_terminate` before it ends the program, which is what web2c's TeX
+does. `engine-build/changes/jump-out.ch` does that, and `close_files_and_terminate` is written to be
+safe after a fatal error (section 1333). The `fatal-after-page` fixture ships a page and then
+`\input`s a file that does not exist: it used to come back as an empty DVI and a missing file, and
+now its page is drawn and the card shows LaTeX's "File `nosuchfile.tex' not found" with it, as
+pdflatex gives a PDF of the pages it shipped before stopping. The transcripts of `runaway-macro` and
+`missing-package` end with TeX's own last two lines now, "No pages of output." and "Transcript
+written on input.log."; no other fixture changes, and the dump is the same bytes, because nothing
+in the format build ends in a fatal error.
+
+**What reaches the card.** TeX prints an error to the terminal and to its transcript file,
+`input.log`, except in batch mode, where it prints to the file alone; the worker reads the
+terminal. A diagram that switched to `\batchmode` and then failed came back with no error, and a
+hundredth error, which ends the run, as "TeX produced no output". When the terminal shows no error,
+the worker now reads the file as well, and if the file has one, the card is built from it and the
+file's lines join the log, under a line that says where they come from.
+
+Each way TeX gives up has a fixture, and `verify:worker` holds the reply of the shipped worker to
+what the fixture says it must be, then has the same worker draw `basic` and requires the drawing it
+gives on its own. In Node, on the desktop D14 was measured on, each failure comes back in under
+100 ms, and in 300 to 400 ms the one that loads pgfplots first:
+
+| Fixture | How TeX gives up | Kind | First error on the card |
+|---|---|---|---|
+| `missing-package` | LaTeX asks for another name; nonstop mode cannot read one, so an emergency stop | `missing-file` | LaTeX Error: File `nosuchpackage.sty' not found. |
+| `missing-pgfplots-library` | `\input` of a file that does not exist: "job aborted, file error in nonstop mode" | `missing-file` | I can't find file `pgflibrarypgfplots.nosuchlibrary.code.tex'. |
+| `runaway-macro` | a macro that expands to itself: capacity exceeded | `capacity` | TeX capacity exceeded, sorry [input stack size=5000]. |
+| `batchmode-errors` | `\batchmode`, then a hundred errors | `tex-error` | Undefined control sequence. |
+| `fatal-after-page` | a page shipped, then a missing file | drawn, with the error | LaTeX Error: File `nosuchfile.tex' not found. |
+
+The plugin's time limit stays as it is. A TeX run is synchronous inside the worker, so a run that
+does not end, a `\loop` with no way out say, is still stopped only by terminating the worker; what
+no longer reaches the limit is a run TeX itself has given up on.
+
+D16 and D17 cost no TeX time that could be measured. Over the 26 fixtures 0.1.5 had, the minimum of
+three runs of each, summed, in Node 22.19 on the desktop of D14, two paired runs of the three
+engines gave 8,803 and 8,710 ms for 0.1.5, 4,547 and 4,460 ms for D15's engine, and 4,604 and
+4,450 ms for this one. Every figure is about twice D15's because the desktop was busy with other
+work while they were taken; the ratios are what the runs show, and the D15 engine and this one are
+within a run's noise of each other. `tex.wasm` is 356,500 B, 77,347 gzipped, `core.dump.gz`
+5,994,269 B and `main.js` 12,335,931 B, 1,125 B more than D15's. Nothing was measured on an iPhone.
+Two Docker builds of the final source produced the same 411 files, the ones committed.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

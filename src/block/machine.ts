@@ -240,10 +240,10 @@ function go(
 /**
  * `any → unload → DISPOSED`, with the one exception in the table.
  *
- * `abort()` is emitted from every phase but COMPILING. A started TeX run cannot be cancelled: the
- * only way to stop an asyncify'd `texify` is `Worker.terminate()`, which costs a respawn and
- * throws away work already paid for. Mid-flight termination is reserved for timeout, plugin unload
- * and backpressure — never for one block scrolling out of view.
+ * `abort()` is emitted from every phase but COMPILING. A started TeX run cannot be cancelled: it is
+ * synchronous inside the worker, and the only way to stop it is `Worker.terminate()`, which costs a
+ * respawn and throws away work already paid for. Mid-flight termination is reserved for timeout,
+ * plugin unload and backpressure — never for one block scrolling out of view.
  */
 function unload(state: State): [State, Effect[]] {
 	if (state.phase === 'COMPILING') {
@@ -414,9 +414,10 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 						{ kind: 'mountErrorCard', reason: event.reason },
 					]);
 				case 'timeout': {
-					// The worker is wedged inside an asyncify unwind and is never reused; the key is
-					// poisoned for the session so one bad diagram cannot starve the vault. Both happen
-					// even if this block is gone — they are engine hygiene, not presentation.
+					// The worker is still inside a TeX run that did not end — since 0.2.0 a run TeX
+					// gives up on ends by itself, so this is one that loops — and is never reused; the
+					// key is poisoned for the session so one bad diagram cannot starve the vault. Both
+					// happen even if this block is gone — they are engine hygiene, not presentation.
 					const cleanup: Effect[] = [{ kind: 'terminateWorker' }, { kind: 'poison' }];
 					if (state.unloaded) return go(state, { phase: 'DISPOSED' }, cleanup);
 					return go(state, { phase: 'FAILED', reason: 'timeout' }, [

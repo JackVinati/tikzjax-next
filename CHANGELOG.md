@@ -3,6 +3,32 @@
 What changed in each release, newest first. The release workflow puts a version's section at the
 top of its notes on GitHub, and will not publish a version that has none.
 
+## 0.2.0 — unreleased
+
+- TeX runs in a little over half the time: over the 26 diagrams 0.1.5 was tested with, its time went
+  from 4.6 s to 2.5 s, measured in Node, which runs JavaScript and WebAssembly with the same
+  engine as Obsidian on the desktop. The engine no longer carries asyncify, machinery in every
+  function that 0.1.5 no longer used and still paid for, and TeX looks up its macros in a table
+  spread wider, with shorter searches. Nothing has been measured on an iPhone or iPad yet. Diagrams
+  come out the same, byte for byte, apart from the changes below.
+- After updating, every cached diagram is compiled once more, the next time it is shown, because the
+  engine changed.
+- A diagram on which TeX gives up, with "TeX capacity exceeded" from a macro that never stops
+  expanding, an emergency stop, or a hundred errors, now fails at once with TeX's message, instead of
+  waiting out its time budget and being reported as too slow. That includes a `\usepgfplotslibrary`
+  the engine does not have. A diagram that switches TeX to `\batchmode`, which keeps TeX's messages
+  off the terminal, gets its error from TeX's transcript file instead of "TeX produced no output",
+  and a page TeX shipped before giving up is still drawn.
+- `~` is a non-breaking space, as in LaTeX. Until now every `~` in a diagram gave three TeX errors
+  and drew a stray tilde before its space, because the engine lacked the `\ifincsname` primitive
+  LaTeX's `~` asks for. A node with `Fig.~1` now comes out as TeX Live's own `latex` sets it.
+- A package or file the engine does not have stops the diagram at once, with LaTeX's "File
+  `x.sty' not found" on the error card. Until now the engine told LaTeX that every file existed,
+  and read a missing one as empty: the diagram went on, and anything the package defines failed
+  further down as an undefined control sequence. This includes a package the diagram never uses,
+  such as `inputenc` or `fontenc`, which this engine does not need: remove the line, as the
+  pre-flight warning on it says.
+
 ## 0.1.5 — 2026-10-13
 
 - After updating, every cached diagram is compiled once more, the next time it is shown: both the

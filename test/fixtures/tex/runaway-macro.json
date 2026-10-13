@@ -1,0 +1,9 @@
+{
+  "expect": "failure",
+  "reply": {
+    "type": "error",
+    "kind": "capacity",
+    "firstError": "TeX capacity exceeded, sorry [input stack size=5000]."
+  },
+  "note": "A macro that never stops expanding. TeX gives up with \"TeX capacity exceeded\" and its jump_out, which leaves every procedure at once, and the run must end there with TeX's message rather than wait for the plugin's timeout. Until 0.2.0 the engine made that jump with asyncify, and the run never finished."
+}

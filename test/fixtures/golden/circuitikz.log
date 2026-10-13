@@ -1,0 +1,17 @@
+This is e-TeX, Version 3.141592653-2.6 (preloaded format=latex 2026.1.1)
+**entering extended mode
+(input.tex
+LaTeX2e <2023-11-01> patch level 1
+L3 programming layer <2024-01-22>
+("circuitikz.sty" (tikzlibrarycalc.code.tex) (pgflibraryarrows.meta.code.tex)
+(tikzlibrarybending.code.tex (pgfmodulebending.code.tex
+(pgfmodulenonlineartransformations.code.tex) (pgflibrarycurvilinear.code.tex)))
+ (tikzlibraryfpu.code.tex (pgflibraryfpu.code.tex)) (pgfcirc.defines.tex)
+(pgfcircutils.tex) (pgfcircpath.tex) (pgfcircshapes.tex) (pgfcircmonopoles.tex)
+ (pgfcircbipoles.tex) (pgfcirctripoles.tex) (pgfcircquadpoles.tex)
+(pgfcircmultipoles.tex) (pgfcirclabel.tex) (pgfcircvoltage.tex)
+(pgfcirccurrent.tex) (pgfcircflow.tex)) ("l3backend-dvips.def")
+No file input.aux.
+[1] (input.aux) )
+Output written on input.dvi (1 page, 6788 bytes).
+Transcript written on input.log.

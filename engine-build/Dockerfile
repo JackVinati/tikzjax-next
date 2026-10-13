@@ -18,7 +18,7 @@ FROM ubuntu:24.04
 
 ARG TEXLIVE=apt
 
-# Node runs the engine BUILD only — web2js's tangle/compile/asyncify/initex and tikzjax's font and
+# Node runs the engine BUILD only — web2js's tangle/compile/optimise/initex and tikzjax's font and
 # tex_files pipeline — and none of it ships. It is pinned to an exact release, taken from
 # nodejs.org's own archive and checked against its published SHA-256, the way bakoma.zip is below:
 # that archive keeps every release forever, where a distribution repository drops old packages and
@@ -144,6 +144,8 @@ RUN set -eu; \
     echo "$BAKOMA_SHA256  /opt/src/bakoma.zip" | sha256sum -c -
 
 COPY pins.env tex-files.extra.json tex-files.collected.json build-engine.sh collect-tex-files.sh /opt/engine-build/
+# Our change files to TeX, which build-engine.sh applies after web2js's (internal/DECISIONS.md D16).
+COPY changes/ /opt/engine-build/changes/
 RUN chmod +x /opt/engine-build/build-engine.sh /opt/engine-build/collect-tex-files.sh
 
 WORKDIR /opt/engine-build

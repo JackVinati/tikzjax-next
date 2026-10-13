@@ -33,10 +33,11 @@ export const buildInput = (source: string, options: RenderOptions): TexInput => 
 	// user gave, so that a preamble file redefining one of the same commands still has the last word.
 	const shim = needsTs1Shim(`${given}\n${source}`) ? TS1_SHIM : '';
 
-	// \nonstopmode is why a bad diagram now produces a transcript instead of hanging. Without it
-	// TeX reaches the interactive `? ` prompt and suspends the asyncify'd wasm, and a suspended
-	// asyncify continuation cannot be resumed — only terminated. Upstream #18 #23 #27 #39 #51
-	// #82 #85 #89, roughly 22 reporters, are all downstream of this one token.
+	// \nonstopmode is why a bad diagram produces a transcript and, usually, a drawing. Without it
+	// TeX stops at the interactive `? ` prompt on the first error: upstream's engine then suspended
+	// its asyncify'd wasm for good, and this one, which reads the end of its terminal input there,
+	// stops the run with "Emergency stop" and draws nothing. Upstream #18 #23 #27 #39 #51 #82 #85
+	// #89, roughly 22 reporters, are all downstream of this one token.
 	const preamble = `\\nonstopmode${shim}${given}`;
 
 	const wrap = options.wrap ?? 'auto';

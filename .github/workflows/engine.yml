@@ -87,6 +87,12 @@ jobs:
       - name: Build the engine
         run: npm run engine:build
 
+      - name: The engine is WebAssembly 1.0
+        # Nothing from a later proposal, or the engine does not compile in the older WebViews
+        # minAppVersion admits (iOS 14.5, Chromium 106) while every desktop runs it. CI's tests check
+        # the committed engine the same way; this checks the one just built, before anything else.
+        run: node scripts/wasm-mvp.mjs engine-build/out/tex.wasm
+
       - name: The committed engine is the one this source produces
         # The compressed engine is committed so `npm run build` works in a clean checkout with no
         # Docker (internal/DECISIONS.md D12), which is only honest if it can be checked.
@@ -97,8 +103,8 @@ jobs:
         # reads it, so every runner produced a different core.dump. It was diagnosed at the time as
         # "Ubuntu's TeX Live moved" — but Ubuntu 24.04's texlive never changed; this file did.
         #
-        # The `format inputs` hash in BUILD-MANIFEST covers the 146 files the format is built from,
-        # language.dat included, and separates the two ways this step can fail:
+        # The `format inputs` hash in BUILD-MANIFEST covers the files the format is built from, 145
+        # of them, language.dat included, and separates the two ways this step can fail:
         #
         #   inputs differ  -> something the format reads changed: a texlive update, or a new source of
         #                     disorder like language.dat was. A warning, with the evidence printed —
@@ -147,10 +153,14 @@ jobs:
         # would otherwise notice.
         run: npm run smoke
 
-      - name: The fork still matches upstream
-        # engine-src/library.ts is a fork of a WebAssembly host. It is only defensible if it can
-        # show it changed nothing observable, everywhere it did not mean to.
-        run: npm run verify:fork
+      - name: Every fixture renders what the golden corpus recorded
+        # engine-src/library.ts is a fork of a WebAssembly host, and the engine is built differently
+        # from upstream's. Both are only defensible if they can show they changed nothing observable
+        # where they did not mean to. The corpus was recorded from the 0.1.5 engine, whose output
+        # verify-fork had shown to be upstream's; a rebuilt engine that changes any fixture's DVI,
+        # transcript or SVG fails here, unless the commit that changed it recorded the new output and
+        # said why (internal/DECISIONS.md D13).
+        run: npm run verify:golden
 
       - name: The shipped worker renders identically
         run: npm run verify:worker

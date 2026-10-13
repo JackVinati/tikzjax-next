@@ -1,0 +1,8 @@
+{
+  "expect": "failure",
+  "reply": {
+    "type": "ok",
+    "firstError": "LaTeX Error: Two \\documentclass or \\documentstyle commands."
+  },
+  "note": "A whole LaTeX file pasted into a block, upstream #52. The engine has its class loaded already, so LaTeX reports the second \\documentclass and goes on, and the diagram draws with the error on its card. Pre-flight used to warn that this hangs the render; on the engine built from source it never has."
+}

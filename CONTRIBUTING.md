@@ -42,7 +42,7 @@ npm run typecheck      # TypeScript 7
 npm run typecheck:legacy  # TypeScript 5, the one the store's review reads the code with
 npm test               # unit tests; `npm run test:coverage` adds coverage and its floors
 npm run smoke          # every fixture through the engine, headless
-npm run verify:fork    # our engine fork against the upstream it forked from, byte for byte
+npm run verify:golden  # every fixture against the output recorded in test/fixtures/golden
 npm run verify:worker  # the exact worker string that goes into main.js
 npm run build
 npm run scan:native -- --check   # about a minute
@@ -102,6 +102,11 @@ npm run engine:image   # container with a pinned TeX Live and the web2js toolcha
 npm run engine:build   # tex.wasm, core.dump, tex_files, fonts -> engine-build/out/
 npm run scan:native    # which characters that engine typesets -> src/source/native-unicode.ts
 ```
+
+TeX itself is `tex.web` with change files applied by tie: web2js's own, and then ours, in
+`engine-build/changes`, which the build appends to web2js's list (`internal/DECISIONS.md` D16). A
+change to what TeX does goes there, as one more change file, and the build stops if tie cannot apply
+it. The image carries a copy, so rebuild the image after editing one.
 
 Building the image is the only step that touches the network: it pins the upstream sources by commit
 (`engine-build/pins.env`) and the font archive by SHA-256, then bakes them in, so `engine:build`

@@ -170,10 +170,11 @@ export class WorkerHost implements TexHost {
 	 * Destroy the worker and interrupt everything outstanding — the job inside it and the ones
 	 * waiting for it alike.
 	 *
-	 * Terminating is mandatory, not defensive. A TeX run that gets stuck suspends the asyncify'd
-	 * wasm, and a suspended asyncify continuation cannot be resumed — only terminated. \nonstopmode
-	 * makes that far rarer (it is why the `broken` fixture now reports a line number instead of
-	 * hanging), but it is an optimisation; terminate-and-respawn is the guarantee.
+	 * Terminating is mandatory, not defensive. A TeX run is synchronous inside the worker, so one
+	 * that never ends — a \loop with no way out — holds it for good, and nothing but terminate()
+	 * stops it. Since 0.2.0 a run TeX gives up on ends by itself, with TeX's message (DECISIONS.md
+	 * D14, D17), and \nonstopmode keeps an ordinary error from waiting at TeX's `? ` prompt; neither
+	 * stops a run that loops. Terminate-and-respawn is the guarantee.
 	 *
 	 * The waiting jobs are interrupted too rather than handed a fresh worker, because the callers
 	 * here — backgrounding on a phone, above all — kill the worker to be rid of it, and booting
@@ -332,8 +333,8 @@ export class WorkerHost implements TexHost {
 	 * The caller stopped waiting: its timeout, or its startup allowance, ran out.
 	 *
 	 * A job abandoned mid-run takes the worker with it. It cannot be stopped any other way, and
-	 * nothing queued behind it could run until it ended — which, for a run wedged in an asyncify
-	 * unwind, is never. A job abandoned before the worker had it takes nothing with it, unless it
+	 * nothing queued behind it could run until it ended — which, for a run that loops, is never. A
+	 * job abandoned before the worker had it takes nothing with it, unless it
 	 * was the last one waiting on a boot: a boot that outlived a caller's whole startup allowance
 	 * is presumed wedged, and with nobody left waiting there is no reason to let it go on.
 	 */

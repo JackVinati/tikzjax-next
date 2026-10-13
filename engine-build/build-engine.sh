@@ -234,16 +234,265 @@ if (got !== '2026-1-1-0') { console.error('clock patch did not take: ' + got); p
 " || die "the library.js clock patch did not apply"
 ok "library.js clock pinned to 2026-01-01, so core.dump is reproducible"
 
+# ---------------------------------------------------------------------------------------------
+# NO ASYNCIFY, and the one jump that used it.
+#
+# Upstream optimises the compiled engine with `wasm-opt --asyncify`, which instruments every
+# function so that the stack can be unwound to the host and rewound later. Upstream's host unwinds
+# to fetch each TeX file over the network. engine-src/library.ts has every file in memory and never
+# unwinds, and the instrumentation alone cost 42% of TeX's time over the fixtures
+# (internal/DECISIONS.md D14), so the engine is optimised without it.
+#
+# One thing in the compiled TeX did use it. TeX's jump_out, where a fatal error, a capacity overflow
+# and a hundredth error all end up, is `goto end_of_TEX`: a jump out of every procedure at once to
+# the end of the main program, which WebAssembly has no instruction for. web2js compiles that jump,
+# and the INITEX-only `goto final_end` in pseudo_input, into an asyncify unwind. Without asyncify
+# its import would be left for the host to provide under asyncify's name, and an unwind that did not
+# happen would return into whatever called jump_out and let TeX carry on past a fatal error. So the
+# jump becomes a call to the host's `library.jumpOut`, which ends the run by throwing, followed by
+# `unreachable`, so that TeX traps rather than carries on should a host ever return from it. The jump
+# also passes over the close_files_and_terminate at end_of_TEX, so engine-build/changes/jump-out.ch
+# has jump_out call it first, as tex.web asks of a compiler that cannot make the jump (D17).
+#
+# Both edits are to web2js's code generator, before it compiles anything. Each must find what it
+# replaces exactly once and leave its replacement in place, or the build stops.
+node - <<'JUMP' || die "the jump_out patch did not apply — re-read web2js's goto.js and program.js"
+const fs = require('fs');
+const edit = (file, before, after) => {
+    const path = `web2js/${file}`;
+    const text = fs.readFileSync(path, 'utf8');
+    const found = text.split(before).length - 1;
+    if (found !== 1) {
+        console.error(`${file}: expected what is replaced exactly once, found it ${found} times`);
+        process.exit(1);
+    }
+    const patched = text.replace(before, () => after);
+    if (!patched.includes(after) || patched.includes(before)) process.exit(1);
+    fs.writeFileSync(path, patched);
+};
+
+edit(
+    'pascal/statements/goto.js',
+    `            const jmpbuf = (pages - 100) * 1024 * 64;
+            const jmpbuf_end = pages * 1024 * 64;
+
+            return module.block(null, [
+                module.i32.store(jmpbuf, 0, module.i32.const(0), module.i32.const(jmpbuf + 8)),
+                module.i32.store(jmpbuf + 4, 0, module.i32.const(0), module.i32.const(jmpbuf_end)),
+                module.call('start_unwind', [module.i32.const(jmpbuf)], Binaryen.none),
+                module.return(this.label == 9999 ? module.i32.const(0) : Binaryen.none)
+            ]);`,
+    `            return module.block(null, [module.call('jumpOut', [], Binaryen.none), module.unreachable()]);`
+);
+
+edit(
+    'pascal/program.js',
+    `        module.addFunctionImport(
+            'start_unwind',
+            'asyncify',
+            'start_unwind',
+            Binaryen.createType([Binaryen.i32]),
+            Binaryen.none
+        );
+        module.addFunctionImport('stop_unwind', 'asyncify', 'stop_unwind', Binaryen.createType([]), Binaryen.none);
+        module.addFunctionImport(
+            'start_rewind',
+            'asyncify',
+            'start_rewind',
+            Binaryen.createType([Binaryen.i32]),
+            Binaryen.none
+        );
+        module.addFunctionImport('stop_rewind', 'asyncify', 'stop_rewind', Binaryen.createType([]), Binaryen.none);`,
+    `        module.addFunctionImport('jumpOut', 'library', 'jumpOut', Binaryen.createType([]), Binaryen.none);`
+);
+JUMP
+if grep -rq "start_unwind\|'asyncify'" web2js/pascal; then
+    die "web2js's code generator still mentions asyncify after the jump_out patch"
+fi
+
+# initex.js runs the engine with web2js's own library.js, which has no jumpOut, and an engine with an
+# import its host lacks does not instantiate. When the format is built, a jump out means TeX hit a
+# fatal error reading latex.ltx, so it stops the build with TeX's transcript above it.
+grep -q "^module.exports = {" web2js/library.js || die "web2js library.js is no longer a CommonJS object literal"
+cat >> web2js/library.js <<'JUMPOUT'
+
+// Appended by engine-build/build-engine.sh. The engine is built without asyncify, and calls this
+// where TeX's jump_out jumps to the end of the program (a fatal error).
+module.exports.jumpOut = () => {
+    throw new Error('TeX stopped at a fatal error while the format was being built; its transcript is above');
+};
+JUMPOUT
+node --input-type=commonjs -e "
+const lib = require(process.cwd() + '/web2js/library.js');
+try { lib.jumpOut(); } catch { process.exit(0); }
+process.exit(1);
+" || die "the library.js jumpOut patch did not apply"
+ok "a jump out of TeX calls library.jumpOut; nothing is left for asyncify"
+
+# ---------------------------------------------------------------------------------------------
+# TEX'S HASH TABLE, spread out.
+#
+# web2js's changes/memory.ch gives TeX room for 600,000 control sequences (hash_size) but leaves
+# hash_prime at tex.web's 1777. TeX hashes a name to one of hash_prime slots and chains a name whose
+# slot is taken into a free one elsewhere, so with 1777 the 33,822 names in the dump hang in chains
+# 19 long, and finding a name visits 11.3 slots on average, comparing names as it goes.
+#
+# 131071 (2^17 - 1) brings that to 2.0. A larger prime buys almost nothing more, because TeX's hash,
+# h = 2h + c over the name, gives names whose characters trade off against each other the same value
+# whatever the prime: at 510007, tex.web's 85% of hash_size, it is 1.9, and the longest chain is 26
+# either way. TeX time measured the same for both. What a larger prime does cost is memory: the slots
+# that hold names spread over hash_prime x 8 bytes, which is what the core dump's archive and a
+# reset that writes only the dump's non-zero bytes both pay for (internal/DECISIONS.md D15). The
+# table's size and place in memory stay as they were; only where each name sits in it moves, so the
+# dump's bytes change and TeX's output does not.
+#
+# memory.ch names hash_prime twice: in its @x part, which has to match tex.web as it stands, and in
+# the @y part that replaces it. Only the second changes, and only if it reads exactly as expected.
+HASH_PRIME=131071
+HASH_PRIME="$HASH_PRIME" node - <<'HASH' || die "the hash_prime patch did not apply — re-read web2js's changes/memory.ch"
+const fs = require('fs');
+const path = 'web2js/changes/memory.ch';
+const prime = process.env.HASH_PRIME;
+const before = `@d hash_size=600000 {maximum number of control sequences; it should be at most
+  about |(mem_max-mem_min)/10|}
+@d hash_prime=1777 {a prime number equal to about 85\\pct! of |hash_size|}
+`;
+const after = before.replace(
+    /@d hash_prime=1777 .*\n/,
+    `@d hash_prime=${prime} {a prime number; see engine-build/build-engine.sh}\n`
+);
+const text = fs.readFileSync(path, 'utf8');
+const found = text.split(before).length - 1;
+if (found !== 1) {
+    console.error(`memory.ch: expected its hash_size and hash_prime lines exactly once, found them ${found} times`);
+    process.exit(1);
+}
+const at = text.indexOf(before);
+if (text.lastIndexOf('@y', at) < text.lastIndexOf('@x', at)) {
+    console.error('memory.ch: the hash_prime to change is not in a replacement (@y) part');
+    process.exit(1);
+}
+fs.writeFileSync(path, text.replace(before, () => after));
+HASH
+[ "$(grep -c "^@d hash_prime=$HASH_PRIME " web2js/changes/memory.ch)" = 1 ] \
+    || die "memory.ch does not set hash_prime to $HASH_PRIME after the patch"
+[ "$(grep -c '^@d hash_prime=1777 ' web2js/changes/memory.ch)" = 1 ] \
+    || die "memory.ch no longer matches tex.web's hash_prime in its @x part"
+ok "hash_prime $HASH_PRIME of hash_size 600000"
+
+# ---------------------------------------------------------------------------------------------
+# OUR CHANGE FILES, applied after web2js's.
+#
+# web2js builds TeX from tex.web and the change files listed in changes/change-order, which tie
+# applies one after the other, each to TeX as the ones before it left it (internal/DECISIONS.md D8).
+# engine-build/changes holds ours, for what LaTeX expects of the engine and web2js's do not give it:
+# the \ifincsname primitive, and a \filesize that prints nothing for a file that does not exist
+# (D16), and a fatal error that closes TeX's files before the jump below ends the run (D17). Each
+# goes at the end of the list, so it changes TeX as web2js changed it, and tie stops the build if a
+# change no longer finds the text it replaces. A change file of web2js's own by the same name is not
+# overwritten.
+OUR_CHANGES=(ifincsname.ch filesize-missing.ch jump-out.ch)
+for ch in "${OUR_CHANGES[@]}"; do
+    [ -s "$SRC/changes/$ch" ] || die "the image has no engine-build/changes/$ch — rebuild it (npm run engine:image)"
+    [ ! -e "web2js/changes/$ch" ] || die "web2js has a change file of its own named $ch — read it before adding ours"
+    cp "$SRC/changes/$ch" "web2js/changes/$ch"
+    printf 'changes/%s\n' "$ch" >> web2js/changes/change-order
+done
+[ "$(tail -n ${#OUR_CHANGES[@]} web2js/changes/change-order | tr '\n' ' ')" = "$(printf 'changes/%s ' "${OUR_CHANGES[@]}")" ] \
+    || die "our change files are not the last in web2js's change-order"
+ok "change files after web2js's: ${OUR_CHANGES[*]}"
+
+# web2js's library.js is the host the format is built with, and its getfilesize answered 0 for a
+# file kpathsea could not find, as engine-src/library.ts did. filesize-missing.ch has \filesize
+# print nothing for -1, so this host answers -1 too, and the format is built with \filesize as the
+# plugin runs it. It changes the format: expl3 decides the platform by asking for nul: and /dev/null,
+# and utf8.def asks for three .dfu files TeX Live does not have (D16).
+node - <<'FILESIZE' || die "the library.js getfilesize patch did not apply — re-read web2js's library.js"
+const fs = require('fs');
+const path = 'web2js/library.js';
+const before = `        filename = kpse.findFile(filename, format);
+
+        if (filename) {
+            try {
+                return fs.statSync(filename).size;
+            } catch {
+                return 0;
+            }
+        }
+
+        return 0;
+    },`;
+const after = before.replace(/return 0;/g, 'return -1;');
+const text = fs.readFileSync(path, 'utf8');
+const found = text.split(before).length - 1;
+if (found !== 1) {
+    console.error(`library.js: expected getfilesize's lookup exactly once, found it ${found} times`);
+    process.exit(1);
+}
+fs.writeFileSync(path, text.replace(before, () => after));
+FILESIZE
+node --input-type=commonjs -e "
+const lib = require(process.cwd() + '/web2js/library.js');
+const name = 'no-such-file-anywhere.tex';
+const memory = new WebAssembly.Memory({ initial: 1 });
+new Uint8Array(memory.buffer).set(Buffer.from(name));
+lib.setMemory(memory.buffer);
+process.exit(lib.getfilesize(name.length, 0) === -1 ? 0 : 1);
+" || die "web2js's library.js still gives a size for a file that does not exist"
+ok "library.js getfilesize answers -1 for a file that does not exist"
+
+# Upstream's optimisation step, checked to be the asyncify one this replaces: if upstream changes how
+# it optimises the engine, that wants reading before it is replaced.
+UPSTREAM_OPT='wasm-opt --asyncify --pass-arg=asyncify-ignore-indirect --pass-arg=asyncify-imports@library.reset,library.getfilesize -O4 out.wasm -o tex.wasm'
+[ "$(node -p "require('./web2js/package.json').scripts['build:asyncify-wasm']")" = "$UPSTREAM_OPT" ] \
+    || die "web2js's build:asyncify-wasm is no longer the step this build replaces — re-read package.json"
+
 # Upstream's `npm run build` is four steps and the last one is the flaky one, so run them
 # separately: a failure then names the step it happened in instead of "the build".
-for step in build:parser build:wasm build:asyncify-wasm build:initex; do
+for step in build:parser build:wasm build:initex; do
     node -e "process.exit(require('./web2js/package.json').scripts['$step'] ? 0 : 1)" \
         || die "web2js has no '$step' script — its build was restructured; re-read package.json"
 done
 
-( cd web2js && npm run build:parser && npm run build:wasm && npm run build:asyncify-wasm )
+( cd web2js && npm run build:parser && npm run build:wasm )
+
+# tie stops on a change that does not match, so this is the other half: that each of ours is in the
+# TeX that was compiled. web2js/tex.web is the merged source build:tie wrote and build:tangle read.
+for marker in 'primitive("ifincsname",if_test,if_in_csname_code);' \
+              'filesize_code: if cur_val>=0 then print_int(cur_val);' \
+              'begin close_files_and_terminate; goto end_of_TEX;'; do
+    grep -qF "$marker" web2js/tex.web || die "the TeX compiled lacks a change of ours: $marker"
+done
+ok "the TeX compiled carries \\ifincsname, \\filesize's nothing for a missing file, and jump_out's close"
+
+# In place of build:asyncify-wasm: the same -O4, and nothing beyond WebAssembly 1.0. The engine has
+# to compile in the WebViews minAppVersion admits, iOS 14.5's among them, and the later features
+# give this code nothing: binaryen 132 emits the same instructions with them enabled. --mvp-features
+# also makes wasm-opt refuse an input that uses one ("all used features should be allowed").
+# scripts/wasm-mvp.mjs checks the result again: the Engine workflow on this build, the tests on what
+# is committed. No -tnh: see D14.
+WASM_OPT=(--mvp-features -O4)
+( cd web2js && ./node_modules/.bin/wasm-opt "${WASM_OPT[@]}" out.wasm -o tex.wasm )
+BINARYEN=$(node -p "require('./web2js/node_modules/binaryen/package.json').version")
 
 [ -s web2js/tex.wasm ] || die "tex.wasm was not produced"
+node -e '
+const engine = new WebAssembly.Module(require("fs").readFileSync("web2js/tex.wasm"));
+const names = [
+    ...WebAssembly.Module.exports(engine).map((e) => e.name),
+    ...WebAssembly.Module.imports(engine).map((i) => `${i.module}.${i.name}`),
+];
+const left = names.filter((n) => /asyncify/.test(n));
+if (left.length) {
+    console.error(`tex.wasm still has ${left.join(", ")}`);
+    process.exit(1);
+}
+if (!names.includes("library.jumpOut")) {
+    console.error("tex.wasm does not import library.jumpOut, so a jump out of TeX has nowhere to go");
+    process.exit(1);
+}
+' || die "tex.wasm is not the engine without asyncify that this build makes"
+ok "tex.wasm imports library.jumpOut and has no asyncify left"
 [ -s web2js/tex.pool ] || die "tex.pool was not produced"
 ok "tex.wasm   $(stat -c%s web2js/tex.wasm) bytes  sha256 $(sha256sum web2js/tex.wasm | cut -c1-16)"
 ok "tex.pool   $(stat -c%s web2js/tex.pool) bytes  sha256 $(sha256sum web2js/tex.pool | cut -c1-16)"
@@ -254,9 +503,9 @@ ok "tex.pool   $(stat -c%s web2js/tex.pool) bytes  sha256 $(sha256sum web2js/tex
 # format is the signature of a lost write, and the good one here is 21427400 bytes.
 #
 # Retrying at all is safe because nothing downstream trusts the dump on faith: it must be exactly
-# pages x 65536 bytes, then 21 fixtures render through it, then verify-fork asserts the output is
-# byte-identical to upstream's engine. A dump that passes all three is a dump, whichever attempt
-# produced it.
+# pages x 65536 bytes, then every fixture renders through it, then verify-golden asserts that each
+# one's DVI, transcript and SVG are byte-identical to the golden corpus. A dump that passes all three
+# is a dump, whichever attempt produced it.
 DUMPED=
 for attempt in 1 2 3; do
     if ( cd web2js && npm run build:initex ) && [ -s web2js/core.dump ]; then
@@ -376,8 +625,9 @@ cp tikzjax/initex-files.json "$OUT/" 2>/dev/null || true   # `[ -f ] && cp` woul
 
 # The files the FORMAT was built from, hashed as one.
 #
-# core.dump is a snapshot of TeX's memory after reading latex.ltx and the LaTeX kernel — 146 files,
-# listed by name and resolved path in initex-files.json. Almost none of them are bundled, so none of
+# core.dump is a snapshot of TeX's memory after reading latex.ltx and the LaTeX kernel — 145 files,
+# listed by name and resolved path in initex-files.json. Counted, not written down: utf8-2018.def
+# left the list when the engine gained \ifincsname (D16). Almost none of them are bundled, so none of
 # them appear in tex_files or in tex-versions.txt: they are invisible inputs that decide the whole
 # 156 MiB artifact. When a rebuild produced a different dump with every visible input identical,
 # there was no way to tell whether the kernel had moved or the build had become nondeterministic.
@@ -396,6 +646,7 @@ for (const name of Object.keys(used).sort()) {
 process.stdout.write(hash.digest("hex").slice(0, 32));
 ')
 [ -n "$FORMAT_INPUTS" ] || die "could not hash the format inputs — is web2js/initex-files.json there?"
+FORMAT_FILES=$(node -p "Object.keys(require('./web2js/initex-files.json')).length")
 
 # No build date. This file is committed with the engine it describes, and a timestamp would make
 # every rebuild a diff — which would turn the reproducibility check in the Engine workflow into a
@@ -403,12 +654,15 @@ process.stdout.write(hash.digest("hex").slice(0, 32));
 cat > "$OUT/BUILD-MANIFEST.txt" <<MANIFEST
 tikzjax engine build
 texlive flavour  ${TEXLIVE_FLAVOUR:-unknown}
-format inputs    ${FORMAT_INPUTS} (sha256 over the 146 files latex.ltx pulled in)
+format inputs    ${FORMAT_INPUTS} (sha256 over the ${FORMAT_FILES} files latex.ltx pulled in)
+tex changes      ${OUR_CHANGES[*]} (engine-build/changes, after web2js's)
 tex banner       $(tex --version | head -1)
 TEXMFDIST        $(kpsewhich --var-value TEXMFDIST)
 web2js           ${WEB2JS_REF}
+wasm-opt         ${WASM_OPT[*]} (binaryen ${BINARYEN}), no asyncify
 tikzjax          ${TIKZJAX_REF}
 memory pages     ${PAGES} ($(( PAGES * 65536 / 1048576 )) MiB)
+hash_prime       ${HASH_PRIME} (hash_size 600000)
 tex_files        ${GOT}
 node             $(node --version)
 MANIFEST

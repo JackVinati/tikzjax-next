@@ -1,0 +1,38 @@
+This is e-TeX, Version 3.141592653-2.6 (preloaded format=latex 2026.1.1)
+**entering extended mode
+(input.tex
+LaTeX2e <2023-11-01> patch level 1
+L3 programming layer <2024-01-22>
+("pgfplots.sty" (pgfplots.revision.tex) (pgfplots.code.tex
+(pgfplotscore.code.tex (pgfplotssysgeneric.code.tex)) (pgfplotslibrary.code.tex
+) (pgfplotsoldpgfsupp_loader.code.tex (pgflibraryfpu.code.tex)
+Package pgfplots: loading complementary utilities for your pgf version...
+(pgfplotsoldpgfsupp_pgfutil-common-lists.tex)) (pgfplotsutil.code.tex
+(pgfplotsliststructure.code.tex) (pgfplotsliststructureext.code.tex)
+(pgfplotsarray.code.tex) (pgfplotsmatrix.code.tex)
+(pgfplotstableshared.code.tex) (pgfplotsdeque.code.tex)
+(pgfplotsbinary.code.tex (pgfplotsbinary.data.code.tex))
+(pgfplotsutil.verb.code.tex) (pgflibrarypgfplots.surfshading.code.tex))
+(pgfplotscolormap.code.tex (pgfplotscolor.code.tex))
+(pgfplotsstackedplots.code.tex) (pgfplotsplothandlers.code.tex
+(pgfplotsmeshplothandler.code.tex (pgfplotsmeshplotimage.code.tex)))
+(pgfplots.scaling.code.tex) (pgfplotscoordprocessing.code.tex)
+(pgfplots.errorbars.code.tex) (pgfplots.markers.code.tex)
+(pgfplotsticks.code.tex) (pgfplots.paths.code.tex)
+(tikzlibrarydecorations.code.tex (pgfmoduledecorations.code.tex))
+(tikzlibrarydecorations.pathmorphing.code.tex
+(pgflibrarydecorations.pathmorphing.code.tex))
+(tikzlibrarydecorations.pathreplacing.code.tex
+(pgflibrarydecorations.pathreplacing.code.tex))
+(tikzlibrarypgfplots.contourlua.code.tex)) (tikzlibraryplotmarks.code.tex
+(pgflibraryplotmarks.code.tex))) (tikzlibrarypgfplots.fillbetween.code.tex
+(tikzlibraryfillbetween.code.tex (tikzlibraryintersections.code.tex
+(pgflibraryintersections.code.tex)) (tikzlibrarydecorations.softclip.code.tex
+(pgflibraryfillbetween.code.tex)))
+(tikzlibrarypgfplots.decorations.softclip.code.tex)) ("l3backend-dvips.def")
+No file input.aux.
+Package pgfplots notification 'compat/show suggested version=true': you might b
+enefit from \pgfplotsset{compat=1.18} (current compat level: 1.16).
+[1] (input.aux) )
+Output written on input.dvi (1 page, 11212 bytes).
+Transcript written on input.log.

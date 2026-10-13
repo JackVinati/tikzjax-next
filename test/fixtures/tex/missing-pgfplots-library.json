@@ -1,0 +1,14 @@
+{
+  "dataset": {
+    "texPackages": { "pgfplots": "" },
+    "addToPreamble": "\\usepgfplotslibrary{nosuchlibrary}"
+  },
+  "expect": "failure",
+  "reply": {
+    "type": "error",
+    "kind": "missing-file",
+    "message": "pgflibrarypgfplots.nosuchlibrary.code.tex",
+    "firstError": "I can't find file `pgflibrarypgfplots.nosuchlibrary.code.tex'."
+  },
+  "note": "A pgfplots library the engine does not have. pgfplots falls back to \\input of a file that does not exist, TeX cannot ask for another name in nonstop mode, and the job ends with \"file error in nonstop mode\". On the 0.1.5 engine the run never ended, and the diagram waited for its time limit."
+}
