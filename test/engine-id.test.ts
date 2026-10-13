@@ -109,7 +109,9 @@ const sha256 = async (text: string): Promise<string> =>
 		.map((byte) => byte.toString(16).padStart(2, '0'))
 		.join('');
 
-describe('ENGINE_ID', () => {
+// Each build is quick, but the first in a process reads and encodes the committed engine, and under
+// coverage on a loaded machine that alone has taken 10 s, twice vitest's default.
+describe('ENGINE_ID', { timeout: 60_000 }, () => {
 	it('is the sha256 of the worker that ships, written into it in place of the placeholder', async () => {
 		const built = await buildWorker(ROOT, { plugins: [stubAssets()] });
 		expect(built.engineId).toMatch(/^[0-9a-f]{64}$/);
