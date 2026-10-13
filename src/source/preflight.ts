@@ -7,9 +7,9 @@ import { isNativeUnicode } from './native-unicode';
  *
  * Every rule here corresponds to a class of upstream bug report where the engine's own diagnostic
  * is absent, misleading, or arrives ten seconds late. Reading the source costs microseconds;
- * finding out from TeX costs a worker boot, a compile and — for #52 — a hang. The rules are chosen
- * on that basis, not on how easy they are to write: a lint that only restated what the TeX log
- * already says would be noise.
+ * finding out from TeX costs a worker boot and a compile. The rules are chosen on that basis, not
+ * on how easy they are to write: a lint that only restated what the TeX log already says would be
+ * noise.
  *
  * Pure by construction: no DOM, no clock, no engine. Everything it knows about the engine arrives
  * in `caps`, which is generated from the built image (protocol.ts `EngineInventory`) rather than
@@ -108,16 +108,18 @@ function checkPgfplotsLibraries(text: string, caps: EngineCapabilities, out: Dia
 
 function checkDocumentClass(text: string, out: Diagnostic[]): void {
 	// The format dump was produced with `\documentclass[margin=0pt]{standalone}` already executed,
-	// so a second one re-enters the class loader against a format that is past \begin{document}
-	// and never returns — the user sees a spinner, not an error. Position is not part of the test:
-	// wherever it appears, unless commented out, it hangs. #52 is the single most common user
-	// error in the tracker.
+	// so a second one is an error: LaTeX's "Two \documentclass or \documentstyle commands", or "Can
+	// be used only in preamble" in a block the worker wraps in \begin{document}. TeX goes on, and the
+	// diagram usually draws, with the error on its card. This used to say the render hangs; on the
+	// engine built from source (DECISIONS.md D8) it does not, measured on 0.1.5's engine and
+	// 0.2.0's. Position is not part of the test: wherever it appears, unless commented out, it is
+	// the error. #52 is the single most common user error in the tracker.
 	const m = /\\documentclass\b/.exec(text);
 	if (!m) return;
 
 	out.push({
 		kind: 'warning',
-		message: '\\documentclass is already loaded by the engine; a second one will hang this render.',
+		message: '\\documentclass is already loaded by the engine; LaTeX reports a second one as an error.',
 		line: lineOf(text, m.index),
 		hint:
 			'Delete the \\documentclass line. The engine starts from \\documentclass[margin=0pt]{standalone}, ' +

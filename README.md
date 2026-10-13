@@ -275,9 +275,10 @@ are faster, and a diagram you have already seen comes from the cache without run
 plugin sees them, and MathJax does not run TikZ. Use a `tikz` block; for an inline-looking result,
 `%!tikz align=left` and a small `width`.
 
-**My block starts with `\documentclass` and fails.** Remove the line. The engine already has its
-document class loaded, and `\usepackage` lines followed by `\begin{document}` work as they would in
-a LaTeX file.
+**My block starts with `\documentclass` and shows an error.** Remove the line. The engine already
+has its document class loaded, so LaTeX reports a second one ("Two \documentclass or \documentstyle
+commands"), and `\usepackage` lines followed by `\begin{document}` work as they would in a LaTeX
+file.
 
 **A plot of `tan`, `1/x` or `exp` fails with "Dimension too large".** pgfmath works in fixed point
 and overflows near an asymptote or a large value, the same way it does in a real LaTeX
