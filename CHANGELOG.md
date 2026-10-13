@@ -3,6 +3,20 @@
 What changed in each release, newest first. The release workflow puts a version's section at the
 top of its notes on GitHub, and will not publish a version that has none.
 
+## 0.2.0 — unreleased
+
+- After updating, every cached diagram is compiled once more, the next time it is shown: the
+  engine's id is part of the cache key, and it changed. Diagrams that rendered before come out the
+  same.
+- The TeX engine starts about three times as fast and needs far less memory. Most of its 156 MiB
+  starting image is zeros, and now only the rest ships, is unpacked when the engine starts, and is
+  copied into each compile. Measured on a Windows desktop in Node 22, whose JavaScript engine (V8)
+  is the one Obsidian's desktop app runs: starting 528 → 158 ms, buffers held once started 157.5 →
+  22.7 MiB, and each compile about 25 ms quicker to set up. Not yet measured on a phone.
+- The diagnostics view shows, under each diagram compiled, where its time went: waiting for other
+  diagrams, waiting for the engine to start, setting up TeX's memory, TeX itself, turning TeX's
+  output into SVG, and preparing that SVG for the note.
+
 ## 0.1.5 — 2026-10-13
 
 - After updating, every cached diagram is compiled once more, the next time it is shown: both the

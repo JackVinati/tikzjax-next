@@ -430,7 +430,10 @@ What replaces them, from reading the actual source:
    `filesystem[filename]` before the unwind is needed and skip the round-trip entirely. This is a
    larger win than anything in the old patch table and was not available while the engine was a blob.
 3. **Drop `coredump.slice(0)`** in `texify` — a redundant full copy of the dump. At `pages = 2500`
-   that is **156.25 MiB per render**, not the 68.75 MiB the old P1 targeted.
+   that is **156.25 MiB per render**, not the 68.75 MiB the old P1 targeted. (Since 0.2.0 the dump
+   is not written whole either: a run's new Memory is zero already, so it gets only the dump's
+   non-zero runs, 21.5 MiB, and those are all the build ships and the worker inflates at boot.
+   `engine-src/core-dump.ts`, `scripts/engine-assets.mjs` `packCoreDump`.)
 4. **Keep the decompressed bundled files across runs.** `deleteEverything()` clears `filesystem`
    wholesale, so the pgf/pgfplots tree is re-inflated on every render. Bundled files move to a
    separate map that survives; only per-job files are cleared. (Old P6, now free of its "changes
@@ -566,6 +569,11 @@ So the compressed engine is committed — 8.5 MB across 402 files:
 
 Everything else in `out/` stays ignored, including the uncompressed 156 MiB dump, the logs, and
 upstream's own 6.8 MB `dist/tikzjax.js`, which this plugin does not use at all.
+
+What `main.js` carries of the dump is not this archive as it stands. Since 0.2.0 the plugin build
+inflates it, cuts it into its non-zero runs and gzips only those, with pako at level 9 so that every
+Node gives the same bytes (`scripts/engine-assets.mjs` `packCoreDump`). The committed archive is
+unchanged by that, and is still what the Engine workflow rebuilds and diffs.
 
 **What makes this defensible rather than lazy is that the build is reproducible**, so the committed
 bytes are a claim CI can check rather than one it has to accept. Two things had to change for that:
