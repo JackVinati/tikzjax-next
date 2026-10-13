@@ -9,8 +9,8 @@ top of its notes on GitHub, and will not publish a version that has none.
   engine's id and the SVG pipeline's revision are part of the cache key, and both changed. Diagrams
   that rendered before come out the same. The original TikZJax plugin's cache is still read where
   there is one.
-- Letters with a dieresis (ä, ö, ü, also written as `\"u`) and symbols such as `\spadesuit` no
-  longer make the whole diagram fail. Nor do `°` `×` `±` `µ`, arrows, `™`, `§`, daggers, bulleted
+- Letters with a dieresis (ä, ö, ü, also written as `\"u`), `Ł` and `ł`, and symbols such as
+  `\spadesuit` no longer make the whole diagram fail. Nor do `°` `×` `±` `µ`, arrows, `™`, `§`, daggers, bulleted
   lists and siunitx's units such as `\degree`, `\micro` and `\ohm`; they are drawn from the math
   fonts, so `µ` comes out as the italic math `μ`.
 - Exporting a note to PDF finishes within about a minute however many diagrams are uncached, with

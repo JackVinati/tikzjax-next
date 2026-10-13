@@ -331,6 +331,16 @@ describe('preflight', () => {
 			},
 		);
 
+		// Ł and ł compiled cleanly and then lost the diagram inside the converter, whose glyph map
+		// had no entry for the stroke they are built with. The build gives it one, and the scan
+		// measures them native now.
+		it.each(['Łódź', 'Wrocław', 'Białystok', 'ŁUKASZ'])(
+			'says nothing about %s, which renders since the converter was fixed',
+			(label) => {
+				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
+			},
+		);
+
 		it('names a symbol it cannot draw with the math spelling that does render', () => {
 			const found = preflight('\\node {x ∈ ℝ, n → ∞};', baked(), caps());
 			expect(found).toHaveLength(1);

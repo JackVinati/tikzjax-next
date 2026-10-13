@@ -1,0 +1,3 @@
+{
+  "note": "LaTeX builds Ł and ł from character 32 of the text font, a stroke, and an L or an l. TeX set them cleanly, and then dvi2html failed with \"Cannot read properties of undefined (reading 'toString')\": its glyph map has no entry for the stroke, in any of the text fonts. Fixed by the build's patch to dvi2html (scripts/dvi2html-patch.mjs)."
+}

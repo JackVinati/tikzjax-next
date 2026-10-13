@@ -16,8 +16,9 @@
  *  - errors are classified and returned, not swallowed into a broken-image marker;
  *  - threads.js is replaced by the tagged protocol in ./protocol.ts;
  *  - TeX can be run TWICE, opt-in per block, so a second run can read the first run's .aux;
- *  - dvi2html is bundled with its TFM reader patched to read the last character of every font
- *    (scripts/dvi2html-patch.mjs), without which ä, ö, ü and \spadesuit lose the whole diagram.
+ *  - dvi2html is bundled with its TFM reader patched to read the last character of every font, and
+ *    its glyph map to fall back to the face's own codepoint for a character the map lacks
+ *    (scripts/dvi2html-patch.mjs), without which ä, ö, ü, \spadesuit, Ł and ł lose the whole diagram.
  */
 
 // `buffer/` with the trailing slash, which is the specifier that CANNOT resolve to Node's builtin:
