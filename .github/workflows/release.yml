@@ -139,6 +139,13 @@ jobs:
         run: |
           MIN=$(node -p 'require("./manifest.json").minAppVersion')
           {
+            case "${GITHUB_REF_NAME}" in
+              *-*)
+                echo "A pre-release, for testing. The community store keeps offering the latest full"
+                echo "release; [BRAT](https://github.com/TfTHacker/obsidian42-brat) installs this one."
+                echo
+                ;;
+            esac
             echo "### What's new in ${GITHUB_REF_NAME}"
             echo
             cat changes.md
@@ -223,9 +230,17 @@ jobs:
           GH_REPO: ${{ github.repository }}
         # --verify-tag: the tag must already exist on GitHub. Without it, gh creates a missing tag
         # from the default branch, and a release would point at a commit nobody tagged.
+        #
+        # A tag with a hyphen, such as 0.2.0-beta.1, is a pre-release. GitHub then keeps the last
+        # full release as the latest, so the store goes on offering that one, while BRAT, which
+        # looks at pre-releases too, offers this one to whoever installed the plugin through it.
+        # main's manifest.json is not bumped for a pre-release, and its tag is not on main.
         run: |
+          prerelease=()
+          case "${GITHUB_REF_NAME}" in *-*) prerelease=(--prerelease) ;; esac
           gh release create "${GITHUB_REF_NAME}" \
             --verify-tag \
+            "${prerelease[@]}" \
             --title "${GITHUB_REF_NAME}" \
             --notes-file release-notes.md \
             main.js manifest.json styles.css

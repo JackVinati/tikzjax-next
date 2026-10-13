@@ -8,7 +8,9 @@ import { describe, expect, it } from 'vitest';
  * is found while it is still an edit, not a failed release.
  *
  * The format the workflow relies on: one `## <version> — <date>` heading per release, newest
- * first, where the date is YYYY-MM-DD or, until the release is cut, the word `unreleased`.
+ * first, where the date is YYYY-MM-DD or, until the release is cut, the word `unreleased`. A
+ * pre-release such as `0.2.0-beta.1` has a section of its own while it is the newest; the release
+ * it leads to takes that section over.
  */
 
 // Vite's glob rather than node:fs, like preflight.test.ts: the tests typecheck without Node's types.
@@ -19,7 +21,7 @@ const files = import.meta.glob<string>(['../CHANGELOG.md', '../manifest.json', '
 });
 
 const HEADING = /^## (\S+)(.*)$/;
-const VERSION = /^\d+\.\d+\.\d+$/;
+const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/;
 const DATED = /^ — \d{4}-\d{2}-\d{2}$/;
 const UNRELEASED = ' — unreleased';
 
@@ -44,14 +46,20 @@ function sections(text: string): Section[] {
 	return out;
 }
 
+/** Semver's order, as far as these versions need it: 0.2.0-beta.1 < 0.2.0-beta.2 < 0.2.0. */
 function compare(a: string, b: string): number {
-	const pa = a.split('.').map(Number);
-	const pb = b.split('.').map(Number);
+	const [ca = '', pa = ''] = a.split('-', 2);
+	const [cb = '', pb = ''] = b.split('-', 2);
+	const na = ca.split('.').map(Number);
+	const nb = cb.split('.').map(Number);
 	for (let i = 0; i < 3; i++) {
-		const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+		const d = (na[i] ?? 0) - (nb[i] ?? 0);
 		if (d !== 0) return d;
 	}
-	return 0;
+	if (pa === pb) return 0;
+	if (pa === '') return 1;
+	if (pb === '') return -1;
+	return pa.localeCompare(pb, 'en', { numeric: true });
 }
 
 describe('CHANGELOG.md', () => {

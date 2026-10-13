@@ -24,7 +24,8 @@ describe('the banner on the built files', () => {
 	});
 
 	it('points at the notices for everything embedded, at that release', () => {
-		const version = /TikZJax Next (\d+\.\d+\.\d+)/.exec(js)?.[1] ?? '';
+		// The whole version, a pre-release's suffix included: its tag is 0.2.0-beta.1, not 0.2.0.
+		const version = /TikZJax Next (\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)/.exec(js)?.[1] ?? '';
 		for (const banner of [js, css]) expect(banner).toContain(`${REPOSITORY}/blob/${version}/NOTICE`);
 		expect(js).toContain('GPL-3.0-or-later');
 	});
