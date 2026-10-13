@@ -378,6 +378,26 @@ HASH
     || die "memory.ch no longer matches tex.web's hash_prime in its @x part"
 ok "hash_prime $HASH_PRIME of hash_size 600000"
 
+# ---------------------------------------------------------------------------------------------
+# OUR CHANGE FILES, applied after web2js's.
+#
+# web2js builds TeX from tex.web and the change files listed in changes/change-order, which tie
+# applies one after the other, each to TeX as the ones before it left it (internal/DECISIONS.md D8).
+# engine-build/changes holds ours, for what LaTeX expects of the engine and web2js's do not give it:
+# the \ifincsname primitive (D16). Each goes at the end of the list, so it changes TeX as web2js
+# changed it, and tie stops the build if a change no longer finds the text it replaces. A change
+# file of web2js's own by the same name is not overwritten.
+OUR_CHANGES=(ifincsname.ch)
+for ch in "${OUR_CHANGES[@]}"; do
+    [ -s "$SRC/changes/$ch" ] || die "the image has no engine-build/changes/$ch — rebuild it (npm run engine:image)"
+    [ ! -e "web2js/changes/$ch" ] || die "web2js has a change file of its own named $ch — read it before adding ours"
+    cp "$SRC/changes/$ch" "web2js/changes/$ch"
+    printf 'changes/%s\n' "$ch" >> web2js/changes/change-order
+done
+[ "$(tail -n ${#OUR_CHANGES[@]} web2js/changes/change-order | tr '\n' ' ')" = "$(printf 'changes/%s ' "${OUR_CHANGES[@]}")" ] \
+    || die "our change files are not the last in web2js's change-order"
+ok "change files after web2js's: ${OUR_CHANGES[*]}"
+
 # Upstream's optimisation step, checked to be the asyncify one this replaces: if upstream changes how
 # it optimises the engine, that wants reading before it is replaced.
 UPSTREAM_OPT='wasm-opt --asyncify --pass-arg=asyncify-ignore-indirect --pass-arg=asyncify-imports@library.reset,library.getfilesize -O4 out.wasm -o tex.wasm'
@@ -392,6 +412,13 @@ for step in build:parser build:wasm build:initex; do
 done
 
 ( cd web2js && npm run build:parser && npm run build:wasm )
+
+# tie stops on a change that does not match, so this is the other half: that each of ours is in the
+# TeX that was compiled. web2js/tex.web is the merged source build:tie wrote and build:tangle read.
+for marker in 'primitive("ifincsname",if_test,if_in_csname_code);'; do
+    grep -qF "$marker" web2js/tex.web || die "the TeX compiled lacks a change of ours: $marker"
+done
+ok "the TeX compiled carries \\ifincsname"
 
 # In place of build:asyncify-wasm: the same -O4, and nothing beyond WebAssembly 1.0. The engine has
 # to compile in the WebViews minAppVersion admits, iOS 14.5's among them, and the later features
@@ -553,8 +580,9 @@ cp tikzjax/initex-files.json "$OUT/" 2>/dev/null || true   # `[ -f ] && cp` woul
 
 # The files the FORMAT was built from, hashed as one.
 #
-# core.dump is a snapshot of TeX's memory after reading latex.ltx and the LaTeX kernel — 146 files,
-# listed by name and resolved path in initex-files.json. Almost none of them are bundled, so none of
+# core.dump is a snapshot of TeX's memory after reading latex.ltx and the LaTeX kernel — 145 files,
+# listed by name and resolved path in initex-files.json. Counted, not written down: utf8-2018.def
+# left the list when the engine gained \ifincsname (D16). Almost none of them are bundled, so none of
 # them appear in tex_files or in tex-versions.txt: they are invisible inputs that decide the whole
 # 156 MiB artifact. When a rebuild produced a different dump with every visible input identical,
 # there was no way to tell whether the kernel had moved or the build had become nondeterministic.
@@ -573,6 +601,7 @@ for (const name of Object.keys(used).sort()) {
 process.stdout.write(hash.digest("hex").slice(0, 32));
 ')
 [ -n "$FORMAT_INPUTS" ] || die "could not hash the format inputs — is web2js/initex-files.json there?"
+FORMAT_FILES=$(node -p "Object.keys(require('./web2js/initex-files.json')).length")
 
 # No build date. This file is committed with the engine it describes, and a timestamp would make
 # every rebuild a diff — which would turn the reproducibility check in the Engine workflow into a
@@ -580,7 +609,8 @@ process.stdout.write(hash.digest("hex").slice(0, 32));
 cat > "$OUT/BUILD-MANIFEST.txt" <<MANIFEST
 tikzjax engine build
 texlive flavour  ${TEXLIVE_FLAVOUR:-unknown}
-format inputs    ${FORMAT_INPUTS} (sha256 over the 146 files latex.ltx pulled in)
+format inputs    ${FORMAT_INPUTS} (sha256 over the ${FORMAT_FILES} files latex.ltx pulled in)
+tex changes      ${OUR_CHANGES[*]} (engine-build/changes, after web2js's)
 tex banner       $(tex --version | head -1)
 TEXMFDIST        $(kpsewhich --var-value TEXMFDIST)
 web2js           ${WEB2JS_REF}

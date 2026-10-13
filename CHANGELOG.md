@@ -16,6 +16,9 @@ top of its notes on GitHub, and will not publish a version that has none.
 - A diagram on which TeX gives up, with "TeX capacity exceeded" from a macro that never stops
   expanding, an emergency stop, or a hundred errors, now fails at once with TeX's message, instead of
   waiting out its time budget and being reported as too slow.
+- `~` is a non-breaking space, as in LaTeX. Until now every `~` in a diagram gave three TeX errors
+  and drew a stray tilde before its space, because the engine lacked the `\ifincsname` primitive
+  LaTeX's `~` asks for. A node with `Fig.~1` now comes out as TeX Live's own `latex` sets it.
 
 ## 0.1.5 — 2026-10-13
 

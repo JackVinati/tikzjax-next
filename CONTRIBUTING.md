@@ -103,6 +103,11 @@ npm run engine:build   # tex.wasm, core.dump, tex_files, fonts -> engine-build/o
 npm run scan:native    # which characters that engine typesets -> src/source/native-unicode.ts
 ```
 
+TeX itself is `tex.web` with change files applied by tie: web2js's own, and then ours, in
+`engine-build/changes`, which the build appends to web2js's list (`internal/DECISIONS.md` D16). A
+change to what TeX does goes there, as one more change file, and the build stops if tie cannot apply
+it. The image carries a copy, so rebuild the image after editing one.
+
 Building the image is the only step that touches the network: it pins the upstream sources by commit
 (`engine-build/pins.env`) and the font archive by SHA-256, then bakes them in, so `engine:build`
 runs entirely offline. The Engine workflow rebuilds the engine and diffs it against what is

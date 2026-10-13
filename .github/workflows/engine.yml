@@ -103,8 +103,8 @@ jobs:
         # reads it, so every runner produced a different core.dump. It was diagnosed at the time as
         # "Ubuntu's TeX Live moved" — but Ubuntu 24.04's texlive never changed; this file did.
         #
-        # The `format inputs` hash in BUILD-MANIFEST covers the 146 files the format is built from,
-        # language.dat included, and separates the two ways this step can fail:
+        # The `format inputs` hash in BUILD-MANIFEST covers the files the format is built from, 145
+        # of them, language.dat included, and separates the two ways this step can fail:
         #
         #   inputs differ  -> something the format reads changed: a texlive update, or a new source of
         #                     disorder like language.dat was. A warning, with the evidence printed —

@@ -791,6 +791,44 @@ engine's archive lost 44 KB and the dump's gained 55 KB, both carried as base64.
 
 ---
 
+## D16 — Change files of our own give TeX what LaTeX asks of it
+
+**Amends D8, which takes the change files web2js applies as the whole of this engine's TeX.**
+
+web2js builds TeX from `tex.web` and fifteen change files, e-TeX's and fourteen of its own, which
+add the primitives expl3 needs (D8). LaTeX asks the engine for more than that, and where a
+primitive is missing it either fails or quietly takes an older path. `engine-build/changes` holds
+change files of ours. `build-engine.sh` appends them to web2js's `changes/change-order`, so tie
+applies each to TeX as web2js's left it and stops the build if a change no longer finds the text
+it replaces, and then checks that the merged source carries each of them. The Dockerfile copies
+them into the image, and BUILD-MANIFEST names them.
+
+**`\ifincsname`.** pdfTeX's conditional, true while TeX expands what stands between `\csname` or
+`\ifcsname` and the `\endcsname` that ends it. LaTeX defines `~` as `\ifincsname` … `\else
+\nobreakspace \fi`, so on this engine every `~` was "Undefined control sequence", "Extra \else" and
+"Extra \fi", and drew the tilde, character 126 of the text font, ahead of its space: the `tilde`
+fixture came out 5.85 pt wider than it should. `ifincsname.ch` is pdfTeX's code for it, as
+`pdftex.web` has it: a flag, saved and set before `\csname` and `\ifcsname` expand their tokens and
+restored after, so a `\csname` inside another leaves the outer one's flag as it found it. With it,
+the `tilde` fixture's DVI is byte-identical to the one TeX Live 2023's `latex` (pdfTeX in DVI mode)
+writes for the same body behind the preamble the dump was made with, with `SOURCE_DATE_EPOCH` set
+to the engine's fixed date (run in the engine image); the engine before it differed in the width of
+the page.
+
+The format changes with it. LaTeX's `utf8.def` asks whether `\ifincsname` exists and, on an engine
+without it, loads `utf8-2018.def` instead, the UTF-8 support LaTeX had before 2019, kept for old
+e-pTeX builds. This engine had been loading that. Now it loads `utf8.def`'s own code, as pdfTeX
+does, in which a UTF-8 character is a `\protected` macro, and its own bytes inside a `\csname`. The
+format is built from 145 files rather than 146, and BUILD-MANIFEST counts them now instead of
+saying 146. expl3 copies the primitive to `\tex_ifincsname:D` and uses it nowhere; of the other
+packages in TeX Live 2023 that test it (kvsetkeys, kvdefinekeys, babel, hologo, thmtools), none is
+bundled. All 27 fixtures that were there before give the same DVI, transcript and SVG (D13), and
+`scan:native` finds the same characters native. `tex.wasm` is 356,483 B, 77,339 gzipped, and
+`core.dump.gz` 5,994,457 B; ENGINE_ID moves, in the release that already recompiles every diagram.
+Two Docker builds produced the same 411 files.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

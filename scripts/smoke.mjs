@@ -161,7 +161,10 @@ for (const name of names) {
 	// A run "succeeded" if TeX wrote a DVI and dvi2html produced an <svg>. Structural, not heuristic.
 	const gotSvg = !!result?.svg && result.svg.includes('<svg');
 	const succeeded = !error && wroteDvi && gotSvg;
-	const passed = expectFailure ? !!texError : expectUnsupported ? true : succeeded;
+	// A diagram that draws while TeX reports an error is not a pass. Under \nonstopmode TeX goes on
+	// past most errors and still writes a page, so a drawing alone said nothing about whether TeX
+	// understood the source: every ~ drew a stray tilde and passed, with three errors in its log.
+	const passed = expectFailure ? !!texError : expectUnsupported ? true : succeeded && !texError;
 
 	if (result?.svg) writeFileSync(join(RESULTS, `${name}.svg`), result.svg);
 	writeFileSync(join(RESULTS, `${name}.log`), log.join('\n'));

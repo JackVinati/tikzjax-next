@@ -1,0 +1,3 @@
+{
+  "note": "LaTeX's ~ asks \\ifincsname whether it is inside a \\csname, and the engine had no \\ifincsname: every ~ gave three errors (Undefined control sequence, Extra \\else, Extra \\fi) and set a stray tilde before its space. engine-build/changes/ifincsname.ch adds the primitive, as pdfTeX has it."
+}

@@ -144,6 +144,8 @@ RUN set -eu; \
     echo "$BAKOMA_SHA256  /opt/src/bakoma.zip" | sha256sum -c -
 
 COPY pins.env tex-files.extra.json tex-files.collected.json build-engine.sh collect-tex-files.sh /opt/engine-build/
+# Our change files to TeX, which build-engine.sh applies after web2js's (internal/DECISIONS.md D16).
+COPY changes/ /opt/engine-build/changes/
 RUN chmod +x /opt/engine-build/build-engine.sh /opt/engine-build/collect-tex-files.sh
 
 WORKDIR /opt/engine-build
