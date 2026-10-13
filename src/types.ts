@@ -6,9 +6,9 @@
  * unit-tested in Node with no DOM. The Obsidian-facing adapters live in src/platform/.
  */
 
-import type { RenderOptions, TexErrorKind } from '../engine-src/protocol';
+import type { RenderOptions, RenderTimings, TexErrorKind } from '../engine-src/protocol';
 
-export type { RenderOptions, TexErrorKind };
+export type { RenderOptions, RenderTimings, TexErrorKind };
 
 // -------------------------------------------------------------------------------------------
 // Per-block options
@@ -136,6 +136,8 @@ export interface TexResult {
 	svg: string;
 	log: string[];
 	durationMs: number;
+	/** Where the time went, when the engine said: see TexTimings. */
+	timings?: TexTimings | undefined;
 	/** TeX recovered but complained. The diagram mounts with a warning rather than an error. */
 	firstError?: string | undefined;
 	/**
@@ -143,6 +145,26 @@ export interface TexResult {
 	 * above the block are 0, -1, … and are in the preamble; see engine/worker-host.ts `blockLine`.
 	 */
 	line?: number | undefined;
+}
+
+/** The worker's own steps (engine-src/protocol.ts), and what the host saw of the engine's start. */
+export interface TexTimings extends RenderTimings {
+	/**
+	 * How long this job waited for the engine to start, when it did: from the job reaching the host,
+	 * or the engine being created if that was later, to the engine saying it was ready.
+	 */
+	startMs?: number | undefined;
+}
+
+/**
+ * Where one compile's time went, for the diagnostics view: the engine's steps as far as it timed
+ * them, and around them the block's own waiting for the queue and the SVG pipeline it ran after.
+ */
+export interface CompileTimings extends Partial<TexTimings> {
+	/** From the block asking for a compile to the queue starting it. */
+	queueMs: number;
+	/** The SVG pipeline, from the engine's output to what is mounted. */
+	postMs: number;
 }
 
 export class TexError extends Error {

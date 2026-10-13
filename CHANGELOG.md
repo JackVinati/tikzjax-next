@@ -5,14 +5,20 @@ top of its notes on GitHub, and will not publish a version that has none.
 
 ## 0.2.0 — unreleased
 
+- After updating, every cached diagram is compiled once more, the next time it is shown: the
+  engine's id is part of the cache key, and it changed. Diagrams that rendered before come out the
+  same, byte for byte, apart from the changes below.
 - TeX runs in a little over half the time: over the 26 diagrams 0.1.5 was tested with, its time went
   from 4.6 s to 2.5 s, measured in Node, which runs JavaScript and WebAssembly with the same
   engine as Obsidian on the desktop. The engine no longer carries asyncify, machinery in every
   function that 0.1.5 no longer used and still paid for, and TeX looks up its macros in a table
-  spread wider, with shorter searches. Nothing has been measured on an iPhone or iPad yet. Diagrams
-  come out the same, byte for byte, apart from the changes below.
-- After updating, every cached diagram is compiled once more, the next time it is shown, because the
-  engine changed.
+  spread wider, with shorter searches.
+- The TeX engine starts about three times as fast and needs far less memory. Most of its 156 MiB
+  starting image is zeros, and now only the rest ships, is unpacked when the engine starts, and is
+  copied into each compile. Measured on a Windows desktop in Node 22, whose JavaScript engine (V8)
+  is the one Obsidian's desktop app runs: starting 528 → 158 ms, buffers held once started 157.5 →
+  22.7 MiB, and each compile about 25 ms quicker to set up. Nothing has been measured on an iPhone
+  or iPad yet.
 - A diagram on which TeX gives up, with "TeX capacity exceeded" from a macro that never stops
   expanding, an emergency stop, or a hundred errors, now fails at once with TeX's message, instead of
   waiting out its time budget and being reported as too slow. That includes a `\usepgfplotslibrary`
@@ -28,6 +34,9 @@ top of its notes on GitHub, and will not publish a version that has none.
   further down as an undefined control sequence. This includes a package the diagram never uses,
   such as `inputenc` or `fontenc`, which this engine does not need: remove the line, as the
   pre-flight warning on it says.
+- The diagnostics view shows, under each diagram compiled, where its time went: waiting for other
+  diagrams, waiting for the engine to start, setting up TeX's memory, TeX itself, turning TeX's
+  output into SVG, and preparing that SVG for the note.
 
 ## 0.1.5 — 2026-10-13
 

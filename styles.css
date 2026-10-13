@@ -445,6 +445,17 @@ The fonts are converted from the BaKoMa Fonts Collection, whose licence follows.
 	font-size: var(--font-ui-smaller);
 }
 
+/* Where a compile's time went: one span a step, wrapping onto another line in a narrow sidebar. */
+.tikzjax-debug-timings {
+	grid-column: 2 / -1;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0 0.75em;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	font-variant-numeric: tabular-nums;
+}
+
 /* Off-screen host for warming a note's diagrams: they must render, and lay out, without being
    seen. `visibility: hidden` would not do — a hidden subtree still lays out, but Obsidian's
    viewport gating and getBBox() need real geometry. */

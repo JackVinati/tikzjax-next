@@ -100,6 +100,7 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] Sized placeholders from the persisted bbox — no layout shift
 - [x] Pre-flight source lint (§7.6's six rules) — **closes #52 #49 #67, partial #96**
 - [x] Debug view; Safari Web Inspector workflow documented in the README
+- [x] Where each compiled diagram's time went, in the debug view (0.2.0): the queue, the engine's start if it waited for it, the memory reset, TeX, DVI to SVG and the SVG pipeline
 - [ ] **open** — desktop-only status bar item. The debug view covers what it was for; this is convenience
 
 ## 4 · Colour, geometry, SVG pipeline
@@ -134,6 +135,7 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] One Blob materialisation of the worker instead of four
 - [x] Teardown on `visibilitychange → hidden`; concurrency hard-clamped to 1 on mobile (and since 0.1.5 everywhere). A diagram compiling at that moment is interrupted, not failed, and finishes when the app comes back
 - [x] Half the boot peak (0.1.5): the core dump inflates into one buffer, 313 → 156 MiB of ArrayBuffers right after inflating (Node 22, V8)
+- [x] Only the core dump's non-zero runs (0.2.0): the build ships the 21.5 MiB of the 156.25 MiB dump that is not zero, the worker inflates only that at boot, and writes only that into each run's new Memory, which is zero already. Boot 528 → 158 ms, 157.5 → 22.7 MiB of ArrayBuffers held after it, the memory reset 30.5 → 4.8 ms a render (Node 22, V8); not yet measured on a phone
 - [x] TTF → WOFF2 — **closes #111 #91 #7 #24 #3**
 
 ## 7 · Preamble, options, export
@@ -172,6 +174,7 @@ The manual matrix in DESIGN.md §10.4, in full. The ones that catch the most:
 
 - [x] **iOS: it loads and renders.** Confirmed on an iPhone, 2026-09-02, after minAppVersion came down to 1.7.2 (D6) — the store floor, not the code, was what had kept it off the device
 - [ ] **iOS, the rest of the path**: open Settings (the #111 crash path, which happens *before* anything renders) → 20-diagram note → scroll → background → foreground → export
+- [ ] **iOS, 0.2.0's numbers**: on the 20-diagram note, read the engine start and each diagram's steps from the diagnostics view, on 0.1.5 and on 0.2.0, so the changelog's desktop figures get phone figures beside them. Every number 0.2.0 claims so far was measured in V8
 - [ ] **A vault with a pre-existing legacy cache**: upgrade, open a note, assert **zero** TeX compiles
 - [ ] **Devtools Network tab** across a full session including a failing diagram: assert zero requests
 - [ ] **Finalize a fence with no blank line above it**, then un-finalize: the embed must render as an embed, the `%%` must open a comment, and the note must come back byte for byte (the open question in `src/note/finalize.ts`)

@@ -1,6 +1,8 @@
 import { ItemView, type WorkspaceLeaf } from 'obsidian';
 import type { EngineInventory } from '../../engine-src/protocol';
 import type { BlockOutcome } from '../block/render-child';
+import type { CompileTimings } from '../types';
+import { STRINGS } from './strings';
 
 export const DEBUG_VIEW_TYPE = 'tikzjax-debug';
 
@@ -11,6 +13,8 @@ export interface RenderRecord {
 	state: 'rendering' | BlockOutcome['state'];
 	tier?: BlockOutcome['tier'];
 	durationMs?: number | undefined;
+	/** Where the time went, for a diagram compiled this time. */
+	timings?: CompileTimings | undefined;
 	message?: string | undefined;
 	log?: string[] | undefined;
 	at: number;
@@ -117,8 +121,27 @@ export class DebugView extends ItemView {
 					.filter(Boolean)
 					.join(' · '),
 			});
+			if (record.timings) this.timings(row, record.timings);
 			if (record.message) row.createDiv({ cls: 'tikzjax-debug-message', text: record.message });
 		}
+	}
+
+	/**
+	 * Where a compile's time went, a step to a span, in the order the steps happen, so a slow
+	 * diagram can be reported with where it was slow: behind other diagrams, waiting for the engine
+	 * to start, in TeX, or in the SVG work on either side of it. A step nobody timed is left out.
+	 */
+	private timings(row: HTMLElement, timings: CompileTimings): void {
+		const steps = [
+			STRINGS.timingQueue(timings.queueMs),
+			timings.startMs === undefined ? null : STRINGS.timingStart(timings.startMs),
+			timings.resetMs === undefined ? null : STRINGS.timingReset(timings.resetMs),
+			timings.texMs === undefined ? null : STRINGS.timingTex(timings.texMs, timings.passes ?? 1),
+			timings.svgMs === undefined ? null : STRINGS.timingSvg(timings.svgMs),
+			STRINGS.timingPost(timings.postMs),
+		];
+		const line = row.createDiv({ cls: 'tikzjax-debug-timings' });
+		for (const step of steps) if (step !== null) line.createSpan({ text: step });
 	}
 
 	private fact(parent: HTMLElement, label: string, value: string): void {

@@ -415,6 +415,8 @@ What this buys, none of it reachable otherwise: real timeouts with recovery (`te
 
 **Why P1/P2/P2b are safe enough to ship in Phase 1 rather than post-1.0:** the core dump is exactly 72,089,600 B = 1100 pages × 65536 = the **entire** non-growable `WebAssembly.Memory`. `.set(ye)` therefore fully resets a reused instance — there is no region of memory the dump does not cover. That property is what makes hoisting the Memory safe, and it is not obvious, so it is stated here rather than assumed. The Phase 1 golden corpus gates it: the patched engine must produce byte-identical SVG on every fixture.
 
+**As built (0.2.0).** Each run gets a new Memory, and the dump is no longer written over all of it. A new `WebAssembly.Memory` is zero by the WebAssembly spec, and 134 of the dump's 156.25 MiB are zero, so only the dump's non-zero runs are written (`engine-src/core-dump.ts`): 28 runs, 21.5 MiB, split wherever 4 KiB or more of zeros lie between them. The property above is still what the reset rests on, and it is tested rather than stated: the memory a job starts from is compared with the committed dump byte for byte, and the 26 fixtures render byte-identically. Measured in Node 22 (V8), median of 15: 30.5 → 4.8 ms a render. The pages TeX never touches are never written either, so a render no longer adds 156 MiB to the worker's resident memory until the collector frees its Memory: with this change alone, the process's peak after five renders went from 704 to 301 MiB (five fresh processes, medians).
+
 ### 4.5 Capabilities and the inventory
 
 `engine/inventory.ts` is generated at build time from the bundle's embedded `tex_files` manifest:
@@ -718,6 +720,8 @@ Once L3 is retired, `showConsole` becomes a real per-job flag driven by the debu
 
 **Debug surface.** A Debug view (`ItemView`): last 100 renders with source preview, state, duration, engine, cache tier, log, retry; cache stats; engine capabilities; queue depth. A status-bar indicator **gated on `Platform.isDesktop`** (`addStatusBarItem` is documented as unavailable on mobile). And a documented Safari Web Inspector workflow in CONTRIBUTING (device Settings → Safari → Advanced → Web Inspector, then Develop over USB) — every mobile issue in the tracker is currently untriageable for want of that one paragraph. #82's reporter literally wrote *"I'm not sure if there's an easy way to get debug output from the plugin."*
 
+**Where the time went, as built (0.2.0).** A compiled diagram's row in the view says where its time went, a step at a time: waiting in the queue, the engine starting (for a job that waited for it, and only the part it was there for), the memory reset, TeX, DVI to SVG — those three added up over both passes when there are two — and the SVG pipeline. The worker times its own steps and sends them with every reply, ok or error (`RenderTimings` in `engine-src/protocol.ts`); the host adds the start, and the block the queue and the pipeline. It is also how the phone numbers that 0.2.0 does not have yet will be read off a device.
+
 ### 7.7 Settings and per-block options
 
 **Per-block options are `%!tikz` body directives, and only that.** This overrides the brief, for a correctness reason:
@@ -804,6 +808,7 @@ Beyond §5.4:
 
 - **styles.css split (Phase 1):** 12 core WOFF2 faces stay in `styles.css` (~200 KB); the other 128 become a **cold string constant in `main.js`**, injected per-`Document` on first render. Startup CSSOM parse drops from 4,791,337 B to ~0.2 MB. This is the installable form of the mobile fix — sibling asset files do not reach store users.
 - **Copy count:** the 7 MB worker source is a cold string materialised **once** into a Blob (revoked on terminate) instead of four times (main.js literal → DOM text node → module-147 string → Blob).
+- **The core dump at boot (0.2.0):** `main.js` carries the dump's non-zero runs, not the whole of it. The plugin build cuts whatever `core.dump.gz` is committed into them and gzips their bytes with pako (`scripts/engine-assets.mjs` `packCoreDump`), so a boot inflates 21.5 MiB instead of 156.25. Measured on the worker as it ships, in Node 22 (V8), five fresh processes, medians: boot 528 → 158 ms, the process's peak resident memory growing by 179 → 54 MiB during it, and 157.5 → 22.7 MiB of ArrayBuffers held after it. `main.js` is 82 KB smaller. Nothing of this is measured on a phone yet; the diagnostics view's timings are how it will be.
 - **`textContent`, not `innerText`** for any large string assignment.
 - **Teardown** on `visibilitychange → hidden`: terminate the worker, clear L1. WebKit discards JIT code at 65 % memory pressure and reloads the page at 100 %; being near-zero while backgrounded is the difference between surviving and being jetsam-killed (#111).
 - **Guards** for `window.CodeMirror?.modeInfo` and `floatingSplit?.children` — both throw unguarded in `onload`/`onLayoutReady` and produce exactly `Failed to load plugin` (#74).

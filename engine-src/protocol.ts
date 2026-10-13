@@ -79,6 +79,22 @@ export interface LogMessage {
 	line: string;
 }
 
+/**
+ * Where a render's time went inside the worker, in whole milliseconds, added up over every pass of
+ * TeX. The plugin times the rest — the queue, the engine starting, the SVG pipeline — and the
+ * diagnostics view shows them together, so a slow diagram can be reported with where it was slow.
+ */
+export interface RenderTimings {
+	/** A fresh Memory with the core dump written into it (./core-dump). */
+	resetMs: number;
+	/** TeX: instantiating the compiled module, and the run. */
+	texMs: number;
+	/** dvi2html drawing the DVI as SVG. 0 when TeX wrote no DVI. */
+	svgMs: number;
+	/** How many times TeX ran: 2 when a second pass was taken (RenderOptions.twoPass). */
+	passes: number;
+}
+
 export interface OkMessage {
 	type: 'ok';
 	id: number;
@@ -87,6 +103,7 @@ export interface OkMessage {
 	/** Bundled-file misses. Mostly benign probes; the diagnostic value is on the failure path. */
 	missing: string[];
 	durationMs: number;
+	timings?: RenderTimings | undefined;
 	/**
 	 * TeX reported an error but recovered and still produced a diagram.
 	 *
@@ -125,6 +142,8 @@ export interface ErrorMessage {
 	log: string[];
 	missing: string[];
 	durationMs: number;
+	/** Absent when TeX never ran: a worker that failed to boot, a ping. */
+	timings?: RenderTimings | undefined;
 }
 
 export type WorkerResponse = ReadyMessage | LogMessage | OkMessage | ErrorMessage;

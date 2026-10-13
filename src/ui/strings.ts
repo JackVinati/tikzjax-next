@@ -37,6 +37,16 @@ export const STRINGS = {
 		'The original TikZJax plugin is also enabled. Both register the same code block, so every ' +
 		'diagram would be rendered twice. Disable one of them.',
 
+	// The diagnostics view: where one compile's time went, a step at a time, in the order the steps
+	// happen. Each is a label and a number of milliseconds, never part of a sentence.
+	timingQueue: (ms: number) => `queue ${ms} ms`,
+	timingStart: (ms: number) => `engine start ${ms} ms`,
+	timingReset: (ms: number) => `memory reset ${ms} ms`,
+	timingTex: (ms: number, passes: number) =>
+		passes > 1 ? `TeX ${ms} ms, ${passes} passes` : `TeX ${ms} ms`,
+	timingSvg: (ms: number) => `DVI to SVG ${ms} ms`,
+	timingPost: (ms: number) => `SVG pipeline ${ms} ms`,
+
 	// Cache.
 	cacheStats: (count: number, mb: string) => `${count} diagrams, ${mb}`,
 	cacheCleared: 'Cleared the diagram cache.',

@@ -2,6 +2,7 @@ import { WORKER_SOURCE, ENGINE_ID, ENGINE_INVENTORY } from 'virtual:engine';
 import type {
 	EngineInventory,
 	RenderOptions,
+	RenderTimings,
 	WorkerRequest,
 	WorkerResponse,
 } from '../../engine-src/protocol';
@@ -12,6 +13,7 @@ import {
 	type TexHost,
 	type TexJob,
 	type TexResult,
+	type TexTimings,
 } from '../types';
 
 /** The capability view of an inventory: what pre-flight and the error hints actually read. */
@@ -44,6 +46,8 @@ export interface WorkerHostOptions {
 	idleTeardownMs?: number | undefined;
 	/** Required for `idleTeardownMs` to do anything. */
 	timers?: HostTimers | undefined;
+	/** The clock the engine's start is timed with, in milliseconds. Omitted: performance.now(). */
+	now?: (() => number) | undefined;
 }
 
 /** One render, from `render()` until it settles. */
@@ -53,6 +57,10 @@ interface Job {
 	readonly source: string;
 	readonly options: RenderOptions;
 	readonly log: string[];
+	/** When `render` was called, by the host's clock. */
+	readonly arrived: number;
+	/** How long it waited for the engine to start, once it has been posted; see TexTimings. */
+	startMs: number | undefined;
 	readonly onRunning: (() => void) | undefined;
 	readonly signal: AbortSignal;
 	readonly onAbort: () => void;
@@ -66,6 +74,9 @@ interface Engine {
 	blobUrl: string | null;
 	/** It has announced itself, so it can take a job. */
 	up: boolean;
+	/** When it was created, and when it said it was ready, by the host's clock. */
+	readonly spawnedAt: number;
+	readyAt: number | null;
 	readonly ready: Promise<void>;
 	readonly resolveReady: () => void;
 	readonly rejectReady: (error: Error) => void;
@@ -103,6 +114,7 @@ export class WorkerHost implements TexHost {
 	private readonly onLog: ((jobKey: string, line: string) => void) | undefined;
 	private readonly idleTeardownMs: number | undefined;
 	private readonly timers: HostTimers | undefined;
+	private readonly now: () => number;
 
 	/**
 	 * Known from the moment the plugin loads, from the inventory baked in at build time.
@@ -124,6 +136,7 @@ export class WorkerHost implements TexHost {
 				? options.idleTeardownMs
 				: undefined;
 		this.timers = options.timers;
+		this.now = options.now ?? (() => performance.now());
 	}
 
 	get capabilities(): EngineCapabilities {
@@ -154,6 +167,8 @@ export class WorkerHost implements TexHost {
 				source: job.source,
 				options: job.options,
 				log: [],
+				arrived: this.now(),
+				startMs: undefined,
 				onRunning,
 				signal,
 				onAbort: () => this.abandon(entry),
@@ -222,6 +237,10 @@ export class WorkerHost implements TexHost {
 
 		this.waiting.shift();
 		this.current = next;
+		// The part of the engine's start this job was there for. Waiting behind another job once
+		// the engine was up is not the engine starting.
+		if (engine.readyAt !== null && next.arrived < engine.readyAt)
+			next.startMs = engine.readyAt - Math.max(next.arrived, engine.spawnedAt);
 		engine.worker.postMessage({
 			type: 'render',
 			id: next.id,
@@ -256,7 +275,16 @@ export class WorkerHost implements TexHost {
 		// no one awaiting `ready()` must not surface as an unhandled rejection.
 		ready.catch(() => undefined);
 
-		const engine: Engine = { worker, blobUrl, up: false, ready, resolveReady, rejectReady };
+		const engine: Engine = {
+			worker,
+			blobUrl,
+			up: false,
+			spawnedAt: this.now(),
+			readyAt: null,
+			ready,
+			resolveReady,
+			rejectReady,
+		};
 		worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
 			if (this.engine === engine) this.receive(engine, event.data);
 		};
@@ -270,6 +298,7 @@ export class WorkerHost implements TexHost {
 	private receive(engine: Engine, message: WorkerResponse): void {
 		if (message.type === 'ready') {
 			engine.up = true;
+			engine.readyAt = this.now();
 			this.inventory = message.inventory;
 			this.caps = capabilitiesOf(message.inventory);
 			// The blob URL has done its job the moment the worker is running. Upstream never revokes
@@ -300,6 +329,7 @@ export class WorkerHost implements TexHost {
 				svg: message.svg,
 				log: message.log,
 				durationMs: message.durationMs,
+				timings: timingsOf(message.timings, job.startMs),
 				firstError: message.firstError,
 				line,
 			};
@@ -417,6 +447,12 @@ export class WorkerHost implements TexHost {
  */
 function blockLine(line: number | undefined, bodyLine: number | undefined): number | undefined {
 	return line === undefined ? undefined : line - (bodyLine ?? 2) + 1;
+}
+
+/** The worker's timings with the engine's start added, when this job waited for it. */
+function timingsOf(worker: RenderTimings | undefined, startMs: number | undefined): TexTimings | undefined {
+	if (worker === undefined) return undefined;
+	return startMs === undefined ? { ...worker } : { ...worker, startMs: Math.round(startMs) };
 }
 
 function unloaded(): TexError {

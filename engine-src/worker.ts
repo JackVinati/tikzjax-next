@@ -8,8 +8,10 @@
  * CHANGES FROM UPSTREAM (internal/DECISIONS.md D10):
  *  - assets are injected at build time instead of fetched from a urlRoot;
  *  - the WebAssembly.Module is compiled ONCE, not on every render;
- *  - no `coredump.slice(0)` — at pages=2500 that copy is 156.25 MiB per render — and the dump is
- *    inflated into one buffer rather than glued together from chunks into a second (./inflate);
+ *  - no `coredump.slice(0)` — at pages=2500 that copy is 156.25 MiB per render — and the dump
+ *    ships as its non-zero runs, packed by the build, which are all that is inflated at boot and
+ *    all that a run's fresh Memory has written into it, since it is zero everywhere else already
+ *    (./core-dump, ./inflate);
  *  - \begin{document} wrapping is conditional (upstream nests it into every existing vault), and the
  *    input is assembled in ./document, with a TS1 shim for a block that can use one (./ts1-shim);
  *  - \nonstopmode, so a TeX error is logged instead of blocking on the interactive `? ` prompt;
@@ -35,8 +37,24 @@ import * as library from './library';
 import { describeConvertError } from './convert-error';
 import { buildInput } from './document';
 import { inflateExactly } from './inflate';
-import { CORE_DUMP_GZ, ENGINE_ID, INVENTORY, TEX_FILES, TEX_WASM_GZ } from 'virtual:engine-assets';
-import type { ErrorMessage, OkMessage, RenderOptions, TexErrorKind, WorkerRequest } from './protocol';
+import { checkCoreDump, packedLength, startingMemory, unpackCoreDump } from './core-dump';
+import {
+	CORE_DUMP_GZ,
+	CORE_DUMP_RUNS,
+	CORE_DUMP_SIZE,
+	ENGINE_ID,
+	INVENTORY,
+	TEX_FILES,
+	TEX_WASM_GZ,
+} from 'virtual:engine-assets';
+import type {
+	ErrorMessage,
+	OkMessage,
+	RenderOptions,
+	RenderTimings,
+	TexErrorKind,
+	WorkerRequest,
+} from './protocol';
 
 // --- base64 -------------------------------------------------------------------------------------
 
@@ -70,13 +88,21 @@ library.setBundledFiles(bundled, (gz) => ungzip(gz));
 const texModule = new WebAssembly.Module(ungzip(fromBase64(TEX_WASM_GZ)));
 
 /**
- * Inflated straight into one buffer of the size the Memory needs, and asserted to be exactly that
- * size: the runtime .set()s the dump over the whole non-growable Memory, so a short dump would
- * leave live TeX state uninitialised — a corruption that would surface much later as garbage output
- * rather than as a failure here. Not `ungzip`, which glues 64 KiB chunks into a copy and so holds
- * the 156 MiB dump twice at boot (./inflate).
+ * The dump's non-zero runs, 21.5 MiB of its 156.25, which the build packed back to back
+ * (scripts/engine-assets.mjs `packCoreDump`): they are all a run's fresh Memory needs written into
+ * it (./core-dump). Inflating the whole dump took half a second of every boot on the desktop.
+ *
+ * Inflated straight into one buffer of the size the runs add up to, and asserted to be exactly that
+ * size. Not `ungzip`, which glues 64 KiB chunks into a copy and so holds the bytes twice (./inflate).
+ * The dump has to fill the Memory exactly, or live TeX state would start at zero — a corruption
+ * that would surface much later as garbage output — so that is checked here, at boot.
  */
-const coreDump = inflateExactly(fromBase64(CORE_DUMP_GZ), library.pages * 65536);
+const coreDump = unpackCoreDump(
+	CORE_DUMP_SIZE,
+	CORE_DUMP_RUNS,
+	inflateExactly(fromBase64(CORE_DUMP_GZ), packedLength(CORE_DUMP_RUNS)),
+);
+checkCoreDump(coreDump, library.pages);
 
 // --- transcript analysis --------------------------------------------------------------------------
 
@@ -339,12 +365,15 @@ interface PassResult {
 /**
  * Run TeX once over `<job>.tex`, which must already be in the virtual filesystem, and draw
  * `<job>.dvi`. Everything the run leaves behind stays there for the caller to harvest or discard.
+ * What each step took is added to `spent`.
  */
-const runPass = async (job: string): Promise<PassResult> => {
-	const memory = new WebAssembly.Memory({ initial: library.pages, maximum: library.pages });
-	// No .slice(0): upstream copies the dump before writing it, which at pages=2500 is an extra
-	// 156.25 MiB allocated and discarded on every single render.
-	new Uint8Array(memory.buffer, 0, library.pages * 65536).set(coreDump);
+const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> => {
+	const started = performance.now();
+	// A new Memory with the dump's non-zero runs written into it: 21.5 MiB rather than all 156.25,
+	// the rest being zero from the start. Upstream also copies the dump with .slice(0) first, an
+	// extra 156.25 MiB allocated and discarded on every single render.
+	const memory = startingMemory(coreDump, library.pages);
+	const reset = performance.now();
 
 	library.setMemory(memory.buffer);
 	library.setInput(`${job}.tex\n\\end\n`);
@@ -352,16 +381,24 @@ const runPass = async (job: string): Promise<PassResult> => {
 	let svg = '';
 	let wroteDvi = false;
 	let convertError: string | undefined;
+	// When TeX was done, and when drawing its DVI began. A run that throws out of TeX sets neither,
+	// and all of its time is TeX's; one that wrote no DVI drew nothing, and spent nothing drawing.
+	let texDone: number | undefined;
+	let drawing: number | undefined;
 	try {
 		const instance = await WebAssembly.instantiate(texModule, {
 			library,
 			env: { memory },
 		});
 		await library.executeAsync(instance.exports);
+		texDone = performance.now();
 
 		const dvi = library.readFileSync(`${job}.dvi`);
 		wroteDvi = dvi.byteLength > 0;
-		if (wroteDvi) svg = await dviToSvg(dvi);
+		if (wroteDvi) {
+			drawing = performance.now();
+			svg = await dviToSvg(dvi);
+		}
 	} catch (error) {
 		// Two very different things land here, and telling them apart is the difference between a
 		// useful message and a shrug:
@@ -372,8 +409,22 @@ const runPass = async (job: string): Promise<PassResult> => {
 		// Swallowing both produced "TeX produced no output" for a compile that worked perfectly.
 		if (wroteDvi) convertError = error instanceof Error ? error.message : String(error);
 	}
+
+	const done = performance.now();
+	spent.resetMs += reset - started;
+	spent.texMs += (texDone ?? done) - reset;
+	spent.svgMs += drawing === undefined ? 0 : done - drawing;
+	spent.passes += 1;
 	return { svg, wroteDvi, convertError };
 };
+
+/** `spent` as the plugin is told it: whole milliseconds, which is all a person reading it needs. */
+const rounded = (spent: RenderTimings): RenderTimings => ({
+	resetMs: Math.round(spent.resetMs),
+	texMs: Math.round(spent.texMs),
+	svgMs: Math.round(spent.svgMs),
+	passes: spent.passes,
+});
 
 /** A file the run wrote, or undefined if it never wrote one. */
 const readIfWritten = (name: string): Uint8Array | undefined => {
@@ -412,6 +463,8 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	// Both passes read this same text, so `bodyLine` holds for an `l.NN` from either.
 	const { text, bodyLine } = buildInput(source, options);
 	const input = new TextEncoder().encode(text);
+	/** Where the time went, over both passes when there are two. */
+	const spent: RenderTimings = { resetMs: 0, texMs: 0, svgMs: 0, passes: 0 };
 
 	/** Where the first pass's transcript ends, so its diagnosis can never be read out of pass two. */
 	let firstEnd: number;
@@ -423,7 +476,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	let firstTranscriptFile: Uint8Array | undefined;
 	try {
 		library.writeFileSync(`${FIRST_JOB}.tex`, input);
-		const first = await runPass(FIRST_JOB);
+		const first = await runPass(FIRST_JOB, spent);
 		firstEnd = log.length;
 		reported = first;
 		if (logging) firstTranscriptFile = readIfWritten(`${FIRST_JOB}.log`);
@@ -454,7 +507,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 				if (logging)
 					emit(`(tikzjax) second pass: re-running with ${carried.map((f) => f.name).join(', ')}`);
 
-				const second = await runPass(SECOND_JOB);
+				const second = await runPass(SECOND_JOB, spent);
 				if (second.wroteDvi && second.svg.includes('<svg')) {
 					reported = second;
 					adoptedSecondPass = true;
@@ -468,6 +521,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	}
 
 	const durationMs = Math.round(performance.now() - started);
+	const timings = rounded(spent);
 	const gotSvg = reported.svg.includes('<svg');
 	let transcript = readTranscript(log.slice(0, firstEnd));
 
@@ -514,13 +568,23 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 			log,
 			missing,
 			durationMs,
+			timings,
 		};
 	}
 
 	if (!reported.wroteDvi || !gotSvg) {
 		// Only ever reached with a failed FIRST pass — a failed second one is discarded above — so
 		// `transcript` here is that pass's own, not a later run's.
-		return { type: 'error', id, ...diagnose(transcript, missing), bodyLine, log, missing, durationMs };
+		return {
+			type: 'error',
+			id,
+			...diagnose(transcript, missing),
+			bodyLine,
+			log,
+			missing,
+			durationMs,
+			timings,
+		};
 	}
 	return {
 		type: 'ok',
@@ -529,6 +593,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 		log,
 		missing,
 		durationMs,
+		timings,
 		firstError: diagnostics.firstError,
 		line: diagnostics.line,
 		bodyLine,

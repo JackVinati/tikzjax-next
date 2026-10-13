@@ -3,11 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { inflateExactly } from '../engine-src/inflate';
 
 /*
- * The worker inflates its 156.25 MiB core dump once, at boot. pako's ungzip collects the output in
- * 64 KiB chunks and then glues them into a new array of the total length, so for that moment the
- * dump exists twice and the boot peaks at about 313 MiB of ArrayBuffers instead of 156 — on a phone
- * whose whole budget for the worker is not much more than that. inflateExactly writes the stream
- * into one buffer of the size the dump must have, and hands that buffer back.
+ * The worker inflates its core dump once, at boot: its 21.5 MiB of non-zero runs since 0.2.0, the
+ * whole 156.25 MiB before. pako's ungzip collects the output in 64 KiB chunks and then glues them
+ * into a new array of the total length, so for that moment the bytes exist twice; with the whole
+ * dump the boot peaked at about 313 MiB of ArrayBuffers instead of 156 — on a phone whose whole
+ * budget for the worker is not much more than that. inflateExactly writes the stream into one
+ * buffer of the size the result must have, and hands that buffer back.
  */
 
 /** Bytes that compress, but not to nothing, so the stream has real blocks to decode. */

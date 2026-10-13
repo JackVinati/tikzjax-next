@@ -1,5 +1,13 @@
 import { MarkdownRenderChild } from 'obsidian';
-import type { Artifact, BlockOptions, Diagnostic, SvgoMode, TexHost, TexResult } from '../types';
+import type {
+	Artifact,
+	BlockOptions,
+	CompileTimings,
+	Diagnostic,
+	SvgoMode,
+	TexHost,
+	TexResult,
+} from '../types';
 import { InterruptedError, TexError } from '../types';
 import {
 	initialState,
@@ -85,6 +93,8 @@ export interface BlockOutcome {
 	tier?: 'l1' | 'l2' | 'l3' | undefined;
 	/** How long TeX ran, for a diagram compiled this time. */
 	durationMs?: number | undefined;
+	/** Where the time went, for a diagram compiled this time: the diagnostics view shows it. */
+	timings?: CompileTimings | undefined;
 	/** What the error card says. */
 	message?: string | undefined;
 	log?: string[] | undefined;
@@ -119,8 +129,12 @@ export class TikzBlock extends MarkdownRenderChild {
 	private placeholder: HTMLElement | null = null;
 	private body: HTMLElement;
 
-	/** Where the artifact on screen came from: a cache tier, or a compile and how long TeX took. */
-	private origin: { tier: 'l1' | 'l2' | 'l3' } | { durationMs: number } | null = null;
+	/**
+	 * Where the artifact on screen came from: a cache tier, or a compile, how long TeX took and
+	 * where the time went.
+	 */
+	private origin: { tier: 'l1' | 'l2' | 'l3' } | { durationMs: number; timings: CompileTimings } | null =
+		null;
 	/** What the error card on screen says, for the report. */
 	private cardMessage = '';
 	/** Has come to rest at least once, so an unload afterwards is not a cancellation. */
@@ -378,6 +392,9 @@ export class TikzBlock extends MarkdownRenderChild {
 		// Here rather than in the machine, which decides the band from where the block is and
 		// would otherwise have to know about fast mode at every one of its submits.
 		const band = this.spec.options.fast && priority > 0 ? ((priority - 1) as Priority) : priority;
+		// How long the job waits for the queue to start it, behind the diagrams ahead of it.
+		const asked = this.deps.now();
+		let started: number | undefined;
 		try {
 			const result = await this.deps.queue.submit(this.spec.key, this.spec, band, this.spec.timeoutMs, {
 				owner: this,
@@ -386,7 +403,10 @@ export class TikzBlock extends MarkdownRenderChild {
 				// cancelled), and those arrive as `rejected`, which SCHEDULING handles and
 				// COMPILING does not. So the queue says when — to this block, not to whichever
 				// block submitted the key first.
-				onStart: () => this.dispatch({ type: 'slot' }),
+				onStart: () => {
+					started ??= this.deps.now();
+					this.dispatch({ type: 'slot' });
+				},
 				...(this.spec.isExport ? { ignorePoison: true } : {}),
 				...(this.spec.uncapped ? { uncapped: true } : {}),
 				...(resumed ? { resumed: true } : {}),
@@ -411,7 +431,11 @@ export class TikzBlock extends MarkdownRenderChild {
 				// renders with a piece quietly missing.
 				...(result.firstError ? { warn: STRINGS.warnRecovered(result.firstError) } : {}),
 			};
-			this.origin = { durationMs: result.durationMs };
+			this.origin = {
+				durationMs: result.durationMs,
+				// The pipeline's time is added when it has run (transform).
+				timings: { ...result.timings, queueMs: (started ?? asked) - asked, postMs: 0 },
+			};
 			this.dispatch({ type: 'ok' });
 		} catch (error) {
 			if (this.state.phase === 'DISPOSED') return;
@@ -463,6 +487,7 @@ export class TikzBlock extends MarkdownRenderChild {
 	 * the page.
 	 */
 	private transform(origin: 'l3' | 'render'): void {
+		const began = this.deps.now();
 		const raw = this.artifact?.template;
 		if (raw === undefined) {
 			this.failure = new TexError(
@@ -532,6 +557,8 @@ export class TikzBlock extends MarkdownRenderChild {
 				...(warnings.length ? { warn: warnings.join('; ') } : {}),
 			};
 
+			const compiled = this.origin;
+			if (compiled && 'timings' in compiled) compiled.timings.postMs = this.deps.now() - began;
 			this.dispatch({ type: result.degraded ? 'degraded' : 'ok' });
 		} catch (error) {
 			// Nothing came out that passed sanitize and ids. The raw engine output is dropped here
@@ -634,7 +661,10 @@ export class TikzBlock extends MarkdownRenderChild {
 			outcome =
 				origin && 'tier' in origin
 					? { state: 'cached', tier: origin.tier }
-					: { state: 'ok', ...(origin ? { durationMs: origin.durationMs } : {}) };
+					: {
+							state: 'ok',
+							...(origin ? { durationMs: origin.durationMs, timings: origin.timings } : {}),
+						};
 		} else if (phase === 'FAILED') {
 			const log = this.failure?.log ?? [];
 			outcome = { state: 'error', message: this.cardMessage, ...(log.length ? { log } : {}) };
