@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { App, Command, Editor, MarkdownView, Plugin } from 'obsidian';
+import type { App, Command, Editor, MarkdownSectionInformation, MarkdownView, Plugin } from 'obsidian';
 import { installObsidianDom } from './stubs/obsidian-dom';
-import { shownNotices, TFile } from './stubs/obsidian';
+import { Modal, shownNotices, TFile } from './stubs/obsidian';
+import { BLOCKS, livePreviewWidget } from './support/obsidian-blocks';
 import { fakeApp } from './stubs/vault';
 import { artifact, processBlock, processorDeps } from './stubs/processor';
 import { asProcessorSource, findTikzBlocks, type TikzBlockSpan } from '../src/note/finalize';
@@ -234,6 +235,15 @@ function workspace(
 		l1.set(await processedKey(deps, seen, readingView(note, span), file.path), artifact());
 	};
 
+	/** Render a block from what a view hands the processor, and what its getSectionInfo answers. */
+	const renderAs = async (
+		source: string,
+		section: MarkdownSectionInformation | null = null,
+	): Promise<void> => {
+		const { spec } = await processBlock(deps, seen, source, { path: file.path, load: false, section });
+		l1.set(spec.key, artifact());
+	};
+
 	/** Run an editor command with the cursor on the first occurrence of `marker`. */
 	const run = (id: string, marker: string): void => {
 		const text = vault.get(file.path) ?? '';
@@ -254,7 +264,7 @@ function workspace(
 		void command.callback();
 	};
 
-	return { vault, created, file, render, run, call };
+	return { vault, created, file, render, renderAs, run, call };
 }
 
 const lastNotice = (): string => String(shownNotices[shownNotices.length - 1]?.message ?? '');
@@ -322,6 +332,84 @@ describe('the commands at the cursor', () => {
 			[false, false],
 			[true, true],
 		]);
+	});
+});
+
+describe('the commands at the cursor, in a list item, a blockquote or a callout', () => {
+	beforeEach(() => {
+		shownNotices.length = 0;
+	});
+
+	/** Each view that renders the block, and what it hands the processor. */
+	const views = (block: (typeof BLOCKS)[number]) => {
+		const out: [string, string, MarkdownSectionInformation | null][] = [
+			['Reading view', block.reading, null],
+		];
+		if (block.livePreview === 'lines') {
+			const { source, section } = livePreviewWidget(block.note);
+			out.push(['Live Preview', source, section]);
+		}
+		return out;
+	};
+
+	for (const block of BLOCKS) {
+		for (const [view, source, section] of views(block)) {
+			it(`Save SVG finds the diagram ${view} rendered in ${block.name}`, async () => {
+				const w = workspace(block.note);
+				await w.renderAs(source, section);
+
+				w.run('save-svg', block.marker);
+				await vi.waitFor(() => expect(lastNotice()).toBe('Saved folder/note-diagram.svg'));
+				expect(w.vault.get('folder/note-diagram.svg')).toContain('<svg');
+			});
+		}
+	}
+
+	it('Copy SVG and the zoom view find a diagram Live Preview rendered in a list item', async () => {
+		const block = BLOCKS[0];
+		if (!block) throw new Error('a block');
+		const writeText = vi.fn(() => Promise.resolve());
+		Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+		const open = vi.spyOn(Modal.prototype, 'open');
+		const w = workspace(block.note);
+		const { source, section } = livePreviewWidget(block.note);
+		await w.renderAs(source, section);
+
+		w.run('copy-svg', block.marker);
+		await vi.waitFor(() => expect(lastNotice()).toBe('Diagram copied as SVG.'));
+		w.run('zoom-diagram', block.marker);
+		await vi.waitFor(() => expect(open).toHaveBeenCalledOnce());
+		expect(lastNotice()).toBe('Diagram copied as SVG.');
+		open.mockRestore();
+	});
+
+	it('Finalize finalizes the diagrams Live Preview rendered in list items, and Un-finalize undoes it', async () => {
+		const note =
+			'# Steps\n\n1. The axis:\n   ```tikz\n   \\draw[->] (0,0) -- (3,0);\n   ```\n' +
+			'2. The circle:\n\t```tikz\n\t\\begin{tikzpicture}\n\t\t\\draw (0,0) circle (1);\n' +
+			'\t\\end{tikzpicture}\n\t```\n3. Done.\n';
+		const w = workspace(note);
+		const lines = note.split('\n');
+		for (const opener of ['   ```tikz', '\t```tikz']) {
+			const lineStart = lines.indexOf(opener);
+			const lineEnd = lines.indexOf(opener.replace('tikz', ''), lineStart);
+			await w.renderAs(lines.slice(lineStart + 1, lineEnd).join('\n'), {
+				text: note,
+				lineStart,
+				lineEnd,
+			});
+		}
+
+		w.run('finalize-note', '# Steps');
+		await vi.waitFor(() => expect(lastNotice()).toBe('Finalized 2 diagram(s).'));
+		const finalized = w.vault.get('folder/note.md') ?? '';
+		expect(finalized).toContain('2. The circle:\n\t![[note-diagram 1.svg]]\n\t%%\n\t```tikz\n');
+		expect(finalized).toContain('1. The axis:\n   ![[note-diagram.svg]]\n   %%\n   ```tikz\n');
+		expect(finalized).toContain('\t```\n\t%%\n3. Done.\n');
+
+		w.run('unfinalize-note', '# Steps');
+		await vi.waitFor(() => expect(lastNotice()).toBe('Restored 2 diagram source(s).'));
+		expect(w.vault.get('folder/note.md')).toBe(note);
 	});
 });
 

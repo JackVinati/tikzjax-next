@@ -9,7 +9,7 @@ import { isExportContext } from '../platform/context';
 import { artifactRevision, type TikzSettings } from '../settings/schema';
 import { TikzBlock, type BlockDeps, type BlockOutcome, type TexJobSpec } from './render-child';
 import { standaloneMarkup } from './mount';
-import { asProcessorSource } from '../note/finalize';
+import { asProcessorSource, asReadingView } from '../note/finalize';
 import type { QueueTimers, RenderQueue } from '../queue/queue';
 import type { DiagramCache } from '../cache';
 import type { Budgets } from '../types';
@@ -137,7 +137,7 @@ export function createProcessor(deps: ProcessorDeps) {
 			budgeted: print !== null,
 			offscreen: el.closest(`.${OFFSCREEN_CLASS}`) !== null,
 		};
-		const prepared = prepare(source, deps, ctx.sourcePath, place);
+		const prepared = prepare(readingViewSource(source, el, ctx), deps, ctx.sourcePath, place);
 
 		// The common case — no preamble configured anywhere — stays SYNCHRONOUS, and that is not an
 		// optimisation. A cached diagram is only painted in the same frame as the text around it if
@@ -149,6 +149,51 @@ export function createProcessor(deps: ProcessorDeps) {
 		}
 		return attach(prepared, el, ctx, deps, deadline);
 	};
+}
+
+/**
+ * The block's text as Reading view hands it over, whichever view is rendering it.
+ *
+ * Live Preview's code-block widget hands the processor the editor's lines between the two fences
+ * exactly as they stand, so a block in a list item arrives with the list's indentation on every
+ * line. Reading view, a PDF export and a callout hand over the code block's content, which the
+ * markdown parser has already taken that indentation off (both read in the 1.14.4 bundle). The
+ * source keeps leading whitespace into the key, so the one diagram had a key in each view: it was
+ * compiled twice, and the commands, which derive Reading view's, said a diagram on screen in Live
+ * Preview had not been rendered.
+ *
+ * The widget's getSectionInfo answers with the whole note and the two fence lines, and then the
+ * lines between them are `source` exactly. Only then is anything taken off, and only what Reading
+ * view takes (`asReadingView`), so two blocks that differ in Reading view still differ here. Every
+ * other caller has handed over the code block's content already: Reading view's section is the
+ * whole list, and an export or an embed has none.
+ *
+ * TeX sees the same text in both views now. What differs is whitespace at the start of a line,
+ * which TeX skips, so a diagram draws as it did; only where a block reads spaces as text, in a
+ * verbatim environment, did Live Preview show something Reading view and the PDF did not.
+ */
+function readingViewSource(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext): string {
+	// No line starts with a space or a tab, so there is nothing to take off: the usual block,
+	// which is spared reading the note.
+	if (!/^[ \t]/m.test(source)) return source;
+	const section = ctx.getSectionInfo(el);
+	if (!section) return source;
+	const lines = linesOf(section.text, section.lineStart, section.lineEnd);
+	if (lines.length < 2 || lines.slice(1, -1).join('\n') !== source) return source;
+	return asReadingView(lines[0] ?? '', source) ?? source;
+}
+
+/** Lines `from` to `to` of `text`, both included; fewer when the text ends first. */
+function linesOf(text: string, from: number, to: number): string[] {
+	const lines: string[] = [];
+	let start = 0;
+	for (let line = 0; line <= to; line++) {
+		const end = text.indexOf('\n', start);
+		if (line >= from) lines.push(text.slice(start, end === -1 ? text.length : end));
+		if (end === -1) break;
+		start = end + 1;
+	}
+	return lines;
 }
 
 function attach(
@@ -216,7 +261,9 @@ export type KeyDeps = Pick<ProcessorDeps, 'settings' | 'budgets' | 'host' | 'pre
  * had already processed this session (never one in Source mode, nor one the cursor was resting in
  * when the note opened), grew with every edit, and was keyed on a form of the text the scanner does
  * not produce. Deriving it here, from `asProcessorSource` of the scanned text, cannot drift from the
- * processor, because it is the processor.
+ * processor, because it is the processor. The scanned text is Reading view's, and a block Live
+ * Preview hands over with a list's indentation is made Reading view's before its key is derived
+ * (`readingViewSource`), so the block has the one key in both views.
  */
 export function keyFor(source: string, notePath: string, deps: KeyDeps): string | Promise<string> {
 	const prepared = specFor(source, notePath, deps);

@@ -1,6 +1,12 @@
 import type { TFile } from 'obsidian';
 import { MarkdownView, Notice, type App, type Editor, type Plugin } from 'obsidian';
-import { findTikzBlocks, finalizeBlock, unfinalizeBlock, type TikzBlockSpan } from '../note/finalize';
+import {
+	findTikzBlockAt,
+	findTikzBlocks,
+	finalizeBlock,
+	unfinalizeBlock,
+	type TikzBlockSpan,
+} from '../note/finalize';
 import { freezeSvg } from '../svg/freeze';
 import { ZoomModal } from './zoom';
 import { STRINGS } from '../ui/strings';
@@ -34,11 +40,8 @@ const EXPORT_PAPER = '#ffffff';
 export function registerCommands(plugin: Plugin, deps: CommandDeps): void {
 	const { app } = deps;
 
-	const blockAtCursor = (editor: Editor): TikzBlockSpan | null => {
-		const text = editor.getValue();
-		const offset = editor.posToOffset(editor.getCursor());
-		return findTikzBlocks(text).find((b) => offset >= b.start && offset <= b.end) ?? null;
-	};
+	const blockAtCursor = (editor: Editor): TikzBlockSpan | null =>
+		findTikzBlockAt(editor.getValue(), editor.posToOffset(editor.getCursor()));
 
 	const frozenFor = async (
 		span: TikzBlockSpan,

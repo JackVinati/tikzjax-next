@@ -38,9 +38,11 @@ top of its notes on GitHub, and will not publish a version that has none.
   gives other copies of that diagram the wrong colours; invert no longer turns ink dark in a dark
   theme; and the zoom view shows a diagram in its own mode, without white shapes turning solid.
 - Copy SVG, Save SVG, Finalize and the zoom view find the diagram at the cursor, even after a
-  restart, and Finalize puts each picture above its own diagram. "Render all diagrams in this note"
-  finishes, can be stopped, and says truthfully how many rendered; the diagnostics view shows each
-  diagram's real outcome.
+  restart and in a list item in Live Preview, and Finalize puts each picture above its own diagram.
+  Copy SVG, Save SVG and the zoom view also work in a blockquote or a callout. A diagram in a list
+  item is compiled once for Live Preview and Reading view, not once for each. "Render all diagrams
+  in this note" finishes, can be stopped, and says truthfully how many rendered; the diagnostics
+  view shows each diagram's real outcome.
 - Fast mode renders ahead of other diagrams; `%!tikz svgo=off` and the svgo setting really turn
   SVG optimisation off.
 - Safer: diagrams can no longer carry stylesheets, external images or other active markup into a

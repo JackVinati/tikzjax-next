@@ -9,6 +9,7 @@ import { buildInput } from '../engine-src/document';
 import { budgetsFor } from '../src/platform/budgets';
 import { DEFAULT_SETTINGS, type TikzSettings } from '../src/settings/schema';
 import { TexError } from '../src/types';
+import { BLOCKS, livePreviewWidget } from './support/obsidian-blocks';
 
 beforeAll(() => {
 	installObsidianDom(window as unknown as Window & typeof globalThis);
@@ -138,6 +139,71 @@ describe('the settings a block is built with', () => {
 		expect(after.spec.options.presentation.colors).toBe('paper');
 		// Fast and full renders are different artifacts, so the key moves with the setting.
 		expect(after.spec.key).not.toBe(before.spec.key);
+	});
+});
+
+describe('a block in a list item', () => {
+	/**
+	 * Live Preview hands the processor the block's lines as they stand in the note, the list's
+	 * indentation on every one; Reading view hands it the code block's content, which the markdown
+	 * parser has taken that indentation off. The source keeps leading whitespace into the key, so
+	 * the one diagram was compiled once for each view, and the commands, which derive Reading
+	 * view's key, said a diagram on screen in Live Preview had not been rendered.
+	 */
+	for (const block of BLOCKS.filter((b) => b.livePreview === 'lines')) {
+		it(`is the same diagram in Live Preview as in Reading view: ${block.name}`, async () => {
+			const { deps, seen } = processorDeps();
+			const reading = await processBlock(deps, seen, block.reading, { load: false });
+			const { source, section } = livePreviewWidget(block.note);
+			const live = await processBlock(deps, seen, source, { load: false, section });
+
+			expect(live.spec.key).toBe(reading.spec.key);
+			expect(live.spec.source).toBe(reading.spec.source);
+		});
+	}
+
+	it('applies a %!tikz line written at the list indentation, in both views', async () => {
+		const block = BLOCKS.find((b) => b.reading.startsWith('%!tikz'));
+		if (!block) throw new Error('a block with a directive');
+		const { deps, seen } = processorDeps();
+		const { source, section } = livePreviewWidget(block.note);
+		const live = await processBlock(deps, seen, source, { load: false, section });
+
+		expect(live.spec.options.baked.border).toBe('2pt');
+		expect(live.spec.source.startsWith('\\begin{tikzpicture}\n')).toBe(true);
+	});
+
+	it('keeps what it is handed when the section is not the block itself', async () => {
+		// Reading view describes the whole list, whose inner lines are not the block; an embed or an
+		// export has no section at all. Either way the text is already Reading view's.
+		const { deps, seen } = processorDeps();
+		const block = BLOCKS[0];
+		if (!block) throw new Error('a block');
+		const list = block.note.split('\n');
+		const section = {
+			text: block.note,
+			lineStart: list.indexOf('- The square:'),
+			lineEnd: list.indexOf('- Next step.'),
+		};
+		const handed = '  \\draw (0,0);\n    \\draw (1,1);';
+		const framed = await processBlock(deps, seen, handed, { load: false, section });
+		const bare = await processBlock(deps, seen, handed, { load: false });
+
+		expect(framed.spec.source).toBe(handed);
+		expect(bare.spec.source).toBe(handed);
+	});
+
+	it('keeps the indentation of a top-level body, so it is not the unindented block', async () => {
+		// A fence at the left margin has nothing in front of it to take off: its body's
+		// indentation is the block's own, as Reading view leaves it.
+		const { deps, seen } = processorDeps();
+		const indented = 'Text.\n\n```tikz\n  \\draw (0,0);\n```\n';
+		const { source, section } = livePreviewWidget(indented);
+		const live = await processBlock(deps, seen, source, { load: false, section });
+		const unindented = await processBlock(deps, seen, '\\draw (0,0);', { load: false });
+
+		expect(live.spec.source).toBe('  \\draw (0,0);');
+		expect(live.spec.key).not.toBe(unindented.spec.key);
 	});
 });
 

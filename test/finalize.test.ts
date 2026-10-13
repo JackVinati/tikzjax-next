@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { findTikzBlocks, finalizeBlock, unfinalizeBlock, type TikzBlockSpan } from '../src/note/finalize';
+import {
+	asProcessorSource,
+	asReadingView,
+	findTikzBlockAt,
+	findTikzBlocks,
+	finalizeBlock,
+	unfinalizeBlock,
+	type TikzBlockSpan,
+} from '../src/note/finalize';
+import { BLOCKS, livePreviewWidget } from './support/obsidian-blocks';
 
 // Notes are written as line arrays and joined with an explicit terminator, so every test says out
 // loud which line ending it is about. A trailing '' element is a trailing newline — the thing a
@@ -218,6 +227,77 @@ describe('findTikzBlocks: recognising a finalized block', () => {
 	it('does not call it finalized when the commented fence is another language', () => {
 		const text = note(['![[a.svg]]', '%%', '```js', 'x', '```', '%%', '']);
 		expect(findTikzBlocks(text)).toEqual([]);
+	});
+});
+
+describe('findTikzBlockAt', () => {
+	for (const block of BLOCKS) {
+		it(`finds the block in ${block.name}, as Reading view hands it to the processor`, () => {
+			const span = findTikzBlockAt(block.note, block.note.indexOf(block.marker));
+			expect(span).not.toBeNull();
+			expect(asProcessorSource(span?.source ?? '')).toBe(block.reading);
+		});
+	}
+
+	it('covers the fence lines and their quote markers, and nothing around them', () => {
+		const text = note(['> [!note]', '> ```tikz', '> \\draw (0,0);', '> ```', '', 'after', '']);
+		const span = findTikzBlockAt(text, text.indexOf('draw'));
+
+		expect(span && sliceOf(text, span)).toBe(note(['> ```tikz', '> \\draw (0,0);', '> ```']));
+		expect(findTikzBlockAt(text, text.indexOf('> ```tikz'))).toEqual(span);
+		expect(findTikzBlockAt(text, text.indexOf('[!note]'))).toBeNull();
+		expect(findTikzBlockAt(text, text.indexOf('after'))).toBeNull();
+	});
+
+	it('ends a quoted block where the quote ends', () => {
+		const text = note(['> ```tikz', '> \\draw (0,0);', '', 'after', '']);
+
+		expect(findTikzBlockAt(text, text.indexOf('draw'))?.source).toBe('\\draw (0,0);\n');
+		expect(findTikzBlockAt(text, text.indexOf('after'))).toBeNull();
+	});
+
+	it('takes off as many quote markers as the opening fence has', () => {
+		const text = note(['> > ```tikz', '> > \\draw (0,0);', '> >   \\draw (1,1);', '> > ```', '']);
+		expect(findTikzBlockAt(text, text.indexOf('draw'))?.source).toBe('\\draw (0,0);\n  \\draw (1,1);\n');
+	});
+
+	it('does not find a block inside a %% comment, which does not render', () => {
+		const text = note(['%%', '> ```tikz', '> \\draw (0,0);', '> ```', '%%', '']);
+		expect(findTikzBlockAt(text, text.indexOf('draw'))).toBeNull();
+	});
+
+	it('finds a finalized block, from its embed as well', () => {
+		const text = note(['![[d.svg]]', '%%', '```tikz', '\\draw (0,0);', '```', '%%', '']);
+		const span = findTikzBlockAt(text, 2);
+
+		expect(span?.finalized).toBe(true);
+		expect(span?.source).toBe('\\draw (0,0);\n');
+	});
+});
+
+describe('asReadingView', () => {
+	for (const block of BLOCKS.filter((b) => b.livePreview === 'lines')) {
+		it(`gives what Reading view hands the processor for ${block.name}`, () => {
+			const { source, section } = livePreviewWidget(block.note);
+			const opener = section.text.split('\n')[section.lineStart] ?? '';
+			expect(asReadingView(opener, source)).toBe(block.reading);
+		});
+	}
+
+	it('takes off no more than what stands in front of the opening fence, and keeps blank lines', () => {
+		expect(asReadingView('  ```tikz', '      \\draw (0,0);\n\n\\draw (1,1);')).toBe(
+			'    \\draw (0,0);\n\n\\draw (1,1);',
+		);
+	});
+
+	it("keeps the indentation of a top-level body, which is the block's own", () => {
+		expect(asReadingView('```tikz', '  \\draw (0,0);')).toBe('  \\draw (0,0);');
+	});
+
+	it('is null for a line that does not open a tikz fence, and for a fence in a quote', () => {
+		expect(asReadingView('- item', '  \\draw (0,0);')).toBeNull();
+		expect(asReadingView('  ```js', '  x = 1')).toBeNull();
+		expect(asReadingView('> ```tikz', '> \\draw (0,0);')).toBeNull();
 	});
 });
 
@@ -504,9 +584,160 @@ describe('documented divergences', () => {
 		// Deliberate, and worth pinning: recognising `> ```tikz` means reproducing lazy
 		// continuation to know where the quote ends, and a wrong answer writes the embed OUTSIDE
 		// the quote it belongs to. Finding nothing is the safe failure; if this ever starts
-		// returning a span, the offsets have to be proven against the quote first.
+		// returning a span, the offsets have to be proven against the quote first. The commands
+		// that only read the diagram find it with findTikzBlockAt, and write nothing.
 		const text = note(['> ```tikz', '> \draw (0,0);', '> ```', '']);
 		expect(findTikzBlocks(text)).toEqual([]);
+	});
+
+	it('does not report a fence that opens on its list item marker line', () => {
+		// Its embed would have to take the fence's place on the marker's line, and un-finalize put
+		// the fence back there: a rewrite of its own, for a rare shape. findTikzBlockAt finds it.
+		const text = note(['1. ```tikz', '   \\draw (0,0);', '   ```', '']);
+		expect(findTikzBlocks(text)).toEqual([]);
+	});
+
+	it('does not see a tikz fence quoted inside a fence that opens on a list marker line', () => {
+		// The marker-line fence used to be read as prose, so the example inside it was a block of
+		// its own, and Finalize would have replaced it with a picture.
+		const text = note(['- ````markdown', '  ```tikz', '  \\draw (0,0);', '  ```', '  ````', '']);
+		expect(findTikzBlocks(text)).toEqual([]);
+		expect(findTikzBlockAt(text, text.indexOf('draw'))).toBeNull();
+	});
+});
+
+describe('a diagram in a list item', () => {
+	// The finalized shapes below were run through Obsidian 1.14.4's Reading view parser: the embed
+	// stays in the item's paragraph, the %% comment is a block of the same item, and the item after
+	// it is still an item of the same list.
+	const CASES: ReadonlyArray<readonly [string, string[], string[]]> = [
+		[
+			'a bullet item',
+			['- The square:', '  ```tikz', '  \\draw (0,0) rectangle (2,2);', '  ```', '- Next.', ''],
+			[
+				'- The square:',
+				'  ![[d.svg]]',
+				'  %%',
+				'  ```tikz',
+				'  \\draw (0,0) rectangle (2,2);',
+				'  ```',
+				'  %%',
+				'- Next.',
+				'',
+			],
+		],
+		[
+			'an item indented with a tab',
+			[
+				'- The circle:',
+				'\t```tikz',
+				'\t\\begin{tikzpicture}',
+				'\t\t\\draw (0,0) circle (1);',
+				'\t\\end{tikzpicture}',
+				'\t```',
+				'- Next.',
+				'',
+			],
+			[
+				'- The circle:',
+				'\t![[d.svg]]',
+				'\t%%',
+				'\t```tikz',
+				'\t\\begin{tikzpicture}',
+				'\t\t\\draw (0,0) circle (1);',
+				'\t\\end{tikzpicture}',
+				'\t```',
+				'\t%%',
+				'- Next.',
+				'',
+			],
+		],
+		[
+			'a numbered item',
+			[
+				'1. First.',
+				'2. The axis:',
+				'   ```tikz',
+				'   \\draw[->] (0,0) -- (3,0);',
+				'   ```',
+				'3. Last.',
+				'',
+			],
+			[
+				'1. First.',
+				'2. The axis:',
+				'   ![[d.svg]]',
+				'   %%',
+				'   ```tikz',
+				'   \\draw[->] (0,0) -- (3,0);',
+				'   ```',
+				'   %%',
+				'3. Last.',
+				'',
+			],
+		],
+		[
+			'an item nested two deep',
+			['- Outer', '  - Inner:', '    ```tikz', '    \\node[draw] {A};', '    ```', '  - Sibling', ''],
+			[
+				'- Outer',
+				'  - Inner:',
+				'    ![[d.svg]]',
+				'    %%',
+				'    ```tikz',
+				'    \\node[draw] {A};',
+				'    ```',
+				'    %%',
+				'  - Sibling',
+				'',
+			],
+		],
+	];
+
+	for (const [name, lines, finalizedLines] of CASES) {
+		it(`stays inside ${name} when finalized, and un-finalizes byte for byte`, () => {
+			const original = note(lines);
+			const span = only(findTikzBlocks(original));
+			const finalized = finalizeBlock(original, span, 'd.svg');
+
+			expect(finalized).toBe(note(finalizedLines));
+			const back = only(findTikzBlocks(finalized));
+			expect(back.finalized).toBe(true);
+			expect(back.source).toBe(span.source);
+			expect(unfinalizeBlock(finalized, back)).toBe(original);
+		});
+	}
+
+	it('round-trips several items of a CRLF note, finalized back to front', () => {
+		const original = note(
+			[
+				'1. First:',
+				'   ```tikz',
+				'   \\draw (0,0) -- (1,0);',
+				'   ```',
+				'2. Second:',
+				'\t```tikz',
+				'\t\\draw (0,0) -- (0,1);',
+				'\t```',
+				'',
+			],
+			'\r\n',
+		);
+		let text = original;
+		const blocks = findTikzBlocks(text);
+		expect(blocks).toHaveLength(2);
+		for (let i = blocks.length - 1; i >= 0; i--) {
+			text = finalizeBlock(text, blocks[i] as TikzBlockSpan, `d${i}.svg`);
+		}
+
+		expect(text).toContain('\r\n   ![[d0.svg]]\r\n   %%\r\n   ```tikz');
+		expect(text).toContain('\r\n\t![[d1.svg]]\r\n\t%%\r\n\t```tikz');
+		const finalized = findTikzBlocks(text);
+		expect(finalized.map((s) => s.finalized)).toEqual([true, true]);
+		for (let i = finalized.length - 1; i >= 0; i--) {
+			text = unfinalizeBlock(text, finalized[i] as TikzBlockSpan);
+		}
+		expect(text).toBe(original);
 	});
 });
 
@@ -537,6 +768,7 @@ describe('round trip over generated notes', () => {
 		'\node {```};',
 		'> ```tikz',
 		'- item',
+		'1. ```tikz',
 		'%%  ',
 	];
 
