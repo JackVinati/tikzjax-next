@@ -1035,6 +1035,7 @@ Pipeline output is snapshotted byte-exact. **The Phase 2→3 refactor must be pr
 - [ ] Screen reader (VoiceOver / NVDA) over a note with a captioned diagram, an uncaptioned diagram and an error card.
 - [ ] Devtools Network tab across a full session including a failing diagram: assert **zero** requests.
 - [ ] **Finalize a fence written directly under a line of text**, with no blank line between them, then un-finalize. Assert the embed renders as an embed, the `%%` opens a comment rather than showing the TeX as visible text, and the note comes back byte for byte. This is the open question in the header of `src/note/finalize.ts`: no blank line is inserted because inserting one would make un-finalize inexact, and whether that matters is a fact about Obsidian's parser rather than about CommonMark.
+- [ ] **A diagram in a list item, on a 1.7.2 install**: open it in Live Preview, then in Reading view. Assert one compile and then the diagram coming from the cache in the diagnostics view, and that Copy SVG with the cursor in it works. The shared key rests on `getSectionInfo` framing Live Preview's code-block widget as it does in 1.14.4, the only version it was checked against (§7.9).
 
 ---
 
