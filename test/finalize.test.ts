@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
 	asProcessorSource,
+	asReadingView,
 	findTikzBlockAt,
 	findTikzBlocks,
 	finalizeBlock,
 	unfinalizeBlock,
 	type TikzBlockSpan,
 } from '../src/note/finalize';
-import { BLOCKS } from './support/obsidian-blocks';
+import { BLOCKS, livePreviewWidget } from './support/obsidian-blocks';
 
 // Notes are written as line arrays and joined with an explicit terminator, so every test says out
 // loud which line ending it is about. A trailing '' element is a trailing newline — the thing a
@@ -271,6 +272,32 @@ describe('findTikzBlockAt', () => {
 
 		expect(span?.finalized).toBe(true);
 		expect(span?.source).toBe('\\draw (0,0);\n');
+	});
+});
+
+describe('asReadingView', () => {
+	for (const block of BLOCKS.filter((b) => b.livePreview === 'lines')) {
+		it(`gives what Reading view hands the processor for ${block.name}`, () => {
+			const { source, section } = livePreviewWidget(block.note);
+			const opener = section.text.split('\n')[section.lineStart] ?? '';
+			expect(asReadingView(opener, source)).toBe(block.reading);
+		});
+	}
+
+	it('takes off no more than what stands in front of the opening fence, and keeps blank lines', () => {
+		expect(asReadingView('  ```tikz', '      \\draw (0,0);\n\n\\draw (1,1);')).toBe(
+			'    \\draw (0,0);\n\n\\draw (1,1);',
+		);
+	});
+
+	it("keeps the indentation of a top-level body, which is the block's own", () => {
+		expect(asReadingView('```tikz', '  \\draw (0,0);')).toBe('  \\draw (0,0);');
+	});
+
+	it('is null for a line that does not open a tikz fence, and for a fence in a quote', () => {
+		expect(asReadingView('- item', '  \\draw (0,0);')).toBeNull();
+		expect(asReadingView('  ```js', '  x = 1')).toBeNull();
+		expect(asReadingView('> ```tikz', '> \\draw (0,0);')).toBeNull();
 	});
 });
 

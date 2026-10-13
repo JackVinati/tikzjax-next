@@ -1,5 +1,5 @@
 import { expect } from 'vitest';
-import type { MarkdownPostProcessorContext } from 'obsidian';
+import type { MarkdownPostProcessorContext, MarkdownSectionInformation } from 'obsidian';
 import { Component } from './obsidian';
 import { FakeTimers } from './timers';
 import { fakeApp } from './vault';
@@ -106,13 +106,19 @@ function processorFor(deps: ProcessorDeps): ReturnType<typeof createProcessor> {
 /**
  * Hand a block to the processor the way Obsidian does: a container in the page, and a context
  * whose `addChild` loads the block at once. `load: false` keeps the block from starting, for a
- * test that only wants the spec.
+ * test that only wants the spec. `section` is what the context's getSectionInfo answers, null
+ * unless a test says otherwise.
  */
 export async function processBlock(
 	deps: ProcessorDeps,
 	seen: TexJobSpec[],
 	source: string,
-	opts: { path?: string; el?: HTMLElement; load?: boolean } = {},
+	opts: {
+		path?: string;
+		el?: HTMLElement;
+		load?: boolean;
+		section?: MarkdownSectionInformation | null;
+	} = {},
 ) {
 	const el = opts.el ?? document.body.createDiv();
 	const parent = new Component();
@@ -121,6 +127,7 @@ export async function processBlock(
 	const ctx = {
 		sourcePath: opts.path ?? 'note.md',
 		addChild: (child: Component) => parent.addChild(child),
+		getSectionInfo: () => opts.section ?? null,
 	} as unknown as MarkdownPostProcessorContext;
 	const settled = processorFor(deps)(source, el, ctx);
 	// The processor goes async only to resolve a preamble; give it the turns that takes.

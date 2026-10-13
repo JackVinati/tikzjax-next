@@ -297,6 +297,30 @@ function bodyOf(
 }
 
 /**
+ * What Reading view hands a code-block processor for a block that Live Preview hands over as it
+ * stands in the note: `opener` is the opening fence's line, `body` the lines between the fences,
+ * joined by "\n" as the editor slices them. Null when `opener` does not open a tikz fence, or
+ * opens one in a blockquote, which Live Preview never renders as a block.
+ *
+ * Live Preview hands over every body line with the list item's indentation in front of it, and
+ * Reading view without: its parser takes off the item's indentation and then the fence's own, up
+ * to as much as stands in front of the fence. On a line of its own that is the fence's
+ * indentation, on a list item's marker line the marker and the space after it. Taking that many
+ * spaces or tabs off each line is what the 1.14.4 parser does in every list we tried it on: bullet
+ * and numbered, nested, indented with spaces or with tabs. It can part from it where the two are
+ * mixed, tabs in front of the fence and spaces in front of its lines or the other way round.
+ */
+export function asReadingView(opener: string, body: string): string | null {
+	const fence = matchContainedOpener(opener);
+	if (!fence || fence.quotes > 0 || !isTikzInfo(fence.info)) return null;
+	if (fence.width === 0) return body;
+	return body
+		.split('\n')
+		.map((line) => dedent(line, fence.width))
+		.join('\n');
+}
+
+/**
  * A scanned block's `source` in the form Obsidian hands a code-block processor — the form every
  * cache key was derived from.
  *

@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { App, Command, Editor, MarkdownView, Plugin } from 'obsidian';
+import type { App, Command, Editor, MarkdownSectionInformation, MarkdownView, Plugin } from 'obsidian';
 import { installObsidianDom } from './stubs/obsidian-dom';
-import { shownNotices, TFile } from './stubs/obsidian';
-import { BLOCKS } from './support/obsidian-blocks';
+import { Modal, shownNotices, TFile } from './stubs/obsidian';
+import { BLOCKS, livePreviewWidget } from './support/obsidian-blocks';
 import { fakeApp } from './stubs/vault';
 import { artifact, processBlock, processorDeps } from './stubs/processor';
 import { asProcessorSource, findTikzBlocks, type TikzBlockSpan } from '../src/note/finalize';
@@ -235,9 +235,12 @@ function workspace(
 		l1.set(await processedKey(deps, seen, readingView(note, span), file.path), artifact());
 	};
 
-	/** Render a block from what a view hands the processor. */
-	const renderAs = async (source: string): Promise<void> => {
-		const { spec } = await processBlock(deps, seen, source, { path: file.path, load: false });
+	/** Render a block from what a view hands the processor, and what its getSectionInfo answers. */
+	const renderAs = async (
+		source: string,
+		section: MarkdownSectionInformation | null = null,
+	): Promise<void> => {
+		const { spec } = await processBlock(deps, seen, source, { path: file.path, load: false, section });
 		l1.set(spec.key, artifact());
 	};
 
@@ -337,16 +340,48 @@ describe('the commands at the cursor, in a list item, a blockquote or a callout'
 		shownNotices.length = 0;
 	});
 
-	for (const block of BLOCKS) {
-		it(`Save SVG finds the diagram Reading view rendered in ${block.name}`, async () => {
-			const w = workspace(block.note);
-			await w.renderAs(block.reading);
+	/** Each view that renders the block, and what it hands the processor. */
+	const views = (block: (typeof BLOCKS)[number]) => {
+		const out: [string, string, MarkdownSectionInformation | null][] = [
+			['Reading view', block.reading, null],
+		];
+		if (block.livePreview === 'lines') {
+			const { source, section } = livePreviewWidget(block.note);
+			out.push(['Live Preview', source, section]);
+		}
+		return out;
+	};
 
-			w.run('save-svg', block.marker);
-			await vi.waitFor(() => expect(lastNotice()).toBe('Saved folder/note-diagram.svg'));
-			expect(w.vault.get('folder/note-diagram.svg')).toContain('<svg');
-		});
+	for (const block of BLOCKS) {
+		for (const [view, source, section] of views(block)) {
+			it(`Save SVG finds the diagram ${view} rendered in ${block.name}`, async () => {
+				const w = workspace(block.note);
+				await w.renderAs(source, section);
+
+				w.run('save-svg', block.marker);
+				await vi.waitFor(() => expect(lastNotice()).toBe('Saved folder/note-diagram.svg'));
+				expect(w.vault.get('folder/note-diagram.svg')).toContain('<svg');
+			});
+		}
 	}
+
+	it('Copy SVG and the zoom view find a diagram Live Preview rendered in a list item', async () => {
+		const block = BLOCKS[0];
+		if (!block) throw new Error('a block');
+		const writeText = vi.fn(() => Promise.resolve());
+		Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+		const open = vi.spyOn(Modal.prototype, 'open');
+		const w = workspace(block.note);
+		const { source, section } = livePreviewWidget(block.note);
+		await w.renderAs(source, section);
+
+		w.run('copy-svg', block.marker);
+		await vi.waitFor(() => expect(lastNotice()).toBe('Diagram copied as SVG.'));
+		w.run('zoom-diagram', block.marker);
+		await vi.waitFor(() => expect(open).toHaveBeenCalledOnce());
+		expect(lastNotice()).toBe('Diagram copied as SVG.');
+		open.mockRestore();
+	});
 });
 
 describe('"Render all diagrams in this note"', () => {
