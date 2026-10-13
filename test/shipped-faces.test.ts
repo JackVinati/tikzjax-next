@@ -32,10 +32,12 @@ describe('the font faces the engine ships', () => {
 		for (const size of ['5', '7', '10']) expect(FACES.has(`rsfs${size}`)).toBe(false);
 	});
 
-	it('ships no TS1 face, which is why the worker draws TS1 symbols from the math fonts', () => {
+	it('ships no TS1 face, which is why the worker draws TS1 symbols from Computer Modern', () => {
 		expect(METRICS.has('tcrm1000')).toBe(true);
 		expect([...FACES].filter((face) => face.startsWith('tc'))).toEqual([]);
-		// What engine-src/ts1-shim.ts draws them with, measured on the ts1-symbols fixture.
-		for (const face of ['cmsy10', 'cmsy7', 'cmmi10', 'cmr7']) expect(FACES.has(face)).toBe(true);
+		// What engine-src/ts1-shim.ts draws them with, measured on the ts1-symbols fixture, and on
+		// ts1-currency the £ of the upright italic and the italic.
+		for (const face of ['cmsy10', 'cmsy7', 'cmmi10', 'cmr7', 'cmu10', 'cmti10'])
+			expect(FACES.has(face)).toBe(true);
 	});
 });

@@ -299,11 +299,11 @@ describe('preflight', () => {
 
 	describe('characters the engine cannot typeset (#19 #36 #53)', () => {
 		it('reports the offending characters and where they start', () => {
-			const found = preflight('\\begin{document}\n\\node {Ω and €};', baked(), caps());
+			const found = preflight('\\begin{document}\n\\node {Ω and ¥};', baked(), caps());
 			expect(found).toHaveLength(1);
 			expect(found[0]?.line).toBe(2);
 			expect(found[0]?.message).toContain('U+03A9');
-			expect(found[0]?.message).toContain('U+20AC');
+			expect(found[0]?.message).toContain('U+00A5');
 		});
 
 		// Latin-1 is measured like everything else: é renders natively.
@@ -321,10 +321,39 @@ describe('preflight', () => {
 			},
 		);
 
+		// £, €, © and the rest have no math glyph either; the worker builds them from the Computer
+		// Modern text fonts instead, as LaTeX did before they moved to TS1.
+		it.each(['£5', '€5', '© 2026', 'Acme®', '1ª 2º', '\\pounds 5, \\copyright, \\$5'])(
+			'says nothing about %s, which the worker builds from the text fonts',
+			(label) => {
+				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
+			},
+		);
+
+		it.each([
+			['¥', 'U+00A5'],
+			['¢', 'U+00A2'],
+			['‰', 'U+2030'],
+		])('still warns about %s, which stays in TS1 and has no stand-in', (label, codepoint) => {
+			const found = preflight(`\\node {${label}};`, baked(), caps());
+			expect(found).toHaveLength(1);
+			expect(found[0]?.message).toContain(codepoint);
+		});
+
 		// A dieresis used to lose the whole diagram: dvi2html's TFM reader stopped one character
 		// short of the end of every font, and in cmr10 that character is the accent. The build
 		// patches the reader (scripts/dvi2html-patch.mjs), and the scan measures them native now.
 		it.each(['Müller', 'Ärger', 'Grüße aus Köln', 'naïve', 'Zoë', 'Ÿ', 'n\\"aive \\"u'])(
+			'says nothing about %s, which renders since the converter was fixed',
+			(label) => {
+				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
+			},
+		);
+
+		// Ł and ł compiled cleanly and then lost the diagram inside the converter, whose glyph map
+		// had no entry for the stroke they are built with. The build gives it one, and the scan
+		// measures them native now.
+		it.each(['Łódź', 'Wrocław', 'Białystok', 'ŁUKASZ'])(
 			'says nothing about %s, which renders since the converter was fixed',
 			(label) => {
 				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
@@ -375,13 +404,15 @@ describe('preflight', () => {
 		});
 
 		it('names only the characters that fail, not the native or drawable ones beside them', () => {
-			const found = preflight('\\node {Dvořák € Erdős → 90°};', baked(), caps());
+			const found = preflight('\\node {Dvořák ¥ Erdős → 90° €5 Łódź};', baked(), caps());
 			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain('U+20AC');
+			expect(found[0]?.message).toContain('U+00A5');
 			expect(found[0]?.message).not.toContain('U+0159');
 			expect(found[0]?.message).not.toContain('U+0151');
 			expect(found[0]?.message).not.toContain('U+2192');
 			expect(found[0]?.message).not.toContain('U+00B0');
+			expect(found[0]?.message).not.toContain('U+20AC');
+			expect(found[0]?.message).not.toContain('U+0141');
 		});
 
 		// The old hint offered `\usepackage[utf8]{inputenc}` to "reassemble" the bytes, but the format

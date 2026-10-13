@@ -3,11 +3,12 @@ import { buildInput } from '../engine-src/document';
 import { isTs1Symbol, needsTs1Shim, TS1_SHIM, TS1_SYMBOLS } from '../engine-src/ts1-shim';
 
 /*
- * LaTeX sets °, ×, µ, the arrows and a few more from TS1, whose font (tcrm1000) the SVG converter
- * cannot draw, so a single ° lost the whole diagram — as did siunitx's \micro and \ohm, and every
- * bulleted list. The worker redefines those text commands to glyphs in the math fonts, only for an
- * input that can use one. Which glyphs render is measured through the engine by smoke and
- * verify:worker (the ts1-symbols and siunitx fixtures); these hold the shim's shape and its trigger.
+ * LaTeX sets °, ×, µ, the arrows, £, €, © and a few more from TS1, whose font (tcrm1000) the SVG
+ * converter cannot draw, so a single ° lost the whole diagram — as did siunitx's \micro and \ohm,
+ * every bulleted list and a \$ in a label. The worker redefines those text commands to glyphs in the
+ * math fonts, or to LaTeX's own constructions out of Computer Modern, only for an input that can use
+ * one. Which glyphs render is measured through the engine by smoke and verify:worker (the
+ * ts1-symbols, ts1-currency and siunitx fixtures); these hold the shim's shape and its trigger.
  */
 
 const PICTURE = '\\begin{tikzpicture}\n\\node {%s};\n\\end{tikzpicture}';
@@ -21,7 +22,23 @@ describe('the TS1 shim', () => {
 			expect(commands).toContain(command);
 	});
 
-	it('draws each command from a math font, in the preamble line it injects', () => {
+	it('covers the currency, the legal marks and the ordinals, typed and as commands', () => {
+		const commands = TS1_SYMBOLS.map((symbol) => symbol.command);
+		for (const ch of ['£', '€', '©', '®', 'ª', 'º'])
+			expect(isTs1Symbol(ch.codePointAt(0) ?? 0)).toBe(true);
+		for (const command of [
+			'textsterling',
+			'texteuro',
+			'textcopyright',
+			'textregistered',
+			'textordfeminine',
+			'textordmasculine',
+			'textdollar',
+		])
+			expect(commands).toContain(command);
+	});
+
+	it('draws each command from fonts the converter has, in the preamble line it injects', () => {
 		for (const { command, drawnAs } of TS1_SYMBOLS) {
 			expect(TS1_SHIM).toContain(`\\DeclareRobustCommand\\${command}{${drawnAs}}`);
 		}
@@ -31,8 +48,8 @@ describe('the TS1 shim', () => {
 	});
 
 	it('leaves alone what the engine already draws natively', () => {
-		// Greek, the euro and the rest have no math-font stand-in here; é and ä are native.
-		for (const ch of ['Ω', 'α', '€', 'é', 'ä', '–'])
+		// Greek and the yen have no stand-in here; é, ä and, since the converter was fixed, Ł are native.
+		for (const ch of ['Ω', 'α', '¥', 'é', 'ä', '–', 'Ł', 'ł'])
 			expect(isTs1Symbol(ch.codePointAt(0) ?? 0)).toBe(false);
 	});
 
@@ -40,6 +57,10 @@ describe('the TS1 shim', () => {
 		['a typed symbol', picture('90° and 3×4')],
 		['a command', picture('45\\textdegree')],
 		['\\S', picture('see \\S 3')],
+		['a typed currency sign', picture('£5 and 3€')],
+		['\\pounds', picture('\\pounds 5')],
+		['\\copyright', picture('\\copyright{} 2026')],
+		['\\$, which is \\textdollar in text', picture('costs \\$5')],
 		['a bulleted list, whose label is \\textbullet', picture('\\begin{itemize}\\item a\\end{itemize}')],
 		[
 			'siunitx in the source',
@@ -52,7 +73,8 @@ describe('the TS1 shim', () => {
 	it.each([
 		['a plain picture', picture('basic')],
 		['a name that only starts like a mapped command', picture('$\\Sigma \\textdegreesign \\Phi$')],
-		['native accented letters', picture('Grüße, café')],
+		['native accented letters', picture('Grüße, café, Łódź')],
+		['a name that only starts like \\pounds', picture('\\poundsign')],
 	])('is not injected for %s', (_, source) => {
 		expect(needsTs1Shim(source)).toBe(false);
 		expect(buildInput(source, {}).text).not.toContain(TS1_SHIM);

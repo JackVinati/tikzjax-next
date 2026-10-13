@@ -72,9 +72,9 @@ as the text around it. When TeX reports an error, the block shows it with its li
 error in a preamble file, that file and its line — and, where it can, what to change; a mistyped
 macro usually still renders the rest of the diagram.
 
-Accented letters work as typed, dieresis included (Grüße, naïve, `\"u`), and so do `°` `×` `±`
-`µ` `→`, list bullets and siunitx's units; see the limitations below for the characters that do
-not.
+Accented letters work as typed, dieresis and `Ł` included (Grüße, naïve, `\"u`, Łódź), and so do
+`°` `×` `±` `µ` `→` `£` `€` `©` `®`, `\$`, list bullets and siunitx's units; see the limitations
+below for the characters that do not.
 [`test/vault/TikZ-smoke-test.md`](test/vault/TikZ-smoke-test.md) is a note full of examples to copy
 from.
 
@@ -239,9 +239,9 @@ Being in the list means the file is there, not that everything in it can work: `
 LuaTeX and `external` needs to run programs, and this engine has neither. What a fixture in
 `test/fixtures/tex` renders end to end through the shipped worker, on every CI run: plain TikZ,
 `pgfplots` including its libraries, `circuitikz`, `chemfig`, `tikz-cd`, `forest`, `mathtools`,
-`xparse`, `siunitx`, `tikz-feynhand`, `arrows.meta`, shadings, letters with a dieresis, and `°` `×`
-`→` `±` `µ` with their text commands. The `patterns` library loads too, but see the limitations
-below.
+`xparse`, `siunitx`, `tikz-feynhand`, `arrows.meta`, shadings, letters with a dieresis, `Ł` and
+`ł`, and `°` `×` `→` `±` `µ` `£` `€` `$` `©` `®` `ª` `º` with their text commands. The `patterns`
+library loads too, but see the limitations below.
 
 ## Known limitations
 
@@ -251,8 +251,8 @@ below.
 | `patterns` draws nothing | The driver emits the pattern reference but not the pattern definition. |
 | `chemfig`'s `\schemestart` loses bonds | The bonds are already missing in the DVI, before any JavaScript runs. |
 | `tikz-feynman` | LuaTeX only. `tikz-feynhand` is bundled and works. |
-| Greek, Cyrillic, CJK, IPA, emoji | Not set up in this engine's LaTeX format: TeX leaves them out with an error. Most accented Latin letters work as typed (Dvořák, Erdős, İstanbul, café, Grüße, naïve), as do curly quotes, dashes and `…` — the exact set is measured from the engine and listed in `src/source/native-unicode.ts`. `Ł` and `ł` are the exception: TeX sets them, and the SVG converter then fails on them. |
-| `€` `£` `©` `®` typed directly, `\pounds`, `\textcopyright` | They come from the TS1 text companion font, which the SVG converter cannot draw, and the diagram fails. Pre-flight warns about the typed ones. `°` `×` `±` `µ` `·` `÷` `¬` `§` `¶` `†` `‡` `•` `™` `℃` `←` `↑` `→` `↓` `Ω` and `²` `³` `¹`, their `\text…` commands, siunitx's units (`\degree`, `\micro`, `\ohm` and the rest), `\S`, `\dag` and list bullets do render: they are drawn from the math fonts instead, so `µ` comes out as the italic math `μ`. |
+| Greek, Cyrillic, CJK, IPA, emoji | Not set up in this engine's LaTeX format: TeX leaves them out with an error. Most accented Latin letters work as typed (Dvořák, Erdős, İstanbul, Łódź, café, Grüße, naïve), as do curly quotes, dashes and `…` — the exact set is measured from the engine and listed in `src/source/native-unicode.ts`. In typewriter type `Ł` and `ł` show a `␣` where the stroke should be, because that font has one in its place. |
+| `¥` `¢` `‰` `½` `№`, `\textcircled` | They come from the TS1 text companion font, which the SVG converter cannot draw, and the diagram fails. Pre-flight warns about the typed ones. `°` `×` `±` `µ` `·` `÷` `¬` `§` `¶` `†` `‡` `•` `™` `℃` `←` `↑` `→` `↓` `Ω` and `²` `³` `¹`, their `\text…` commands, siunitx's units (`\degree`, `\micro`, `\ohm` and the rest), `\S`, `\dag` and list bullets do render: they are drawn from the math fonts instead, so `µ` comes out as the italic math `μ`. So do `£` `€` `©` `®` `ª` `º`, their `\text…` commands, `\pounds`, `\copyright` and `\$`, built from the Computer Modern text fonts, mostly as older LaTeX releases built them: `€` is a C with a small `=` across it, LaTeX's own stand-in for a font without a euro, and in bold type `£` and `®` stay medium weight. |
 | Obsidian Sync Standard does not sync `main.js` | It is 11.7 MB, and that plan caps a file at 5 MB. The plugin still installs from the community browser or a release on every device; only syncing the plugin folder itself is affected. The size is the TeX engine — a 156 MiB core dump, gzipped and base64'd — and shrinking it means a smaller engine, not tighter code. |
 | Obsidian Publish | Publish runs no community plugins. Save the diagram as an SVG attachment, or finalize the note, and the result publishes as ordinary content. |
 
