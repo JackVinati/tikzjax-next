@@ -29,12 +29,14 @@ top of its notes on GitHub, and will not publish a version that has none.
 - `~` is a non-breaking space, as in LaTeX. Until now every `~` in a diagram gave three TeX errors
   and drew a stray tilde before its space, because the engine lacked the `\ifincsname` primitive
   LaTeX's `~` asks for. A node with `Fig.~1` now comes out as TeX Live's own `latex` sets it.
-- A package or file the engine does not have stops the diagram at once, with LaTeX's "File
-  `x.sty' not found" on the error card. Until now the engine told LaTeX that every file existed,
-  and read a missing one as empty: the diagram went on, and anything the package defines failed
-  further down as an undefined control sequence. This includes a package the diagram never uses,
-  such as `inputenc` or `fontenc`, which this engine does not need: remove the line, as the
-  pre-flight warning on it says.
+- A diagram that loads a package the engine does not have is drawn without it, as LaTeX goes on
+  when you press Return at its prompt, and LaTeX's "File `x.sty' not found" is shown on the
+  diagram. Until now the engine told LaTeX that every file existed and read a missing one as empty,
+  so nothing said which package was missing, and anything it defines failed further down as an
+  undefined control sequence. A diagram that loads a package it never uses, such as `inputenc` or
+  `amsthm`, is drawn as before, with that message on it. An `\input` of a file the engine does not
+  have now stops the diagram at once, with LaTeX's message, where it used to be read as an empty
+  file.
 - The diagnostics view shows, under each diagram compiled, where its time went: waiting for other
   diagrams, waiting for the engine to start, setting up TeX's memory, TeX itself, turning TeX's
   output into SVG, and preparing that SVG for the note.

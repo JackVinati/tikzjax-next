@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildInput } from '../engine-src/document';
+import { buildInput, MISSING_PACKAGE } from '../engine-src/document';
 import type { RenderOptions } from '../engine-src/protocol';
 
 /*
@@ -46,9 +46,23 @@ describe('buildInput', () => {
 
 	it('wraps only a block that has no document of its own', () => {
 		expect(buildInput(SOURCE, {}).text).toBe(
-			`\\nonstopmode\\begin{document}\n${SOURCE}\n\\end{document}\n`,
+			`\\nonstopmode${MISSING_PACKAGE}\\begin{document}\n${SOURCE}\n\\end{document}\n`,
 		);
 		const own = `\\begin{document}\n${SOURCE}\n\\end{document}`;
-		expect(buildInput(own, {}).text).toBe(`\\nonstopmode\n${own}\n`);
+		expect(buildInput(own, {}).text).toBe(`\\nonstopmode${MISSING_PACKAGE}\n${own}\n`);
+	});
+
+	it('has LaTeX go on without a package it cannot find, before any package is loaded', () => {
+		// LaTeX asks for another name, which TeX in nonstop mode cannot read, and stops. The worker
+		// answers for it as Return does, on the first line, so that the block does not move.
+		const preamble = '\\usepackage{amsthm}\n\\newcommand{\\R}{\\mathbb{R}}';
+		const options = { texPackages: { nosuchpackage: '' }, addToPreamble: preamble };
+		const first = buildInput(SOURCE, options).text.split('\n')[0] ?? '';
+		const answer = first.indexOf('\\def\\@missing@onefilewithoptions');
+		expect(answer).toBeGreaterThan(first.indexOf('\\nonstopmode'));
+		expect(answer).toBeLessThan(first.indexOf('\\usepackage{nosuchpackage}'));
+		expect(answer).toBeLessThan(first.indexOf('\\usepackage{amsthm}'));
+		expect(expectBodyAt(SOURCE, options)).toBe(3);
+		expect(MISSING_PACKAGE).not.toContain('\n');
 	});
 });

@@ -127,6 +127,9 @@ describe('preflight', () => {
 			const found = preflight('\\usepackage{siunitx}', baked(), caps());
 			expect(found).toHaveLength(1);
 			expect(found[0]?.message).toContain('siunitx.sty is not bundled');
+			// What TeX then does: LaTeX reports the missing file as an error and the diagram is drawn
+			// without the package (engine-src/document.ts MISSING_PACKAGE). It used to say "will fail".
+			expect(found[0]?.message).toContain('goes on without it');
 		});
 
 		it('stays silent on a bundled package, options and all', () => {

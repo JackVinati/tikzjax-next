@@ -848,13 +848,13 @@ looks the name up, in the run's own files, dvi2html's font metrics and the bundl
 opening it as upstream did, so asking puts nothing in the run's table of files; a file TeX wrote
 earlier in the run exists, with size 0, because that is how the host reads it back.
 
-A missing package now stops TeX at once, as it does on any TeX: LaTeX reports "File `x.sty' not
-found", asks for another name, and TeX in nonstop mode cannot read one, so it ends with an
-emergency stop, and the card shows LaTeX's message. 0.1.5 drew such a diagram, with the package
+A missing package then stopped TeX at once, as it does on any TeX: LaTeX reports "File `x.sty' not
+found", asks for another name, and TeX in nonstop mode cannot read one, so it ended with an
+emergency stop, and the card showed LaTeX's message. 0.1.5 drew such a diagram, with the package
 read as empty, and anything the package would have defined was an undefined control sequence
 further on. A diagram that loads a package it does not use, `inputenc` or `fontenc` say, rendered in
-0.1.5 and fails now, as pre-flight's warning on that line ("will fail") has said all along. Every
-transcript changes in one place: LaTeX looks for `input.aux` at `\begin{document}`, and where it
+0.1.5 and failed. D19 has the worker answer LaTeX's question as Return does, so such a diagram is
+drawn again, with LaTeX's message on it. Every transcript changes in one place: LaTeX looks for `input.aux` at `\begin{document}`, and where it
 used to find an empty file under the `TeXinputs:` area it now says "No file input.aux.", as LaTeX
 does on a first run anywhere; the TS1 fixtures no longer read a missing `omscmr.fd`. Every DVI and
 SVG is as it was.
@@ -910,6 +910,9 @@ gives on its own. In Node, on the desktop D14 was measured on, each failure come
 | `runaway-macro` | a macro that expands to itself: capacity exceeded | `capacity` | TeX capacity exceeded, sorry [input stack size=5000]. |
 | `batchmode-errors` | `\batchmode`, then a hundred errors | `tex-error` | Undefined control sequence. |
 | `fatal-after-page` | a page shipped, then a missing file | drawn, with the error | LaTeX Error: File `nosuchfile.tex' not found. |
+
+Since D19 `missing-package` no longer gives up: the worker answers LaTeX's question for it, and the
+diagram is drawn with the error.
 
 The plugin's time limit stays as it is. A TeX run is synchronous inside the worker, so a run that
 does not end, a `\loop` with no way out say, is still stopped only by terminating the worker; what
@@ -1017,6 +1020,42 @@ and 1 of DVI to SVG. The start is three times as fast because it inflates 22.3 M
 0.1.5's whole dump. Nothing was measured on an iPhone or an iPad, and JavaScriptCore's costs are not
 V8's. Every cached diagram compiles once more after the update, because ENGINE_ID changes with the
 worker.
+
+---
+
+## D19 — A package the engine does not have is an error LaTeX goes on from
+
+**Amends D16, under which a missing package stopped TeX, and keeps D4: existing blocks render
+without edits.**
+
+Since D16 LaTeX knows when a package is missing, and does what it does on any TeX: it prints "File
+`x.sty' not found" and asks at the terminal for another name. TeX in nonstop mode cannot read an
+answer, so the run ended in an emergency stop and the diagram failed, also when it never used the
+package. Every cached diagram compiles again after the update (D14), so a vault whose blocks, or
+whose shared preamble file, carry such a line would have turned into error cards all at once, and
+pre-flight reads only the block, so a preamble file's line was never even warned about. Each
+version's shipped worker in Node 22.19 was given `\usepackage{x}` and a plain `\draw` for the 30
+common packages that are not bundled (amsthm, babel, bm, fontenc, geometry, hyperref, inputenc,
+lmodern, standalone, textcomp and twenty more), and `[utf8]{inputenc}` and `[T1]{fontenc}`: 0.1.5
+drew all 32, the engine of D16 failed all 32.
+
+At LaTeX's prompt, Return goes on without the file: `\@missingfileerror` leaves the name empty, and
+`\@onefilewithoptions` loads no package by an empty name. The worker gives that answer for TeX.
+`engine-src/document.ts` puts LaTeX's own `\@missing@onefilewithoptions`, with the question replaced
+by `\@latex@error`, on the input's first line after `\nonstopmode`, ahead of everything the block
+and its preambles load. The run goes on as it does after any other error, and the card names the
+file. A diagram that draws without the package is shown with LaTeX's message on it; one that needs
+the package fails further down, as in 0.1.5, but the first error on its card is now the missing
+file. The same 32 now draw the same SVG as 0.1.5, byte for byte, each with "LaTeX Error: File
+`x.sty' not found." on it, and the bundled packages in the same run come out as before.
+`missing-package`'s golden output is now that drawing, the same SVG 0.1.5 draws for the fixture; no
+other fixture changes. Pre-flight's warning on such a line no longer says the `\usepackage` "will
+fail", but that LaTeX reports it as an error and goes on without it.
+
+`\IfFileExists` still answers what D16 needs. An `\input` of a file that does not exist still stops
+the run, as `fatal-after-page` shows: Return at that prompt hands LaTeX the name `.tex`, which does
+not exist either, so LaTeX has no way on to give. 0.1.5 read such a file as empty; that change
+stays.
 
 ---
 

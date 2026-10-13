@@ -4,13 +4,15 @@ This is e-TeX, Version 3.141592653-2.6 (preloaded format=latex 2026.1.1)
 LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
 ! LaTeX Error: File `nosuchpackage.sty' not found.
-Type X to quit or <RETURN> to proceed,
-or enter new name. (Default extension: sty)
-Enter file name: 
-! Emergency stop.
-<read *> 
-         
-l.1 \nonstopmode\usepackage{nosuchpackage}\begin
-                                                {document}^^M
-No pages of output.
+See the LaTeX manual or LaTeX Companion for explanation.
+Type  H <return>  for immediate help.
+ ...                                              
+                                                  
+l.1 ...makeatother\usepackage{nosuchpackage}\begin
+                                                  {document}
+("l3backend-dvips.def")
+No file input.aux.
+[1] (input.aux) )
+(see the transcript file for additional information)
+Output written on input.dvi (1 page, 912 bytes).
 Transcript written on input.log.

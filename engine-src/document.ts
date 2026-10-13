@@ -21,6 +21,29 @@ export interface TexInput {
 	bodyLine: number;
 }
 
+/**
+ * What LaTeX does with a package or class it cannot find: report it, as an error, and go on without
+ * it.
+ *
+ * LaTeX itself asks at the terminal for another name, and pressing Return there goes on without the
+ * file (latex.ltx, `\@missing@onefilewithoptions` and `\@missingfileerror`). In nonstop mode TeX
+ * cannot read an answer, so it ended the run with an emergency stop, and a diagram that loads a
+ * package it never uses, `inputenc` or `amsthm` say, failed. 0.1.5 drew those diagrams: its
+ * `\filesize` said every file existed, and LaTeX read a missing package as an empty file. This is
+ * LaTeX's own code for the Return answer, with the question replaced by `\@latex@error`, so the
+ * card still names the file and the run goes on as it does after any other error. A missing
+ * `\input` is left alone: Return there hands LaTeX the name `.tex`, and it has no way on to give
+ * (internal/DECISIONS.md D19).
+ *
+ * On the first line, with no line break, ahead of every package the block or a preamble loads,
+ * because the plugin counts a preamble's lines from the block up (verify-worker.mjs checks it).
+ */
+export const MISSING_PACKAGE =
+	'\\makeatletter\\def\\@missing@onefilewithoptions#1{' +
+	"\\@latex@error{File `\\@currpath\\@currname.\\@currext' not found}" +
+	'{This engine does not have the file, so LaTeX goes on without it, as when Return is pressed here.}' +
+	'\\global\\let\\@currpath\\@empty\\global\\let\\@currname\\@empty\\gdef\\@currext{tex}}\\makeatother';
+
 export const buildInput = (source: string, options: RenderOptions): TexInput => {
 	const packages = Object.entries(options.texPackages ?? {})
 		.map(([name, opts]) => `\\usepackage${opts ? `[${opts}]` : ''}{${name}}`)
@@ -38,7 +61,7 @@ export const buildInput = (source: string, options: RenderOptions): TexInput => 
 	// its asyncify'd wasm for good, and this one, which reads the end of its terminal input there,
 	// stops the run with "Emergency stop" and draws nothing. Upstream #18 #23 #27 #39 #51 #82 #85
 	// #89, roughly 22 reporters, are all downstream of this one token.
-	const preamble = `\\nonstopmode${shim}${given}`;
+	const preamble = `\\nonstopmode${MISSING_PACKAGE}${shim}${given}`;
 
 	const wrap = options.wrap ?? 'auto';
 	const needsWrap = wrap === 'always' || (wrap === 'auto' && !DOCUMENT_START.test(source));

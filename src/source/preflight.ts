@@ -147,7 +147,7 @@ function checkPackages(text: string, baked: BakedOptions, caps: EngineCapabiliti
 
 		out.push({
 			kind: 'warning',
-			message: `${name}.sty is not bundled with this engine, so \\usepackage{${name}} will fail.`,
+			message: `${name}.sty is not bundled with this engine: LaTeX reports it as an error and goes on without it.`,
 			...(line === undefined ? {} : { line }),
 			hint: packageHint(name, caps),
 		});

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildInput } from '../engine-src/document';
+import { buildInput, MISSING_PACKAGE } from '../engine-src/document';
 import { isTs1Symbol, needsTs1Shim, TS1_SHIM, TS1_SYMBOLS } from '../engine-src/ts1-shim';
 
 /*
@@ -95,7 +95,7 @@ describe('the TS1 shim', () => {
 		const plain = buildInput(source, {});
 		const shimmed = buildInput(source, { texPackages: { siunitx: '' } });
 		expect(plain.text).not.toContain(TS1_SHIM);
-		expect(shimmed.text).toContain(`\\nonstopmode${TS1_SHIM}\\usepackage{siunitx}`);
+		expect(shimmed.text).toContain(`\\nonstopmode${MISSING_PACKAGE}${TS1_SHIM}\\usepackage{siunitx}`);
 		expect(shimmed.bodyLine).toBe(plain.bodyLine);
 	});
 
