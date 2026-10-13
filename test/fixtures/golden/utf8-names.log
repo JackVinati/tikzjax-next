@@ -1,0 +1,14 @@
+This is e-TeX, Version 3.141592653-2.6 (preloaded format=latex 2026.1.1)
+**entering extended mode
+(input.tex
+LaTeX2e <2023-11-01> patch level 1
+L3 programming layer <2024-01-22>
+("l3backend-dvips.def")
+No file input.aux.
+LaTeX Warning: Reference `^^c3^^a9q:^^c3^^bc' on page 1 undefined on input line
+ 6.
+[1] (input.aux)
+LaTeX Warning: There were undefined references.
+ )
+Output written on input.dvi (1 page, 2520 bytes).
+Transcript written on input.log.

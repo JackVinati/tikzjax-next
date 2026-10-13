@@ -1,0 +1,7 @@
+\tikzset{grün/.style={draw, circle}}
+\edef\gruss{Grüße}
+\begin{tikzpicture}
+\node[grün] (café) at (0,0) {\refstepcounter{equation}\label{éq:ü}a};
+\node (b) at (2.5,0) {\gruss\ (\ref{éq:ü})};
+\draw[->] (café) -- (b);
+\end{tikzpicture}

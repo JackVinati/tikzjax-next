@@ -836,6 +836,14 @@ none is bundled. All 27 fixtures that were there before give the same DVI, trans
 and `core.dump.gz` 5,994,457 B; ENGINE_ID moves, in the release that already recompiles every
 diagram. Two Docker builds produced the same 411 files.
 
+None of those fixtures puts an accented letter where LaTeX makes a name of it, and that is where the
+two UTF-8 supports differ. Rendered through the shipped workers of 0.1.5 and of this engine, a node
+named `(café)`, a style named `grün` and `\edef\x{Grüße}` each failed on 0.1.5, with "Missing
+\endcsname inserted", "Extra }, or forgotten \endgroup" or "Missing } inserted", and draw now; a
+`\label{éq:ü}` with its `\ref` drew on 0.1.5 with "Missing \endcsname inserted" and a different
+picture (1,621 B of SVG), and now draws with no error (1,168 B). `utf8-names` holds the four
+together; on 0.1.5's engine it never finished.
+
 **`\filesize` of a file that does not exist is empty.** web2js's `filesize.ch` prints whatever the
 host's `getfilesize` returns, and both hosts, web2js's `library.js` that the format is built with
 and `engine-src/library.ts`, returned 0 for a file they did not have. pdfTeX prints nothing. The
@@ -851,13 +859,13 @@ earlier in the run exists, with size 0, because that is how the host reads it ba
 A missing package then stopped TeX at once, as it does on any TeX: LaTeX reports "File `x.sty' not
 found", asks for another name, and TeX in nonstop mode cannot read one, so it ended with an
 emergency stop, and the card showed LaTeX's message. 0.1.5 drew such a diagram, with the package
-read as empty, and anything the package would have defined was an undefined control sequence
-further on. A diagram that loads a package it does not use, `inputenc` or `fontenc` say, rendered in
-0.1.5 and failed. D19 has the worker answer LaTeX's question as Return does, so such a diagram is
-drawn again, with LaTeX's message on it. Every transcript changes in one place: LaTeX looks for `input.aux` at `\begin{document}`, and where it
-used to find an empty file under the `TeXinputs:` area it now says "No file input.aux.", as LaTeX
-does on a first run anywhere; the TS1 fixtures no longer read a missing `omscmr.fd`. Every DVI and
-SVG is as it was.
+read as empty, and anything the package would have defined was an undefined control sequence further
+on. A diagram that loads a package it does not use, `inputenc` or `fontenc` say, rendered in 0.1.5
+and failed. D19 has the worker answer LaTeX's question as Return does, so such a diagram is drawn
+again, with LaTeX's message on it. Every transcript changes in one place: LaTeX looks for
+`input.aux` at `\begin{document}`, and where it used to find an empty file under the `TeXinputs:`
+area it now says "No file input.aux.", as LaTeX does on a first run anywhere; the TS1 fixtures no
+longer read a missing `omscmr.fd`. Every DVI and SVG is as it was.
 
 The format changes as well. While it is built, expl3 sets `\c_sys_platform_str` by asking whether
 `nul:` and `/dev/null` exist; with `nul:` found it said `unknown`, and now says `unix`, as on any

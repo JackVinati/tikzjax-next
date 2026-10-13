@@ -32,6 +32,11 @@ top of its notes on GitHub, and will not publish a version that has none.
 - `~` is a non-breaking space, as in LaTeX. Until now every `~` in a diagram gave three TeX errors
   and drew a stray tilde before its space, because the engine lacked the `\ifincsname` primitive
   LaTeX's `~` asks for. A node with `Fig.~1` now comes out as TeX Live's own `latex` sets it.
+- Accented letters work where LaTeX makes a name of them: in a node or coordinate name, a style
+  name, a `\label` key and its `\ref`, and an `\edef`. With `\ifincsname` LaTeX loads its current
+  UTF-8 support instead of the one from before 2019, under which each of these gave "Missing
+  \endcsname inserted" or a run of other errors. Most such diagrams failed; one with an accented
+  `\label` was drawn with the errors, and now comes out without them, and so differently.
 - A diagram that loads a package the engine does not have is drawn without it, as LaTeX goes on
   when you press Return at its prompt, and LaTeX's "File `x.sty' not found" is shown on the
   diagram. Until now the engine told LaTeX that every file existed and read a missing one as empty,

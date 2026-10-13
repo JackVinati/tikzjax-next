@@ -1,0 +1,3 @@
+{
+  "note": "Accented letters where LaTeX makes a name of them: a style, a node, a \\label key and its \\ref, and an \\edef. With \\ifincsname, LaTeX's utf8.def makes each such letter a \\protected macro that gives its own bytes inside a \\csname. The engine used to load utf8-2018.def instead, and each of these gave \"Missing \\endcsname inserted\" or a run of other errors: the node, the style and the \\edef lost the diagram, and a \\label drew with errors and a different picture. The \\ref is ?? on one pass, as in LaTeX."
+}
