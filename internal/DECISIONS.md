@@ -1007,12 +1007,16 @@ other work. Where there are two figures, they are two separate sets of runs.
 | Resident memory once started, after a collection | 223.4 and 223.5 MiB | 88.7 and 88.7 MiB |
 | Peak resident memory of the process after five renders | 702.6 and 702.7 MiB | 167.5 and 167.5 MiB |
 | Memory reset, each render | 28.7 to 29.8 ms | 5.0 to 5.1 ms |
+| Memory reset, each render, inside the shipped worker | 24.0 to 26.5 ms | 3.6 to 3.8 ms |
 | Instantiating TeX, each render | 0.3 ms | 0.3 ms |
 | `basic`, the third render, end to end in the worker | 61 and 63 ms | 27 and 27 ms |
 | `pgfplots-axis`, the second render, end to end in the worker | 682 and 699 ms | 366 and 362 ms |
 | `tex.wasm` | 526,378 B, 121,527 gzipped | 356,500 B, 77,347 gzipped |
 | The dump in `main.js`, gzipped, before base64 | 5,938,537 B, all of it | 5,897,406 B, its non-zero runs |
-| `main.js` | 12,320,058 B | 12,209,619 B |
+| `main.js` | 12,320,058 B | 12,242,632 B |
+
+`main.js` was 12,209,619 B when the rest was measured; pgfplotstable's two code files, bundled
+since, add 33,013 B to it, and the other rows were not taken again for them.
 
 How each was taken:
 
@@ -1032,7 +1036,14 @@ How each was taken:
   dump, one version per process so that the other's dump is not resident, the median of 15 runs, in
   three processes for each. The worker reports the same step as 4 ms. Inside the TeX-time process,
   which held both engines and both dumps, its per-fixture minima averaged 24.9 ms for 0.1.5 and
-  8.5 ms for 0.2.0.
+  8.5 ms for 0.2.0. Taken again the same way, five processes each, the medians were 28.3 to 30.3 ms
+  and 5.0 to 5.1 ms.
+- **Memory reset inside the shipped worker**: the worker string as `main.js` embeds it, with
+  `WebAssembly.Memory` and `WebAssembly.instantiate` wrapped to time each run from its new Memory to
+  the instantiate that receives it, `basic` rendered 40 times in a process, the first three left
+  out, the median of the rest, four processes for each version. This is the reset as a render pays
+  for it, and the saving the changelog gives, about 20 ms; timed on its own, as above, the same
+  step comes out a few milliseconds slower for both versions.
 
 The third `basic` render shows where a small diagram's time goes. In 0.1.5, about 33 of its 61 ms
 are TeX and nearly all the rest is the reset; in 0.2.0 the worker reports 22 ms of TeX, 4 of reset

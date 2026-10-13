@@ -137,7 +137,7 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] One Blob materialisation of the worker instead of four
 - [x] Teardown on `visibilitychange → hidden`; concurrency hard-clamped to 1 on mobile (and since 0.1.5 everywhere). A diagram compiling at that moment is interrupted, not failed, and finishes when the app comes back
 - [x] Half the boot peak (0.1.5): the core dump inflates into one buffer, 313 → 156 MiB of ArrayBuffers right after inflating (Node 22, V8)
-- [x] Only the core dump's non-zero runs (0.2.0): the build ships the 22.3 MiB of the 156.25 MiB dump that is not zero, the worker inflates only that at boot, and writes only that into each run's new Memory, which is zero already. Boot 529 → 161 ms, 157.5 → 23.5 MiB of ArrayBuffers held after it, the memory reset 29 → 5 ms a render (Node 22, V8, D18); not yet measured on a phone
+- [x] Only the core dump's non-zero runs (0.2.0): the build ships the 22.3 MiB of the 156.25 MiB dump that is not zero, the worker inflates only that at boot, and writes only that into each run's new Memory, which is zero already. Boot 529 → 161 ms, 157.5 → 23.5 MiB of ArrayBuffers held after it, the memory reset 24–26 → 4 ms a render in the shipped worker, 29 → 5 ms timed on its own (Node 22, V8, D18); not yet measured on a phone
 - [x] TTF → WOFF2 — **closes #111 #91 #7 #24 #3**
 
 ## 7 · Preamble, options, export

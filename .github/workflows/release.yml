@@ -35,7 +35,7 @@ jobs:
   check:
     # The same file CI runs on main, so the two gates cannot drift apart: lint, the store rules,
     # formatting, both typechecks, the tests with their coverage floors, every fixture through the
-    # engine, the fork and worker comparisons, the build, the no-network grep and the
+    # engine, the golden-corpus and worker comparisons, the build, the no-network grep and the
     # native-character scan. The tag is pushed before main, so this is the only run of them that
     # happens on the released commit before it ships. Until it existed, a release ran a subset —
     # without the formatting check, the TypeScript 5 typecheck or the no-network grep.

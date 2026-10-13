@@ -36,9 +36,9 @@ jobs:
       - run: npm ci
 
       # No Docker TeX build here — that is engine.yml's job and takes ten minutes. The plugin build
-      # below is a different thing and now costs half a second, because the compressed engine is
-      # committed (internal/DECISIONS.md D12). Until it was, CI never built the plugin at all and a
-      # broken build was only discovered while cutting a release.
+      # below is a different thing: the compressed engine is committed (internal/DECISIONS.md D12),
+      # so it takes a few seconds, most of them packing the core dump (D18). Until it was, CI never
+      # built the plugin at all and a broken build was only discovered while cutting a release.
       - name: Lint
         run: npm run lint
 

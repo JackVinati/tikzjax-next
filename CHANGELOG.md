@@ -18,7 +18,7 @@ top of its notes on GitHub, and will not publish a version that has none.
   copied into each compile. Measured on a Windows desktop in Node 22, whose JavaScript engine (V8)
   is the one Obsidian's desktop app runs: starting 529 → 161 ms, buffers held once started 157.5 →
   23.5 MiB, the most memory the process took over five compiles 703 → 168 MiB, and each compile
-  about 24 ms quicker to set up. With both changes, a small diagram compiles in 27 ms where it took
+  about 20 ms quicker to set up. With both changes, a small diagram compiles in 27 ms where it took
   61, once the engine is running. Nothing has been measured on an iPhone or iPad yet.
 - A diagram on which TeX gives up, with "TeX capacity exceeded" from a macro that never stops
   expanding, an emergency stop, or a hundred errors, now fails at once with TeX's message, instead of
