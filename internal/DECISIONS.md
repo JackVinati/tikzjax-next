@@ -432,8 +432,8 @@ What replaces them, from reading the actual source:
 3. **Drop `coredump.slice(0)`** in `texify` — a redundant full copy of the dump. At `pages = 2500`
    that is **156.25 MiB per render**, not the 68.75 MiB the old P1 targeted. (Since 0.2.0 the dump
    is not written whole either: a run's new Memory is zero already, so it gets only the dump's
-   non-zero runs, 21.5 MiB, and those are all the build ships and the worker inflates at boot.
-   `engine-src/core-dump.ts`, `scripts/engine-assets.mjs` `packCoreDump`.)
+   non-zero runs, 22.3 MiB, and those are all the build ships and the worker inflates at boot.
+   D18.)
 4. **Keep the decompressed bundled files across runs.** `deleteEverything()` clears `filesystem`
    wholesale, so the pgf/pgfplots tree is re-inflated on every render. Bundled files move to a
    separate map that survives; only per-job files are cleared. (Old P6, now free of its "changes
@@ -572,8 +572,8 @@ upstream's own 6.8 MB `dist/tikzjax.js`, which this plugin does not use at all.
 
 What `main.js` carries of the dump is not this archive as it stands. Since 0.2.0 the plugin build
 inflates it, cuts it into its non-zero runs and gzips only those, with pako at level 9 so that every
-Node gives the same bytes (`scripts/engine-assets.mjs` `packCoreDump`). The committed archive is
-unchanged by that, and is still what the Engine workflow rebuilds and diffs.
+Node gives the same bytes (`scripts/engine-assets.mjs` `packCoreDump`, D18). The committed archive
+is unchanged by that, and is still what the Engine workflow rebuilds and diffs.
 
 **What makes this defensible rather than lazy is that the build is reproducible**, so the committed
 bytes are a claim CI can check rather than one it has to accept. Two things had to change for that:
@@ -923,6 +923,100 @@ work while they were taken; the ratios are what the runs show, and the D15 engin
 within a run's noise of each other. `tex.wasm` is 356,500 B, 77,347 gzipped, `core.dump.gz`
 5,994,269 B and `main.js` 12,335,931 B, 1,125 B more than D15's. Nothing was measured on an iPhone.
 Two Docker builds of the final source produced the same 411 files, the ones committed.
+
+---
+
+## D18 — The core dump ships, and starts each run, as the parts of it that are not zero
+
+**Amends D10's item 3 and D12, which leave the dump whole: in `main.js`, at every boot, and in every
+run's memory.**
+
+The dump is the engine's whole memory as the LaTeX format left it, 2,500 pages or 156.25 MiB, and
+most of it is zero: TeX's arrays are sized for the largest document it will take, and a diagram
+fills a corner of them. Until 0.2.0 all of it went into `main.js` gzipped, every boot inflated all
+of it, half a second on the desktop and the worker's largest allocation, and every run copied all
+of it into a new Memory, writing every page.
+
+A new `WebAssembly.Memory` is zero by the WebAssembly spec, so only what is not zero needs writing.
+The plugin build inflates whatever `core.dump.gz` is committed and cuts it into runs, each starting
+and ending on a byte that is not zero, split wherever 4 KiB or more of zeros lie between two of
+them; splitting at every zero would make thousands of runs to save a few bytes. It gzips the runs'
+bytes, back to back, with pako at level 9 (`scripts/engine-assets.mjs` `packCoreDump`). pako rather
+than `node:zlib`, because what deflate emits is fixed by no standard, only what it inflates to, and
+`node:zlib` is whichever zlib the running Node bundles: another Node could make another `main.js`
+from the same commit. The worker carries the dump's size, the table of runs and the packed bytes. At
+boot it inflates exactly the packed length into one buffer (`engine-src/inflate.ts`), checks the
+table (in order, apart, inside the memory, no byte left over) and the size against the engine's
+pages, and refuses to start on anything else. Each run then gets a new Memory with only the runs
+written into it (`engine-src/core-dump.ts`). The committed archive is not changed by any of this,
+and is still what the Engine workflow rebuilds and diffs. ENGINE_ID hashes the worker, which holds
+the size, the table and the bytes, so it still covers the whole dump; a test moves each of the three
+and requires the id to move.
+
+What the reset rests on is tested rather than argued. `test/core-dump.test.ts` builds the memory a
+job starts from through the build's encoding and the worker's unpacking and compares it with the
+committed dump byte for byte. It also checks the edges of the cut (a zero gap exactly as long as the
+split and one byte shorter, runs either side of a page boundary, a dump of all zeros and one with
+none), that nothing is written outside the runs, and that a malformed table or a wrong size is
+refused. Every fixture renders as the golden corpus records (D13).
+
+With the 0.2.0 engine the dump is 28 runs and 22.3 MiB (23,364,197 B), against 10.8 MiB of bytes
+that are literally not zero, and gzips to 5,897,406 B, where the archive of the whole dump is
+5,994,269 B. On the 0.1.5 engine it was 28 runs and 21.5 MiB; D15's larger hash table spreads the
+names over more of the memory.
+
+The diagnostics view shows, under each compiled diagram, the queue, the engine's start, the memory
+reset, TeX, DVI to SVG and the SVG pipeline (DESIGN.md §7.6). The worker times its own steps and
+sends them with every reply. Every figure below is V8's, and that view is how the same figures will
+be read off an iPhone.
+
+**0.2.0 against 0.1.5.** Measured on 2026-10-13, `release/0.2.0` against `750b363` (built from an
+export of it), in Node 22.19 on the Windows desktop of D14, with about a tenth of its CPU busy with
+other work. Where there are two figures, they are two separate sets of runs.
+
+| | 0.1.5 | 0.2.0 |
+|---|---:|---:|
+| TeX time, the 26 fixtures 0.1.5 has, summed | 4,612 and 4,661 ms | 2,539 and 2,546 ms (−45%; −37% to −49% per fixture) |
+| Engine start, the worker evaluated until it says `ready` | 528 and 530 ms | 161 and 161 ms |
+| Peak resident memory added by the start | 179.5 and 179.3 MiB | 55.5 and 55.0 MiB |
+| ArrayBuffers held once started, after a collection | 157.5 MiB | 23.5 MiB |
+| Resident memory once started, after a collection | 223.4 and 223.5 MiB | 88.7 and 88.7 MiB |
+| Peak resident memory of the process after five renders | 702.6 and 702.7 MiB | 167.5 and 167.5 MiB |
+| Memory reset, each render | 28.7 to 29.8 ms | 5.0 to 5.1 ms |
+| Instantiating TeX, each render | 0.3 ms | 0.3 ms |
+| `basic`, the third render, end to end in the worker | 61 and 63 ms | 27 and 27 ms |
+| `pgfplots-axis`, the second render, end to end in the worker | 682 and 699 ms | 366 and 362 ms |
+| `tex.wasm` | 526,378 B, 121,527 gzipped | 356,500 B, 77,347 gzipped |
+| The dump in `main.js`, gzipped, before base64 | 5,938,537 B, all of it | 5,897,406 B, its non-zero runs |
+| `main.js` | 12,320,058 B | 12,209,619 B |
+
+How each was taken:
+
+- **TeX time**: both engines in one process, interleaved fixture by fixture, the `executeAsync` call
+  and nothing else, the minimum of five runs of each fixture, summed; each engine reset its memory
+  its own way. Every SVG was compared with what 0.1.5's smoke run wrote, and all were identical.
+  `runaway-macro` and the other fixtures added in 0.2.0 are left out, because 0.1.5 never finishes
+  some of them.
+- **Start, memory and the end-to-end renders**: the worker string exactly as `main.js` embeds it,
+  evaluated in a fresh Node process with a stand-in `self`, as `verify:worker` runs it, seven
+  processes for each version in each set, medians. Each process rendered `basic`, `pgfplots-axis`,
+  `basic`, `tikz-cd` and `basic`. Memory is the process's peak resident size
+  (`process.resourceUsage().maxRSS`), and its resident size and ArrayBuffers
+  (`process.memoryUsage()`); the resident figures include the 57 MiB Node holds before the worker
+  is evaluated.
+- **Memory reset**: a new Memory and the dump written into it, each version's own way on its own
+  dump, one version per process so that the other's dump is not resident, the median of 15 runs, in
+  three processes for each. The worker reports the same step as 4 ms. Inside the TeX-time process,
+  which held both engines and both dumps, its per-fixture minima averaged 24.9 ms for 0.1.5 and
+  8.5 ms for 0.2.0.
+
+The third `basic` render shows where a small diagram's time goes. In 0.1.5, about 33 of its 61 ms
+are TeX and nearly all the rest is the reset; in 0.2.0 the worker reports 22 ms of TeX, 4 of reset
+and 1 of DVI to SVG. The start is three times as fast because it inflates 22.3 MiB instead of
+156.25; the dump's archive grew by 55 KB with D15, and the packed runs are still 41 KB smaller than
+0.1.5's whole dump. Nothing was measured on an iPhone or an iPad, and JavaScriptCore's costs are not
+V8's. Every cached diagram compiles once more after the update, because ENGINE_ID changes with the
+worker.
 
 ---
 
