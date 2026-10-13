@@ -382,6 +382,35 @@ describe('the commands at the cursor, in a list item, a blockquote or a callout'
 		expect(lastNotice()).toBe('Diagram copied as SVG.');
 		open.mockRestore();
 	});
+
+	it('Finalize finalizes the diagrams Live Preview rendered in list items, and Un-finalize undoes it', async () => {
+		const note =
+			'# Steps\n\n1. The axis:\n   ```tikz\n   \\draw[->] (0,0) -- (3,0);\n   ```\n' +
+			'2. The circle:\n\t```tikz\n\t\\begin{tikzpicture}\n\t\t\\draw (0,0) circle (1);\n' +
+			'\t\\end{tikzpicture}\n\t```\n3. Done.\n';
+		const w = workspace(note);
+		const lines = note.split('\n');
+		for (const opener of ['   ```tikz', '\t```tikz']) {
+			const lineStart = lines.indexOf(opener);
+			const lineEnd = lines.indexOf(opener.replace('tikz', ''), lineStart);
+			await w.renderAs(lines.slice(lineStart + 1, lineEnd).join('\n'), {
+				text: note,
+				lineStart,
+				lineEnd,
+			});
+		}
+
+		w.run('finalize-note', '# Steps');
+		await vi.waitFor(() => expect(lastNotice()).toBe('Finalized 2 diagram(s).'));
+		const finalized = w.vault.get('folder/note.md') ?? '';
+		expect(finalized).toContain('2. The circle:\n\t![[note-diagram 1.svg]]\n\t%%\n\t```tikz\n');
+		expect(finalized).toContain('1. The axis:\n   ![[note-diagram.svg]]\n   %%\n   ```tikz\n');
+		expect(finalized).toContain('\t```\n\t%%\n3. Done.\n');
+
+		w.run('unfinalize-note', '# Steps');
+		await vi.waitFor(() => expect(lastNotice()).toBe('Restored 2 diagram source(s).'));
+		expect(w.vault.get('folder/note.md')).toBe(note);
+	});
 });
 
 describe('"Render all diagrams in this note"', () => {

@@ -606,6 +606,141 @@ describe('documented divergences', () => {
 	});
 });
 
+describe('a diagram in a list item', () => {
+	// The finalized shapes below were run through Obsidian 1.14.4's Reading view parser: the embed
+	// stays in the item's paragraph, the %% comment is a block of the same item, and the item after
+	// it is still an item of the same list.
+	const CASES: ReadonlyArray<readonly [string, string[], string[]]> = [
+		[
+			'a bullet item',
+			['- The square:', '  ```tikz', '  \\draw (0,0) rectangle (2,2);', '  ```', '- Next.', ''],
+			[
+				'- The square:',
+				'  ![[d.svg]]',
+				'  %%',
+				'  ```tikz',
+				'  \\draw (0,0) rectangle (2,2);',
+				'  ```',
+				'  %%',
+				'- Next.',
+				'',
+			],
+		],
+		[
+			'an item indented with a tab',
+			[
+				'- The circle:',
+				'\t```tikz',
+				'\t\\begin{tikzpicture}',
+				'\t\t\\draw (0,0) circle (1);',
+				'\t\\end{tikzpicture}',
+				'\t```',
+				'- Next.',
+				'',
+			],
+			[
+				'- The circle:',
+				'\t![[d.svg]]',
+				'\t%%',
+				'\t```tikz',
+				'\t\\begin{tikzpicture}',
+				'\t\t\\draw (0,0) circle (1);',
+				'\t\\end{tikzpicture}',
+				'\t```',
+				'\t%%',
+				'- Next.',
+				'',
+			],
+		],
+		[
+			'a numbered item',
+			[
+				'1. First.',
+				'2. The axis:',
+				'   ```tikz',
+				'   \\draw[->] (0,0) -- (3,0);',
+				'   ```',
+				'3. Last.',
+				'',
+			],
+			[
+				'1. First.',
+				'2. The axis:',
+				'   ![[d.svg]]',
+				'   %%',
+				'   ```tikz',
+				'   \\draw[->] (0,0) -- (3,0);',
+				'   ```',
+				'   %%',
+				'3. Last.',
+				'',
+			],
+		],
+		[
+			'an item nested two deep',
+			['- Outer', '  - Inner:', '    ```tikz', '    \\node[draw] {A};', '    ```', '  - Sibling', ''],
+			[
+				'- Outer',
+				'  - Inner:',
+				'    ![[d.svg]]',
+				'    %%',
+				'    ```tikz',
+				'    \\node[draw] {A};',
+				'    ```',
+				'    %%',
+				'  - Sibling',
+				'',
+			],
+		],
+	];
+
+	for (const [name, lines, finalizedLines] of CASES) {
+		it(`stays inside ${name} when finalized, and un-finalizes byte for byte`, () => {
+			const original = note(lines);
+			const span = only(findTikzBlocks(original));
+			const finalized = finalizeBlock(original, span, 'd.svg');
+
+			expect(finalized).toBe(note(finalizedLines));
+			const back = only(findTikzBlocks(finalized));
+			expect(back.finalized).toBe(true);
+			expect(back.source).toBe(span.source);
+			expect(unfinalizeBlock(finalized, back)).toBe(original);
+		});
+	}
+
+	it('round-trips several items of a CRLF note, finalized back to front', () => {
+		const original = note(
+			[
+				'1. First:',
+				'   ```tikz',
+				'   \\draw (0,0) -- (1,0);',
+				'   ```',
+				'2. Second:',
+				'\t```tikz',
+				'\t\\draw (0,0) -- (0,1);',
+				'\t```',
+				'',
+			],
+			'\r\n',
+		);
+		let text = original;
+		const blocks = findTikzBlocks(text);
+		expect(blocks).toHaveLength(2);
+		for (let i = blocks.length - 1; i >= 0; i--) {
+			text = finalizeBlock(text, blocks[i] as TikzBlockSpan, `d${i}.svg`);
+		}
+
+		expect(text).toContain('\r\n   ![[d0.svg]]\r\n   %%\r\n   ```tikz');
+		expect(text).toContain('\r\n\t![[d1.svg]]\r\n\t%%\r\n\t```tikz');
+		const finalized = findTikzBlocks(text);
+		expect(finalized.map((s) => s.finalized)).toEqual([true, true]);
+		for (let i = finalized.length - 1; i >= 0; i--) {
+			text = unfinalizeBlock(text, finalized[i] as TikzBlockSpan);
+		}
+		expect(text).toBe(original);
+	});
+});
+
 describe('round trip over generated notes', () => {
 	// The scanner's hard cases are combinations, not single lines: a comment that opens just
 	// before a fence, a fence that closes on the line a comment wanted, a CRLF note with no
