@@ -1,0 +1,3 @@
+# Byte for byte as recorded: scripts/verify-golden.mjs compares these with what the engine writes,
+# and a Windows checkout with core.autocrlf would otherwise give every transcript CRLF endings.
+* -text

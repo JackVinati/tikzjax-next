@@ -621,6 +621,55 @@ output, and the repository can now prove that is what the output is.
 
 ---
 
+## D13 — A golden corpus carries what verify-fork proved
+
+**Amends D10, D11 and D12, which rest the claim that the fork changed nothing on `verify-fork`.**
+
+`scripts/verify-fork.mjs` renders every fixture twice, through upstream's `library.js` exactly as
+shipped and through `engine-src/library.ts`, both driving the same `tex.wasm`, and requires the two
+SVGs to be byte-identical. That is what lets D10's changes be called a refactor. It needs upstream's
+host to be able to run our engine, and upstream's host loads every file by unwinding the wasm stack
+with asyncify and rewinding it when the file has arrived. Asyncify costs this engine nearly half of
+its TeX time, and an engine built without it has no unwind for upstream's host to call: the
+comparison would have nothing on one side.
+
+So what verify-fork proved is recorded instead. `test/fixtures/golden` holds what the 0.1.5 engine
+produces through the fork for each fixture: the sha256 of the DVI TeX wrote (`dvi.sha256`), the
+transcript (`<name>.log`), and the SVG the patched dvi2html draws (`<name>.svg`) — 221 KB for the 26
+fixtures. `npm run verify:golden` renders every fixture through the committed engine and the fork and
+requires all three to be byte-identical. CI and the Engine workflow run it beside verify-fork for as
+long as the engine has asyncify, and in its place after.
+
+The corpus was checked against upstream when it was recorded. On the 0.1.5 engine, upstream's
+`library.js`, given the fork's fixed date for TeX's clock (it reads `new Date()`, and TeX stamps the
+date into the DVI), produces the same DVI and the same SVG as the corpus for the 24 fixtures
+verify-fork compares, and the same transcript for 22 of them. In `ts1-currency` and `ts1-small-caps`
+the transcript names a file neither host has, `omscmr.fd`, differently: upstream treats a missing
+`.fd` as an empty file and prints `("omscmr.fd")`; the fork reports it missing (its change 6), so TeX
+tries again under its `TeXinputs:` area, which the fork answers with an empty file as upstream does,
+and prints that name. `mathfrak` and `mathscr`, which upstream's host does not survive, are recorded
+from the fork alone, as verify-fork's skip list already had it.
+
+So the chain is: on 0.1.5 the fork matched upstream; the corpus is 0.1.5's output; every later
+engine and host has to match the corpus. Two things differ from verify-fork:
+
+- A fixture added later has no upstream reference. Its golden output is recorded from the engine of
+  the day, and proves only that nothing changed after that.
+- It is stricter. verify-fork drew both sides through the same converter, so a dvi2html change that
+  altered every SVG passed it; here it fails, and the DVI checksum says whether the engine or the
+  converter moved. Every fixture is compared, the two documented limits included, where verify-fork
+  skipped them.
+
+An intended change to a fixture's output is recorded with `npm run verify:golden -- --update` in the
+commit that makes it, and that commit says why; the corpus's diff is then exactly the change. A
+fixture with no golden output fails until it is recorded, and golden output for a fixture that no
+longer exists fails until it is removed. The corpus has a `.gitattributes` of its own, `-text`, so a
+Windows checkout does not give the transcripts CRLF endings.
+
+`engine-src/upstream/` stays as it is: it is what the fork's list of changes is written against.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

@@ -1,0 +1,26 @@
+This is e-TeX, Version 3.141592653-2.6 (preloaded format=latex 2026.1.1)
+**entering extended mode
+(input.tex
+LaTeX2e <2023-11-01> patch level 1
+L3 programming layer <2024-01-22>
+("tikz-feynhand.sty" ("pgfopts.sty") (tikzlibraryfeynhand.code.tex
+(pgflibraryarrows.meta.code.tex) (tikzlibrarycalc.code.tex)
+(tikzlibrarydecorations.code.tex (pgfmoduledecorations.code.tex))
+(tikzlibrarydecorations.markings.code.tex
+(pgflibrarydecorations.markings.code.tex))
+(tikzlibrarydecorations.pathmorphing.code.tex
+(pgflibrarydecorations.pathmorphing.code.tex))
+(tikzlibrarydecorations.pathreplacing.code.tex
+(pgflibrarydecorations.pathreplacing.code.tex)) (tikzlibraryexternal.code.tex
+("pdftexcmds.sty" ("infwarerr.sty") ("ltxcmds.sty")) ("atveryend-ltx.sty")
+(tikzexternalshared.code.tex)) (tikzlibrarypatterns.code.tex
+(pgflibrarypatterns.code.tex)) (tikzlibrarypositioning.code.tex)
+(tikzlibraryshapes.geometric.code.tex (pgflibraryshapes.geometric.code.tex))
+(tikzfeynhand.keys.code.tex)) (tikzlibrarygraphs.code.tex))
+("l3backend-dvips.def") (TeXinputs:"input.aux")
+Package tikz-feynhand Warning: Consider loading TikZ-Feynhand with \usepackage[
+compat=1.1.0]{tikz-feynhand} so that you can be warned if TikZ-Feynhand changes
+. on input line 1.
+[1] (input.aux) )
+Output written on input.dvi (1 page, 5520 bytes).
+Transcript written on input.log.

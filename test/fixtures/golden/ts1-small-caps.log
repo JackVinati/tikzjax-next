@@ -1,0 +1,21 @@
+This is e-TeX, Version 3.141592653-2.6 (preloaded format=latex 2026.1.1)
+**entering extended mode
+(input.tex
+LaTeX2e <2023-11-01> patch level 1
+L3 programming layer <2024-01-22>
+("l3backend-dvips.def") (TeXinputs:"input.aux") (TeXinputs:"omscmr.fd")
+LaTeX Font Warning: Font shape `OMS/cmr/m/sc' undefined
+(Font)              using `OMS/cmsy/m/n' instead on input line 4.
+LaTeX Font Warning: Font shape `OMS/cmr/m/n' undefined
+(Font)              using `OMS/cmr/m/up' instead on input line 4.
+LaTeX Font Warning: Font shape `OMS/cmr/m/up' undefined
+(Font)              using `OMS/cmsy/m/n' instead on input line 4.
+LaTeX Font Warning: Font shape `OT1/cmr/m/up' undefined
+(Font)              using `OT1/cmr/m/n' instead on input line 4.
+LaTeX Font Warning: Font shape `OMS/cmr/m/n' undefined
+(Font)              using `OMS/cmr/m/up' instead on input line 4.
+[1] (input.aux)
+LaTeX Font Warning: Some font shapes were not available, defaults substituted.
+ )
+Output written on input.dvi (1 page, 2144 bytes).
+Transcript written on input.log.
