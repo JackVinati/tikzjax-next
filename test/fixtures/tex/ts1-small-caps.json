@@ -1,0 +1,3 @@
+{
+  "note": "The TS1 shim's symbols in small caps. TS1 has no small-capital shape, so LaTeX sets ª and º from the upright font there, and the shim's raised a and o stay lowercase too (\\ulcshape); before, they came out as small capitals."
+}

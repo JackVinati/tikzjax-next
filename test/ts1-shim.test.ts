@@ -8,7 +8,8 @@ import { isTs1Symbol, needsTs1Shim, TS1_SHIM, TS1_SYMBOLS } from '../engine-src/
  * every bulleted list and a \$ in a label. The worker redefines those text commands to glyphs in the
  * math fonts, or to LaTeX's own constructions out of Computer Modern, only for an input that can use
  * one. Which glyphs render is measured through the engine by smoke and verify:worker (the
- * ts1-symbols, ts1-currency and siunitx fixtures); these hold the shim's shape and its trigger.
+ * ts1-symbols, ts1-currency, ts1-small-caps and siunitx fixtures); these hold the shim's shape and
+ * its trigger.
  */
 
 const PICTURE = '\\begin{tikzpicture}\n\\node {%s};\n\\end{tikzpicture}';
@@ -36,6 +37,15 @@ describe('the TS1 shim', () => {
 			'textdollar',
 		])
 			expect(commands).toContain(command);
+	});
+
+	it('keeps the ordinals lowercase in small caps, where LaTeX sets the TS1 ones from the upright font', () => {
+		// TS1 has no small-capital shape: in \textsc LaTeX substitutes the upright tcrm1000, so ª is
+		// a raised lowercase a there. Set in the current shape, the shim's a came out a small capital.
+		for (const command of ['textordfeminine', 'textordmasculine']) {
+			const symbol = TS1_SYMBOLS.find((s) => s.command === command);
+			expect(symbol?.drawnAs).toContain('\\ulcshape');
+		}
 	});
 
 	it('draws each command from fonts the converter has, in the preamble line it injects', () => {

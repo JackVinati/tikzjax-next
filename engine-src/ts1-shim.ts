@@ -20,7 +20,8 @@
  * circle, € is a C with a small = across it, and in bold type £ and ® stay medium, as does the
  * circle of ©. Proper TS1 support needs tcrm metrics in the converter and a cm-super face, and is a
  * larger job. Every entry was rendered through the committed engine, typed and as a command, in
- * text and in math. The ts1-symbols, ts1-currency and siunitx fixtures keep it that way.
+ * text and in math. The ts1-symbols, ts1-currency, ts1-small-caps and siunitx fixtures keep it
+ * that way.
  *
  * It imports nothing. The pre-flight lint reads the same table on the main thread, so that it does
  * not warn about a character the worker will draw.
@@ -52,12 +53,19 @@ const char36 = (family: string, shape: string, slanted: string): string =>
 	`\\leavevmode\\hbox{\\fontencoding{OT1}${family}` +
 	`\\ifdim\\fontdimen1\\font>0pt \\fontshape{${slanted}}\\else\\fontshape{${shape}}\\fi\\selectfont\\char36}`;
 
+/**
+ * A raised, underlined `letter`, as the TS1 ordinals are drawn. Lowercase in small caps too:
+ * TS1 has no small-capital shape, so there LaTeX sets the ordinal from the upright font, and
+ * \ulcshape takes the small capitals off and leaves every other shape as it is.
+ */
+const ordinal = (letter: string): string => `\\textsuperscript{\\underline{\\ulcshape ${letter}}}`;
+
 export const TS1_SYMBOLS: readonly Ts1Symbol[] = [
 	// The OT1 \textsterling of older LaTeX releases, which took the upright italic's £ in upright type.
 	{ codepoint: 0x00a3, command: 'textsterling', drawnAs: char36('\\fontfamily{cmr}', 'ui', 'it') }, // £
 	{ codepoint: 0x00a7, command: 'textsection', drawnAs: '\\ensuremath{\\mathsection}' }, // §
 	{ codepoint: 0x00a9, command: 'textcopyright', drawnAs: circled('c') }, // ©
-	{ codepoint: 0x00aa, command: 'textordfeminine', drawnAs: '\\textsuperscript{\\underline{a}}' }, // ª
+	{ codepoint: 0x00aa, command: 'textordfeminine', drawnAs: ordinal('a') }, // ª
 	{ codepoint: 0x00ac, command: 'textlnot', drawnAs: '\\ensuremath{\\neg}' }, // ¬
 	// A script-size R, as the default \textregistered of older LaTeX releases had it.
 	{
@@ -73,7 +81,7 @@ export const TS1_SYMBOLS: readonly Ts1Symbol[] = [
 	{ codepoint: 0x00b6, command: 'textparagraph', drawnAs: '\\ensuremath{\\mathparagraph}' }, // ¶
 	{ codepoint: 0x00b7, command: 'textperiodcentered', drawnAs: '\\ensuremath{\\cdot}' }, // ·
 	{ codepoint: 0x00b9, command: 'textonesuperior', drawnAs: '\\textsuperscript{1}' }, // ¹
-	{ codepoint: 0x00ba, command: 'textordmasculine', drawnAs: '\\textsuperscript{\\underline{o}}' }, // º
+	{ codepoint: 0x00ba, command: 'textordmasculine', drawnAs: ordinal('o') }, // º
 	{ codepoint: 0x00d7, command: 'texttimes', drawnAs: '\\ensuremath{\\times}' }, // ×
 	{ codepoint: 0x00f7, command: 'textdiv', drawnAs: '\\ensuremath{\\div}' }, // ÷
 	{ codepoint: 0x2020, command: 'textdagger', drawnAs: '\\ensuremath{\\dagger}' }, // †
