@@ -171,7 +171,10 @@ console.log(
 );
 
 for (const name of names) {
-	const source = readFileSync(join(FIXTURES, `${name}.tex`), 'utf8');
+	// With LF line endings whatever the checkout. A Windows checkout gives the fixtures CRLF, and a CR
+	// that reaches TeX is printed in an error's context as ^^M, so broken.log came out one way on
+	// Windows and another on CI's Linux. The DVI and the SVG are the same either way.
+	const source = readFileSync(join(FIXTURES, `${name}.tex`), 'utf8').replace(/\r\n/g, '\n');
 	const metaPath = join(FIXTURES, `${name}.json`);
 	const meta = existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, 'utf8')) : {};
 

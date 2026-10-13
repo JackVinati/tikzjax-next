@@ -664,7 +664,12 @@ An intended change to a fixture's output is recorded with `npm run verify:golden
 commit that makes it, and that commit says why; the corpus's diff is then exactly the change. A
 fixture with no golden output fails until it is recorded, and golden output for a fixture that no
 longer exists fails until it is removed. The corpus has a `.gitattributes` of its own, `-text`, so a
-Windows checkout does not give the transcripts CRLF endings.
+Windows checkout does not give the transcripts CRLF endings, and the fixtures are read with LF line
+endings whatever the checkout. A Windows checkout gives them CRLF, and TeX sees the CR: it is printed
+in `broken`'s error context as `^^M`, and it makes the `expl3` diagram 3.33 pt wider, a DVI of its
+own. Recorded from CRLF sources, the corpus failed on an LF checkout, which is what CI has. With LF
+sources the 0.1.5 engine through the fork matches the corpus for all 26 fixtures it finishes, and
+through upstream's host for the same 24 and 22 as above.
 
 `engine-src/upstream/` stays as it is: it is what the fork's list of changes is written against.
 

@@ -76,6 +76,7 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] WebAssembly 1.0 only (0.2.0): `--mvp-features` in the build, and `scripts/wasm-mvp.mjs` decodes the committed engine in the tests and the freshly built one in the Engine workflow (D14)
 - [x] TeX's hash table (0.2.0): `hash_prime` 131,071 instead of tex.web's 1,777 in a table web2js sized for 600,000 names, so finding a macro visits 2.0 slots instead of 11.3; 1–3% less TeX time on the largest fixtures, the dump's archive 55 KB larger (D15)
 - [ ] **open** — after a jump out, TeX's `close_files_and_terminate` does not run, so the transcript stops at the error and a DVI begun before it would have no postamble. web2c's `jump_out` closes the files first; a change file appended to web2js's `changes/change-order` could do the same. No picture reaches it today: a fatal error comes before the one page is shipped
+- [ ] **open** — a block with CRLF line endings reaches TeX with its CRs. The `expl3` fixture comes out 3.33 pt wider from a CRLF checkout than from an LF one, and an error's context shows a `^^M`. `npm run verify:golden` reads the fixtures with LF for that reason (D13); whether the worker should do the same for a note saved with CRLF is open, and wants a look at what Obsidian hands the processor on Windows first
 - [ ] **open** — binaryen 132's -O4 measured 4% less TeX time than web2js's binaryen 99 on the same `out.wasm` (D14). It means installing a pinned binaryen in the engine image
 
 ## 3 · Block lifecycle
