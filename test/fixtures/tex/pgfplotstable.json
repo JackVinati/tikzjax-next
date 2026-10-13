@@ -1,3 +1,3 @@
 {
-  "note": "pgfplotstable, which the README lists as bundled: a table read into a plot, and the same table typeset. Until 0.2.0 only pgfplotstable.sty was bundled, and it inputs pgfplotstable.code.tex, which was not: on 0.1.5 the diagram never finished, and on 0.2.0's engine before the file was added it stopped with \"I can't find file `pgfplotstable.code.tex'\"."
+  "note": "pgfplotstable, which the README lists as bundled: a table read into a plot, and the same table typeset in a node beside it. Until 0.2.0 only pgfplotstable.sty was bundled, and it inputs pgfplotstable.code.tex, which was not: on 0.1.5 the diagram never finished, and on 0.2.0's engine before the file was added it stopped with \"I can't find file `pgfplotstable.code.tex'\"."
 }
