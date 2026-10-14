@@ -472,9 +472,9 @@ change with what people ask for.
   files in a way that needs a fix 0.2.0 makes.
 - **After that, features one at a time**, in an order set by votes: `![[file.tex]]` embeds rendered
   in place (planned, [issue #1](https://github.com/JackVinati/tikzjax-next/issues/1)), `.sty` and
-  `.csv` files from the vault, Copy as PNG, syntax highlighting in `tikz` blocks, and CJK and other
-  Unicode labels through [pull request #2](https://github.com/JackVinati/tikzjax-next/pull/2), which
-  is under review.
+  `.csv` files from the vault, Copy as PNG and syntax highlighting in `tikz` blocks. CJK and other
+  Unicode labels, which were on this list, come in 0.2.1, from
+  [pull request #2](https://github.com/JackVinati/tikzjax-next/pull/2).
 
 The plan in full is on the wiki's [Roadmap](https://github.com/JackVinati/tikzjax-next/wiki/Roadmap).
 To ask for something, or vote for what is already there, use
