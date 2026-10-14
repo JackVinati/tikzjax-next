@@ -311,7 +311,7 @@ Preview. When TeX stops on a line of a preamble file, the error card names the f
 | Un-finalize the diagrams in this note | The exact inverse. The source was never thrown away. |
 | Render all diagrams in this note | Ignores lazy rendering and compiles everything now, with a Stop button, and says how many rendered. |
 | Open the diagram at the cursor in a zoom view | A scrollable, zoomable view of one diagram. |
-| Open TikZ diagnostics | The TeX log, the cache key, where each recent compile's time went from coming into view to drawn, and how often the engine started. Its Copy button copies it all as text for a bug report, without your diagrams' code or note names. Start here when a diagram does something inexplicable. |
+| Open TikZ diagnostics | The engine, the cache, and each recent diagram: how it came out, where its time went from coming into view to drawn, and how often the engine started. Its Copy button copies the versions, the device, the engine's starts and the timings as text for a bug report, without your diagrams' code, their error messages or the names of your notes. Start here when a diagram does something inexplicable. |
 | Clear the diagram cache | Forgets every diagram this plugin has rendered; each compiles again when it is next shown. |
 | Restart the TeX engine | Stops the engine, which starts again with the next diagram, and lets diagrams that failed in this session try again. |
 
@@ -423,9 +423,10 @@ engine uses only WebAssembly 1.0, as 0.1.5's did, so it compiles in the same Web
 <!-- DEVICE-CHECK: still to try on a phone: a note with twenty diagrams that are not cached, scrolling it, and a PDF export; and anything on an iPad. When they are done, replace "The iPad runs the same build; I have not checked it separately." with what was checked on it, and drop from "Not tried there yet" whatever has now been tried. -->
 
 Not tried there yet: a note with twenty diagrams that are not cached, and PDF export on the phone.
-If something gives out on a phone, it is probably one of those, and an issue with the device and the
-iOS version helps more than anything else. [Questions](#questions) explains how to get the console
-output from an iPhone with Safari on a Mac.
+If something gives out on a phone, it is probably one of those, and an issue with the device, the iOS
+version and the text the diagnostics view's Copy button gives helps more than anything else.
+[Questions](#questions) explains how to get that text, and then the console output from an iPhone
+with Safari on a Mac.
 
 ## Tests
 
@@ -518,11 +519,14 @@ it.
 finalize the note: each diagram becomes an SVG attachment and the source stays in the note, so it
 shows up in Publish, on GitHub and in any Markdown editor.
 
-**Something fails on my iPhone. How do I report it?** There are no devtools on the device, but
-Safari on a Mac can reach its console: on the device, Settings → Apps → Safari → Advanced → Web
-Inspector; connect it to a Mac by cable; then in Safari on the Mac, Develop → the device → the
-Obsidian window. Every mobile bug report on the original repository is untriageable for want of
-this paragraph, so if you are filing one, this is how to get something worth attaching.
+**Something fails on my iPhone. How do I report it?** First run "Open TikZ diagnostics" from the
+command palette, press Copy, and paste the text into the issue: it has the versions, the device,
+the engine's starts and where each diagram's time went, and none of your diagrams' code or note
+names. There are no devtools on the device, but after that, if you have a Mac, Safari can reach its
+console: on the device, Settings → Apps → Safari → Advanced → Web Inspector; connect it to a Mac by
+cable; then in Safari on the Mac, Develop → the device → the Obsidian window. Every mobile bug
+report on the original repository is untriageable for want of this paragraph, so if you are filing
+one, this is how to get something worth attaching.
 
 **Where can I ask something, or suggest a feature?** In
 [Discussions](https://github.com/JackVinati/tikzjax-next/discussions):
@@ -554,8 +558,9 @@ terminated and restarted, and only that diagram fails. In the original, one bad 
 every later one until Obsidian was restarted.
 
 **Diagrams render when they scroll into view**, off the editor's thread: one at a time on a phone,
-and two at a time on a computer while several are waiting, each in an engine of its own. A note with
-thirty of them does not lock up the editor.
+and two at a time on a computer while several are waiting, each in an engine of its own, unless the
+second engine is turned off or the computer reports little memory. A note with thirty of them does
+not lock up the editor.
 
 **PDF export waits for the diagrams.** The processor returns a promise, which is what Obsidian
 actually awaits before taking the print snapshot, for at most a minute in all, after which a diagram

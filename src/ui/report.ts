@@ -11,8 +11,9 @@ import { STRINGS } from './strings';
  * a test can hold it to the one rule that matters: the text is for a bug report, posted where
  * anyone can read it, so it carries no diagram source, no error message (an error quotes the
  * source, and names a preamble file by its path), no transcript and no note. A render is named by
- * its place in the list and the first eight characters of its cache key, a hash that says nothing
- * about the diagram but tells two renders of the same one apart.
+ * its place in the list and the first eight characters of its cache key: a prefix of a hash, from
+ * which the diagram cannot be read back, though someone who has the same diagram, with the same
+ * settings, could tell that it is the one. It tells two renders of the same diagram apart.
  */
 
 /** One block, from when it was processed: `rendering` until it reports how it came to rest. */
@@ -44,7 +45,7 @@ export interface About {
 	platform: string;
 	/** `Windows`, `macOS`, `Linux`, `iOS` or `Android`, from Obsidian's Platform; `unknown` else. */
 	os: string;
-	/** In place of the user agent, which the store's rules keep plugins from reading. */
+	/** In place of `navigator.userAgent`, which the store's rules keep plugins from reading. */
 	webView: WebViewFeatures;
 	engineId: string;
 	outputRevision: string;
