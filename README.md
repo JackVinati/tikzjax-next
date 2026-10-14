@@ -489,11 +489,11 @@ thumbs-up counts as a vote.
 **Why does the first diagram take a while?** It starts the engine. Measured in Node on my desktop,
 that takes about 160 ms with 0.2.0, where 0.1.5 took about 530 ms. Since 0.2.1 it takes about 100
 ms there, and about 50 ms in Chromium, the engine of Obsidian's desktop app, measured on the same
-desktop; on a phone it takes longer.
-Later diagrams in the session are faster, and a diagram you have already seen comes from the cache
-without running TeX at all.
+desktop. On my iPhone, read off the diagnostics view, 0.2.0 started in about 130 ms, unless
+Lockdown Mode was on (below). Later diagrams in the session are faster, and a diagram you have
+already seen comes from the cache without running TeX at all.
 
-<!-- IPHONE-FIGURES: engine start on iPhone/iPad, 0.1.5 against 0.2.0, is not measured yet. When it is (the "Engine start" row of the engine `iphone` entry in scripts/readme-charts.mjs), replace "on a phone it takes longer" with the figure, the device and the iOS version. -->
+<!-- IPHONE-FIGURES: the iPhone engine start above is one reading of 0.2.0 on the maintainer's iPhone (diagnostics view, 14 October 2026); 0.1.5 and 0.2.1 were not measured there yet. Name the device and iOS version here once the engine `iphone` entry in scripts/readme-charts.mjs is filled. -->
 
 **Can I put TikZ in a `$$ … $$` math block?** No. Obsidian hands math blocks to MathJax before any
 plugin sees them, and MathJax does not run TikZ. Use a `tikz` block; for an inline-looking result,
@@ -529,6 +529,24 @@ console: on the device, Settings → Apps → Safari → Advanced → Web Inspec
 cable; then in Safari on the Mac, Develop → the device → the Obsidian window. Every mobile bug
 report on the original repository is untriageable for want of this paragraph, so if you are filing
 one, this is how to get something worth attaching.
+
+**Diagrams are very slow on my iPhone or iPad.** See whether Lockdown Mode is on: Settings →
+Privacy & Security → Lockdown Mode. It runs Obsidian's web content without the JIT compiler, and
+the TeX engine with it, which costs a factor of about twenty. On my iPhone with 0.2.0, a circuitikz
+diagram took 7.3 s of TeX with Lockdown Mode on and 0.27 s with Obsidian excluded from it, and the
+engine started in 1.3 s instead of 0.13 s. Lockdown Mode can stay on for everything else: under
+Configure Web Browsing in its settings you can exclude Obsidian alone, then restart Obsidian. The
+exclusion takes Lockdown Mode's protection away from Obsidian's web content, so whether it is worth
+it is your call.
+
+**After an update, another device shows the new version but nothing changed.** Obsidian Sync
+Standard does not copy a file over 5 MB, and `main.js` is about 12 MB. When Sync carries your
+installed plugins, the other device gets the new `manifest.json`, which names the new version, and
+keeps the old `main.js`; Obsidian and BRAT then see the new version number and offer no update. With
+Sync Standard, turn off "Installed community plugins" in Sync's settings and update the plugin on
+each device. To repair a device already in this state, reinstall the plugin there: with BRAT, its
+"Choose a single plugin to reinstall"; from the community store, uninstall it and install it again,
+which also resets its settings on that device.
 
 **Where can I ask something, or suggest a feature?** In
 [Discussions](https://github.com/JackVinati/tikzjax-next/discussions):
