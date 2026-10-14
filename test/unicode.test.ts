@@ -159,5 +159,18 @@ describe('8-bit TeX Unicode bridge', () => {
 			expect(restoreUnicode('<svg><g></svg>', [0x5f00])).toBe('<svg><g></svg>');
 			expect(restoreUnicode('<svg><g></svg>', [])).toBe('<svg><g></svg>');
 		});
+
+		// \special{dvisvgm:raw <g/>} beside a bridged label: 0.2.0 drew it, and the count took the
+		// <g/> for a group left open and lost the diagram.
+		it('counts neither a <g/> nor a > inside an attribute as a group left open', () => {
+			const svg = `<svg>${word('开始', 0)}<g/><g data-note="a>b"><path d=""/></g></svg>`;
+			expect(restoreUnicode(svg, codepoints('开始'))).toBe(
+				'<svg><text x="10" y="34" font-family="sans-serif" font-size="10" fill="#c00" text-anchor="middle">开始</text>' +
+					'<g/><g data-note="a>b"><path d=""/></g></svg>',
+			);
+			expect(() => restoreUnicode(`<svg>${word('开', 0)}<g/><g></svg>`, codepoints('开'))).toThrow(
+				'<g>',
+			);
+		});
 	});
 });

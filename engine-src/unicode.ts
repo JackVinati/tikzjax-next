@@ -82,16 +82,19 @@ export function bridgeUnicode(text: string): UnicodeBridge {
 
 const MARKER = /<g data-tikzjax-unicode="([0-9]+)" data-quad="([0-9]+(?:\.[0-9]+)?)pt">([\s\S]*?)<\/g>/g;
 
-/** One bridged character as dvi2html drew it. */
-interface Proxy {
+/** A <g> tag, whose attribute values may hold a `>`. */
+const GROUP_TAG = /<g\b(?:[^>"']|"[^"]*"|'[^']*')*>/g;
+
+/** One bridged character as dvi2html drew it: its marker, and the M TeX set in the box. */
+interface BridgedGlyph {
 	start: number;
 	end: number;
 	text: string;
 	quad: number;
-	/** The proxy glyph's <text> tag, and its x; absent where no glyph was drawn. */
+	/** The M's <text> tag, and its x; absent where no glyph was drawn. */
 	opening?: string | undefined;
 	x: number;
-	/** The tag without its x: proxies that share it share a baseline, a font and a paint. */
+	/** The tag without its x: glyphs that share it share a baseline, a font and a paint. */
 	style: string;
 }
 
@@ -109,14 +112,14 @@ export function restoreUnicode(svg: string, codepoints: readonly number[]): stri
 	if (codepoints.length === 0) return svg;
 	const declared = new Set(codepoints);
 
-	const proxies: Proxy[] = [];
+	const glyphs: BridgedGlyph[] = [];
 	for (const m of svg.matchAll(MARKER)) {
 		const cp = Number(m[1]);
 		if (!declared.has(cp)) continue;
 		const opening = /<text\b[^>]*>/.exec(m[3] ?? '')?.[0];
 		const x = Number(opening === undefined ? NaN : /\sx="([^"]+)"/.exec(opening)?.[1]);
 		const start = m.index;
-		proxies.push({
+		glyphs.push({
 			start,
 			end: start + m[0].length,
 			text: String.fromCodePoint(cp),
@@ -126,28 +129,32 @@ export function restoreUnicode(svg: string, codepoints: readonly number[]): stri
 			style: opening?.replace(/\sx="[^"]*"/, '') ?? '',
 		});
 	}
-	if (proxies.length === 0) return svg;
-	if ((svg.match(/<g\b/g) ?? []).length !== (svg.match(/<\/g\s*>/g) ?? []).length) {
+	if (glyphs.length === 0) return svg;
+	// Each marker ends at the first </g> after it, which is its own only while the groups pair up. A
+	// <g/> opens and closes nothing, so it is not counted: a raw special may write one, and the
+	// diagram drew before the bridge.
+	const opened = (svg.match(GROUP_TAG) ?? []).filter((tag) => !tag.endsWith('/>')).length;
+	if (opened !== (svg.match(/<\/g\s*>/g) ?? []).length) {
 		throw new Error(
-			"The diagram's SVG has a <g> without its </g>, or a </g> without its <g>, so the Unicode text in it cannot be put back. A \\special{dvisvgm:raw …} in the diagram is the likely cause.",
+			"The diagram's SVG has a <g> without its </g>, or a </g> without its <g>, so the Unicode text in it cannot be put back. A \\special{dvisvgm:raw …} in the diagram can cause this.",
 		);
 	}
 
 	let out = '';
 	let from = 0;
 	let i = 0;
-	while (i < proxies.length) {
-		const first = proxies[i] as Proxy;
+	while (i < glyphs.length) {
+		const first = glyphs[i] as BridgedGlyph;
 		out += svg.slice(from, first.start);
 		let last = first;
 		let text = first.text;
 		i++;
-		// A proxy that drew no glyph (TeX set it in \nullfont, or outside a picture, where dvi2html
+		// A marker that drew no glyph (TeX set it in \nullfont, or outside a picture, where dvi2html
 		// writes HTML) has no place to put text: it is dropped, as TeX dropped a character it had no
 		// font for, rather than losing the diagram.
 		if (first.opening !== undefined) {
-			for (; i < proxies.length; i++) {
-				const next = proxies[i] as Proxy;
+			for (; i < glyphs.length; i++) {
+				const next = glyphs[i] as BridgedGlyph;
 				if (next.start !== last.end || next.opening === undefined || next.style !== first.style)
 					break;
 				if (next.quad !== first.quad) break;
