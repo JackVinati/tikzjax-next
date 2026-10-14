@@ -270,8 +270,8 @@ export class RenderQueue<J, T> {
 
 	/**
 	 * Run this many jobs at once from now on: as many as the engine has workers, when the second one
-	 * is turned on or off (main.ts). A job already started carries on; with fewer slots than started
-	 * jobs, nothing new starts until enough of them have finished.
+	 * is turned on or off, or one fails to start (main.ts). A job already started carries on; with
+	 * fewer slots than started jobs, nothing new starts until enough of them have finished.
 	 */
 	setConcurrency(concurrency: number): void {
 		this.concurrency = Math.max(1, Math.floor(concurrency));

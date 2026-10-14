@@ -787,3 +787,98 @@ describe('a pool of workers', () => {
 		expect(host.report().poolSize).toBe(2);
 	});
 });
+
+describe('a pool whose second worker fails to start', () => {
+	/**
+	 * A computer short of memory that reports 8 GB or more, or no figure at all, gets two engines,
+	 * and the second may fail to start, as an out-of-memory error at the worker's top level would
+	 * make it. The pool then runs on the one that came up, until the workers next stop together.
+	 */
+	it('does not start it again behind the busy first worker, and runs the waiting job on that one', async () => {
+		const sizes: number[] = [];
+		const host = new WorkerHost({ poolSize: 2, onSize: (size) => sizes.push(size) });
+		const a = render(host, 'a');
+		worker(0).boot();
+		const b = render(host, 'b');
+		expect(FakeWorker.spawned).toHaveLength(2);
+
+		worker(1).crash('RangeError: Array buffer allocation failed');
+		await tick();
+		// Not started again, however long the first worker stays busy.
+		expect(FakeWorker.spawned).toHaveLength(2);
+		expect(b.result.status).toBe('pending');
+		// The queue is told to run one job at a time.
+		expect(sizes).toEqual([1]);
+		expect(host.report()).toMatchObject({ starts: 2, poolSize: 1 });
+
+		worker(0).reply(worker(0).renders[0] ?? -1);
+		await tick();
+		expect(a.result.status).toBe('fulfilled');
+		expect(b.running.at).toBe(true);
+		expect(worker(0).renders).toHaveLength(2);
+		render(host, 'c');
+		render(host, 'd');
+		expect(FakeWorker.spawned).toHaveLength(2);
+	});
+
+	it('hands the jobs to the other worker still starting, rather than failing them', async () => {
+		const host = new WorkerHost({ poolSize: 2 });
+		const a = render(host, 'a');
+		const b = render(host, 'b');
+		expect(FakeWorker.spawned).toHaveLength(2);
+
+		worker(0).crash('RangeError: Array buffer allocation failed');
+		await tick();
+		expect(a.result.status).toBe('pending');
+		expect(b.result.status).toBe('pending');
+		expect(FakeWorker.spawned).toHaveLength(2);
+
+		worker(1).boot();
+		expect(a.running.at).toBe(true);
+		worker(1).reply(worker(1).renders[0] ?? -1);
+		await tick();
+		expect(a.result.status).toBe('fulfilled');
+		expect(b.running.at).toBe(true);
+	});
+
+	it('fails the waiting jobs when neither worker came up', async () => {
+		const host = new WorkerHost({ poolSize: 2 });
+		const a = render(host, 'a');
+		const b = render(host, 'b');
+		worker(0).crash('out of memory');
+		worker(1).crash('out of memory');
+		await tick();
+		for (const r of [a, b]) expect((r.result.error as TexError).kind).toBe('engine-unavailable');
+		expect(FakeWorker.spawned).toHaveLength(2);
+	});
+
+	it('is two again once the workers have stopped together', async () => {
+		const sizes: number[] = [];
+		const timers = new FakeTimers();
+		const host = new WorkerHost({
+			poolSize: 2,
+			idleTeardownMs: 1000,
+			timers,
+			onSize: (size) => sizes.push(size),
+		});
+		render(host, 'a');
+		worker(0).boot();
+		render(host, 'b');
+		worker(1).crash('out of memory');
+		await tick();
+		worker(0).reply(worker(0).renders[0] ?? -1);
+		await tick();
+		worker(0).reply(worker(0).renders[1] ?? -1);
+		await tick();
+
+		timers.advance(1000);
+		expect(worker(0).terminated).toBe(true);
+		expect(sizes).toEqual([1, 2]);
+		render(host, 'c');
+		render(host, 'd');
+		expect(FakeWorker.spawned).toHaveLength(4);
+
+		host.kill('restart');
+		expect(host.report().poolSize).toBe(2);
+	});
+});

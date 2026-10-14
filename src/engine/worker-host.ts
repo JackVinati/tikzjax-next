@@ -98,6 +98,13 @@ export interface WorkerHostOptions {
 	 * can be changed while running (`setPoolSize`).
 	 */
 	poolSize?: number | undefined;
+	/**
+	 * Told how many jobs the host can run at once whenever that changes: the pool's size was set, an
+	 * engine failed to start and the pool is down to one, or the engines stopped and it is whole
+	 * again. The queue runs as many (main.ts), so that no job it starts waits in here, on its startup
+	 * allowance, behind someone else's diagram.
+	 */
+	onSize?: ((engines: number) => void) | undefined;
 }
 
 /** One render, from `render()` until it settles. */
@@ -155,7 +162,7 @@ interface Engine {
  * Up to `poolSize` workers run side by side (internal/DECISIONS.md D24): two on a desktop, one on a
  * phone. A second one starts only while a job waits that no worker running or starting can take, a
  * timeout or a crash takes down only its own worker, `kill()` stops them all, and they idle down
- * together.
+ * together. Once a worker has failed to start, the pool is one until they next stop together.
  */
 export class WorkerHost implements TexHost {
 	readonly id = ENGINE_ID;
@@ -179,6 +186,18 @@ export class WorkerHost implements TexHost {
 	private readonly timers: HostTimers | undefined;
 	private readonly now: () => number;
 	private poolSize: number;
+	private readonly onSize: ((engines: number) => void) | undefined;
+
+	/**
+	 * A worker failed to start since the workers last stopped together (idle, or `kill()`), so no
+	 * other starts while one is up or starting: the pool is the one that came up. A start that fails
+	 * is most likely memory the computer does not have, which the memory rule cannot see where the
+	 * WebView reports too much or nothing (platform/budgets.ts). Starting the second again for every
+	 * job that waits would be one failed start after another for as long as the first is busy.
+	 */
+	private startFailed = false;
+	/** The size `onSize` was last told. */
+	private told: number;
 
 	/**
 	 * Known from the moment the plugin loads, from the inventory baked in at build time.
@@ -202,6 +221,8 @@ export class WorkerHost implements TexHost {
 		this.timers = options.timers;
 		this.now = options.now ?? (() => performance.now());
 		this.poolSize = sizeOf(options.poolSize ?? 1);
+		this.onSize = options.onSize;
+		this.told = this.poolSize;
 	}
 
 	get capabilities(): EngineCapabilities {
@@ -218,7 +239,7 @@ export class WorkerHost implements TexHost {
 			starts: this.starts,
 			lives: this.lives.map((life) => ({ ...life })),
 			lastStop: this.lastStop,
-			poolSize: this.poolSize,
+			poolSize: this.size,
 		};
 	}
 
@@ -270,6 +291,7 @@ export class WorkerHost implements TexHost {
 	 */
 	setPoolSize(size: number): void {
 		this.poolSize = sizeOf(size);
+		this.resized();
 		this.pump();
 	}
 
@@ -297,6 +319,8 @@ export class WorkerHost implements TexHost {
 			this.teardown(engine, error, why);
 		}
 		victims.push(...this.waiting.splice(0));
+		this.startFailed = false;
+		this.resized();
 		for (const job of victims) this.settle(job, () => job.reject(error));
 	}
 
@@ -310,7 +334,7 @@ export class WorkerHost implements TexHost {
 	/**
 	 * Let a worker above the pool's size go if it has no job; give each idle worker the next waiting
 	 * job; and start another worker while jobs wait that the ones running and starting cannot take,
-	 * up to the pool's size.
+	 * up to the pool's size, or to one once a worker has failed to start.
 	 */
 	private pump(): void {
 		if (this.disposed) return;
@@ -343,7 +367,7 @@ export class WorkerHost implements TexHost {
 		const starting = this.engines.filter((engine) => !engine.up).length;
 		// Every waiting job beyond what the starting workers will take wants a worker of its own.
 		let wanted = this.waiting.length - starting;
-		while (wanted > 0 && this.engines.length < this.poolSize) {
+		while (wanted > 0 && this.engines.length < this.size) {
 			try {
 				this.spawn();
 			} catch (error) {
@@ -476,9 +500,12 @@ export class WorkerHost implements TexHost {
 
 	/**
 	 * `onerror`: an exception nothing in the worker caught, so its state is unknown and it is not
-	 * reused. A crash while starting, with no other worker up, fails everyone waiting — starting
-	 * another behind them would loop on a start that cannot succeed. A crash mid-run fails that job,
-	 * and the jobs behind it get a worker.
+	 * reused. A crash mid-run fails that job, and the jobs behind it get a worker.
+	 *
+	 * A crash while starting makes the pool one until the workers next stop together
+	 * (`startFailed`). The jobs waiting then wait for a worker that is up or still starting, if there
+	 * is one; with none, they fail, because starting another behind them would loop on a start that
+	 * cannot succeed.
 	 */
 	private crashed(engine: Engine, message: string): void {
 		const error = new TexError('engine-unavailable', [], undefined, undefined, message);
@@ -488,7 +515,11 @@ export class WorkerHost implements TexHost {
 		engine.current = null;
 		this.teardown(engine, error, 'error');
 
-		if (starting && !this.engines.some((other) => other.up)) victims.push(...this.waiting.splice(0));
+		if (starting) {
+			this.startFailed = true;
+			this.resized();
+			if (this.engines.length === 0) victims.push(...this.waiting.splice(0));
+		}
 		for (const job of victims) this.settle(job, () => job.reject(error));
 		this.pump();
 	}
@@ -575,6 +606,8 @@ export class WorkerHost implements TexHost {
 					'idle',
 				);
 			}
+			this.startFailed = false;
+			this.resized();
 		}, this.idleTeardownMs);
 	}
 
@@ -582,6 +615,23 @@ export class WorkerHost implements TexHost {
 		if (this.idleTimer === null) return;
 		this.timers?.clearTimeout(this.idleTimer);
 		this.idleTimer = null;
+	}
+
+	/** How many workers run at once now: the pool's size, or one once a worker failed to start. */
+	private get size(): number {
+		return this.startFailed ? 1 : this.poolSize;
+	}
+
+	/** Tell `onSize` the size, if it changed. */
+	private resized(): void {
+		const size = this.size;
+		if (size === this.told) return;
+		this.told = size;
+		try {
+			this.onSize?.(size);
+		} catch {
+			// The caller's business; the pool is this size either way.
+		}
 	}
 }
 

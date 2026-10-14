@@ -84,13 +84,15 @@ export default class TikzjaxNextPlugin extends Plugin {
 
 		// As many workers as jobs the queue runs at once, each running one job at a time: two on a
 		// computer, one on a phone, one where the second engine is off or memory is short
-		// (platform/budgets.ts `engineCount`). A job the queue starts beyond the workers would wait
-		// in the host on its startup allowance, behind someone else's diagram.
+		// (platform/budgets.ts `engineCount`), and one after a worker failed to start, which the
+		// host tells the queue. A job the queue starts beyond the workers would wait in the host on
+		// its startup allowance, behind someone else's diagram.
 		const engines = this.engineCount();
 		this.host = new WorkerHost({
 			idleTeardownMs: this.budgets.idleTeardownMs,
 			timers,
 			poolSize: engines,
+			onSize: (size) => this.queue?.setConcurrency(size),
 		});
 		this.preamble = new PreambleService(this.app, sha256Hex);
 		this.cache = new DiagramCache({
@@ -381,13 +383,12 @@ export default class TikzjaxNextPlugin extends Plugin {
 	}
 
 	/**
-	 * The second engine was turned on or off: the queue runs that many jobs at once from now on, and
-	 * the host that many workers. A worker no longer wanted goes when it has finished its job.
+	 * The second engine was turned on or off: the host runs that many workers from now on, and tells
+	 * the queue how many jobs to run at once (`onSize`), which is one while a worker that failed to
+	 * start keeps the pool at one. A worker no longer wanted goes when it has finished its job.
 	 */
 	private applyEngineCount(): void {
-		const engines = this.engineCount();
-		this.queue?.setConcurrency(engines);
-		this.host?.setPoolSize(engines);
+		this.host?.setPoolSize(this.engineCount());
 	}
 
 	/**

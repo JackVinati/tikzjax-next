@@ -1321,6 +1321,13 @@ What the host does (`src/engine/worker-host.ts`, from the `v-pool` prototype):
   The engine started early for a cache miss (D23) is one worker at most, and a job arriving while it
   starts waits for it rather than starting another.
 - **A timeout or a crash takes down only its own worker**; the other keeps its job.
+- **A worker that fails to start makes the pool one** until the workers next stop together, idle or
+  by `kill()`, and the host tells the queue, which runs one job at a time meanwhile (`onSize`). A
+  start that fails is most likely memory the computer does not have, which the memory rule below
+  cannot see where the WebView reports 8 GiB or more, or nothing. Started again behind a busy first
+  worker, the second would fail again for every job that waited; and when both were starting, a
+  crash of one failed every waiting job while the other was about to come up. The waiting jobs now
+  go to a worker that is up or still starting, and fail only when there is none.
 - **`kill()` stops them all** — Restart the TeX engine, the app going to the background, unload — and
   interrupts every job, as it did the one worker.
 - **They idle down together**, once neither has a job, after the platform's idle budget; one with
@@ -1354,8 +1361,9 @@ happened in the prototype's note of 74 diagrams (the 0.2.x measurements, set F2)
 diagram sent to the worker that holds its preamble, which is for that release.
 
 Tests: `test/worker-host.test.ts` (the prototype's pool tests, and idling down together, one worker
-with a pool of one, a crash, the pool shrinking and growing), the queue's new slot count,
-`test/budgets.test.ts`, and the settings tab.
+with a pool of one, a crash, the pool shrinking and growing, a second worker that fails to start
+while the first is busy or starting), the queue's new slot count, `test/budgets.test.ts`, and the
+settings tab.
 
 ---
 
