@@ -243,10 +243,9 @@ different cache keys and the PDF would get a differently compiled diagram.
 
 The plugin's settings cover colours, lazy rendering, fast mode, a second engine on a computer, the
 time limit, how the source is cleaned up, the pre-flight checks, the preamble files, the TeX log and
-the cache. A change applies
-to the open notes straight away, also when it arrives from another device through Sync. Where an
-option shares its name with a setting (`colors`, `lazy`, `timeout`, `fast`) the option wins for its
-block.
+the cache. A change applies to the open notes straight away, also when it arrives from another
+device through Sync. Where an option shares its name with a setting (`colors`, `lazy`, `timeout`,
+`fast`) the option wins for its block.
 
 ## Shared preambles
 
