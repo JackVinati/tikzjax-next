@@ -115,6 +115,13 @@ describe('where a run is likely to be saved, and its name', () => {
 		expect(predictedPoint('\\begin{tikzpicture}\\end{tikzpicture}\n')).toBeUndefined();
 	});
 
+	it('takes an escaped % before \\begin{document} on its line for what it is, and \\\\% for a comment', () => {
+		const escaped = '\\newcommand\\pc{50\\%}\\begin{document}\nbody\n';
+		expect(predictedPoint(escaped)).toBe(escaped.indexOf('body'));
+		const comment = '\\def\\x{}\\\\% \\begin{document}\n\\begin{document}\nbody\n';
+		expect(predictedPoint(comment)).toBe(comment.indexOf('body'));
+	});
+
 	it('is named the same for the same text and logging, and apart otherwise', () => {
 		const a = buildInput(SOURCE, { texPackages: { pgfplots: '' } }).text;
 		const b = buildInput('\\begin{tikzpicture}\\draw (0,0) -- (1,1);\\end{tikzpicture}', {

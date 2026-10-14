@@ -40,7 +40,7 @@ import { ungzip } from 'pako';
 import { dvi2html } from '@drgrice1/dvi2html';
 import * as library from './library';
 import { describeConvertError } from './convert-error';
-import { buildInput, routeOf } from './document';
+import { buildInput, routeKey, routeOf } from './document';
 import { gunzipExactly } from './inflate';
 import { probeJit } from './jit';
 import { checkCoreDump, packedLength, startingMemory, unpackCoreDump, type CoreDump } from './core-dump';
@@ -274,7 +274,12 @@ type PassPlan =
 			input: Uint8Array;
 			text: string;
 			logging: boolean;
-			route: string;
+			/**
+			 * The name the host gives the run this diagram wants (./document routeOf), or undefined
+			 * where it cannot tell where the \begin{document} is. The run is named so, for the host to
+			 * find it by when it gives the next diagram that name, and else by what it stands for.
+			 */
+			route: string | undefined;
 			/** What the render has said on the terminal and failed to find by the snapshot point. */
 			log: readonly string[];
 			missing: readonly string[];
@@ -318,7 +323,7 @@ const saveRun = (
 	return saved.set({
 		prefix,
 		logging: plan.logging,
-		route: plan.route,
+		route: plan.route ?? routeKey(prefix, plan.logging),
 		stretches,
 		spans: stretchSpans(stretches),
 		host,
@@ -811,9 +816,10 @@ async function render(
 		firstPlan = { kind: 'resume', run: resumable, input };
 	} else if (budget > 0 && saved.wants()) {
 		// Saved at a preamble's first diagram, not its second: waiting for a second sighting spared the
-		// first its save and cost a third of the resumes in a run of every fixture twice (D32).
-		const route = routeOf(text, logging);
-		if (route !== undefined) firstPlan = { kind: 'save', input, text, logging, route, log, missing };
+		// first its save and cost a third of the resumes in a run of every fixture twice (D32). Whether
+		// or not the host can tell where its \begin{document} is (./document predictedPoint): the run is
+		// saved where TeX stands, under what TeX had read.
+		firstPlan = { kind: 'save', input, text, logging, route: routeOf(text, logging), log, missing };
 	}
 
 	/** Where the first pass's transcript ends, so its diagnosis can never be read out of pass two. */

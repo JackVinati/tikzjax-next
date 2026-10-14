@@ -161,6 +161,24 @@ export const HAZARDS = [
 		],
 	},
 	{
+		name: 'escaped-percent',
+		why: `an escaped % before ${B}begin{document} on its line, which the host took for a comment, so that the run was never saved`,
+		options: { wrap: 'never' },
+		bodies: [
+			`${B}newcommand{${B}pc}{50${B}%}${B}begin{document}\n${pic(`${B}node {${B}pc};`)}\n${B}end{document}`,
+			`${B}newcommand{${B}pc}{50${B}%}${B}begin{document}\n${pic(`${B}node {${B}pc, ${B}pc};`)}\n${B}end{document}`,
+		],
+	},
+	{
+		name: 'document-nowhere',
+		why: `${B}begin{document} written nowhere in the block's text, so that the host has no name for its run: it is saved and resumed all the same`,
+		options: { wrap: 'never' },
+		bodies: [
+			`${B}def${B}startdoc{${B}begin}\n${B}startdoc{document}\n${pic(`${B}node {a};`)}\n${B}end{document}`,
+			`${B}def${B}startdoc{${B}begin}\n${B}startdoc{document}\n${pic(`${B}node {bb};`)}\n${B}end{document}`,
+		],
+	},
+	{
 		name: 'filecontents',
 		why: `a file written by the preamble whose text holds a ${B}begin{document} of its own, ahead of the real one`,
 		options: { wrap: 'never' },

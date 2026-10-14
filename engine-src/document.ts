@@ -4,6 +4,7 @@
  * A module of its own, out of worker.ts, so that what TeX is given can be tested without booting an
  * engine — worker.ts is an entry point that inflates a 156 MiB dump the moment it is imported.
  */
+import { commentStart } from './comment';
 import type { RenderOptions } from './protocol';
 import { needsTs1Shim, TS1_SHIM } from './ts1-shim';
 import { bridgeUnicode } from './unicode';
@@ -85,19 +86,20 @@ export const buildInput = (source: string, options: RenderOptions): TexInput => 
 
 /**
  * Where a run of `text` is likely to be saved: just past the line of its first `\begin{document}`
- * that is not in a comment, which is how far TeX has read when its \begin{document} is done
- * (engine-src/snapshot.ts). For a block the worker wraps, that is exactly where, the end of the
+ * that is not in a comment (./comment), which is how far TeX has read when its \begin{document} is
+ * done (engine-src/snapshot.ts). For a block the worker wraps, that is exactly where, the end of the
  * worker's own `\begin{document}` line. For a block with its own it is a guess, which a
- * `\begin{document}` inside a macro, a verbatim or a file the block writes can make wrong: the
- * worker saves a run under what TeX had really read, and this only names it for the host, which
- * sends a diagram to the engine that holds its name. A wrong guess costs a diagram the engine it
- * could have resumed in, never a wrong drawing.
+ * `\begin{document}` inside a macro, a verbatim or a file the block writes can make wrong. The
+ * worker saves a run whatever this guessed, or whether it guessed at all, under what TeX had really
+ * read; this only names runs (routeOf), for the host, which sends a diagram to the engine that holds
+ * the run of its name. A wrong guess, or none, costs a diagram the engine it could have resumed in,
+ * never a save and never a wrong drawing.
  */
 export const predictedPoint = (text: string): number | undefined => {
 	const pattern = new RegExp(DOCUMENT_START.source, 'g');
 	for (let m = pattern.exec(text); m !== null; m = pattern.exec(text)) {
 		const lineStart = text.lastIndexOf('\n', m.index) + 1;
-		if (text.slice(lineStart, m.index).includes('%')) continue;
+		if (commentStart(text.slice(lineStart, m.index)) >= 0) continue;
 		const lineEnd = text.indexOf('\n', m.index + m[0].length);
 		return lineEnd < 0 ? undefined : lineEnd + 1;
 	}
@@ -106,9 +108,10 @@ export const predictedPoint = (text: string): number | undefined => {
 
 /**
  * A short name for a saved run: a 53-bit hash of the text it stands for and of whether the log was
- * kept, in hexadecimal (cyrb53). The worker names each run it holds by the text of the render that
- * saved it, the host each diagram by the text it will be given, both with routeOf, and the host
- * sends a diagram to the engine that holds its name (src/engine/worker-host.ts). Two texts that
+ * kept, in hexadecimal (cyrb53). The host names each diagram by the text its run would stand for
+ * (routeOf), the worker each run it holds as the host named the diagram that saved it, or by the
+ * text it was saved under where routeOf has no name, and the host sends a diagram to the engine that
+ * holds its name (src/engine/worker-host.ts). Two texts that
  * share a name are told apart where it matters, in the worker, which compares the text itself.
  */
 export const routeKey = (prefix: string, logging: boolean): string => {

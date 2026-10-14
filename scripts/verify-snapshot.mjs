@@ -425,7 +425,13 @@ for (const logging of [true, false])
 		}
 		// The host sends a diagram to the worker that holds the name of its run (engine-src/document.ts).
 		const route = lib.routeOf(lib.buildInput(b1, { ...o, captureLog: logging }).text, logging);
-		if (expectSave && !saved1.snapshots?.held.includes(route))
+		// Or, where the host can give it none, under a name of its own.
+		if (
+			expectSave &&
+			(route === undefined
+				? saved1.snapshots?.held.length !== 1
+				: !saved1.snapshots?.held.includes(route))
+		)
 			wrong.push('the worker does not hold the run under the name the host gives it');
 		if (!expectSave && (saved1.snapshots?.held.length ?? 0) > 0) wrong.push('the worker holds a run');
 		const where = logging ? 'worker ' : 'worker, log off,';
