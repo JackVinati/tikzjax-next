@@ -96,6 +96,23 @@ describe('DiagramCache', () => {
 		expect(await cache.stats()).toEqual({ entries: 1, bytes: 50 });
 	});
 
+	it('clears the saved preambles kept beside it, with the diagrams (internal/DECISIONS.md D36)', async () => {
+		let cleared = 0;
+		cache = new DiagramCache({
+			appId: 'vault',
+			l1: { entries: 16, bytes: 1_000_000 },
+			l2Bytes: 1_000_000,
+			importLegacy: () => false,
+			now: () => 5000,
+			runs: { clear: () => Promise.resolve(void cleared++) },
+		});
+		cache.put('a', artifact(100));
+		await fake.idle();
+		await cache.clear();
+		expect(cleared).toBe(1);
+		expect(await cache.stats()).toEqual({ entries: 0, bytes: 0 });
+	});
+
 	it("reads the previous plugin's store on a miss, as raw input for the pipeline", async () => {
 		await seedLegacy();
 		open();

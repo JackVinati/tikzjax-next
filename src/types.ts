@@ -158,6 +158,11 @@ export interface TexTimings extends RenderTimings {
 	 * or the engine being created if that was later, to the engine saying it was ready.
 	 */
 	startMs?: number | undefined;
+	/**
+	 * How long reading the run the host kept for this diagram took (cache/runs.ts), when one was sent
+	 * with it to an engine that did not hold it (internal/DECISIONS.md D36).
+	 */
+	fetchMs?: number | undefined;
 }
 
 /**
@@ -282,4 +287,9 @@ export interface Budgets {
 	 * diagrams with the same preamble start from (internal/DECISIONS.md D32).
 	 */
 	snapshotBytes: number;
+	/**
+	 * What may be stored of those runs, compressed, to outlive the engine that saved them
+	 * (cache/runs.ts, internal/DECISIONS.md D36).
+	 */
+	storedRunBytes: number;
 }

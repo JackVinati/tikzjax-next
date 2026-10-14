@@ -75,6 +75,13 @@ const DESKTOP: Budgets = {
 	 * preambles of the fixtures at once beside TikZ's, next to the 156.25 MiB memory each engine keeps.
 	 */
 	snapshotBytes: 32 * 1024 * 1024,
+	/**
+	 * What may be kept of those runs in IndexedDB, to outlive the engine (cache/runs.ts, D36),
+	 * gzipped where the platform has its own gzip. Over the fixtures, a run is 0.6 MiB for TikZ alone
+	 * and 8.8 MiB for circuitikz as the engine holds it, and gzipped 29 to 38% of that, in WebKit and
+	 * Chromium on the desktop.
+	 */
+	storedRunBytes: 64 * 1024 * 1024,
 };
 
 const MOBILE: Budgets = {
@@ -109,6 +116,11 @@ const MOBILE: Budgets = {
 	 * one large package preamble, or two of the size of siunitx's (internal/DECISIONS.md D32).
 	 */
 	snapshotBytes: 12 * 1024 * 1024,
+	/**
+	 * A quarter of the desktop's, as the diagram cache is about a third of it: a phone's storage is
+	 * smaller and its WebView's quota with it, and before iOS 16.4 the runs are kept uncompressed.
+	 */
+	storedRunBytes: 16 * 1024 * 1024,
 };
 
 export function budgetsFor(isMobile: boolean): Budgets {
@@ -152,4 +164,15 @@ export function snapshotBytes(budgets: Budgets, webView: Pick<WebViewFeatures, '
 	if (webView.memoryGiB !== null && webView.memoryGiB < LOW_MEMORY_GIB)
 		return Math.min(budgets.snapshotBytes, MOBILE.snapshotBytes);
 	return budgets.snapshotBytes;
+}
+
+/**
+ * What may be stored of saved preambles on this device (cache/runs.ts, internal/DECISIONS.md D36):
+ * the platform's `storedRunBytes`, but a phone's on a computer that reports less than 8 GiB of
+ * memory, as for what an engine holds of them (`snapshotBytes`).
+ */
+export function storedRunBytes(budgets: Budgets, webView: Pick<WebViewFeatures, 'memoryGiB'>): number {
+	if (webView.memoryGiB !== null && webView.memoryGiB < LOW_MEMORY_GIB)
+		return Math.min(budgets.storedRunBytes, MOBILE.storedRunBytes);
+	return budgets.storedRunBytes;
 }

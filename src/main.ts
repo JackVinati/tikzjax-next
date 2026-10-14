@@ -1,14 +1,16 @@
 import { Notice, Platform, Plugin } from 'obsidian';
 import { COLD_FONT_CSS } from 'virtual:fonts';
+import { ENGINE_ID } from 'virtual:engine';
 
 import { TexError, type Budgets, type TexResult } from './types';
 import type { BootTimings, EngineInventory } from '../engine-src/protocol';
 import { WorkerHost } from './engine/worker-host';
-import { budgetsFor, engineCount, snapshotBytes } from './platform/budgets';
+import { budgetsFor, engineCount, snapshotBytes, storedRunBytes } from './platform/budgets';
 import { ensureFonts } from './platform/context';
 import { device, webViewFeatures } from './platform/device';
 import { BUILT_VERSION } from './platform/version';
 import { DiagramCache } from './cache';
+import { RunStore } from './cache/runs';
 import { RenderQueue } from './queue/queue';
 import { ViewportGate } from './block/viewport';
 import { editedNote, RecentEdits } from './block/edits';
@@ -46,6 +48,10 @@ export default class TikzjaxNextPlugin extends Plugin {
 	private shownSettings: TikzSettings = { ...DEFAULT_SETTINGS };
 
 	cache: DiagramCache | null = null;
+	/** Saved preambles kept across the engine's stops (cache/runs.ts, internal/DECISIONS.md D36). */
+	private runs: RunStore | null = null;
+	/** Whether saved preambles were on when the settings were last applied, to see them turned off. */
+	private preamblesOn = true;
 
 	private host: WorkerHost | null = null;
 	private queue: RenderQueue<TexJobSpec, TexResult> | null = null;
@@ -93,6 +99,20 @@ export default class TikzjaxNextPlugin extends Plugin {
 		// host tells the queue. A job the queue starts beyond the workers would wait in the host on
 		// its startup allowance, behind someone else's diagram.
 		const engines = this.engineCount();
+		// `appId` is real but undocumented, so it is not on the public App type. It is what keeps each
+		// vault's stores separate: every vault on a desktop install shares one origin, and Obsidian
+		// namespaces its own stores exactly this way.
+		const appId = (this.app as unknown as { appId?: string }).appId ?? 'default';
+		// Saved preambles outlive the engine that saved them, in this device's IndexedDB, never in the
+		// vault (D36); none are kept while saved preambles are off, and what was is deleted.
+		this.runs = new RunStore({
+			appId,
+			engineId: ENGINE_ID,
+			budget: () => storedRunBytes(this.budgets, webViewFeatures()),
+			now: () => Date.now(),
+		});
+		this.preamblesOn = this.settings.preambleSnapshots;
+		if (!this.preamblesOn) void this.runs.discard();
 		this.host = new WorkerHost({
 			idleTeardownMs: this.budgets.idleTeardownMs,
 			timers,
@@ -105,17 +125,17 @@ export default class TikzjaxNextPlugin extends Plugin {
 				this.settings.preambleSnapshots ? snapshotBytes(this.budgets, webViewFeatures()) : 0,
 			// Whether TeX runs without the JIT, which on an iPhone or iPad is said once (D33).
 			onStarted: (boot) => this.warnIfNoJit(boot),
+			runs: this.runs,
 		});
 		this.preamble = new PreambleService(this.app, sha256Hex);
 		this.cache = new DiagramCache({
-			// `appId` is real but undocumented, so it is not on the public App type. It is what
-			// keeps each vault's store separate: every vault on a desktop install shares one
-			// origin, and Obsidian namespaces its own stores exactly this way.
-			appId: (this.app as unknown as { appId?: string }).appId ?? 'default',
+			appId,
 			l1: { entries: this.budgets.l1Entries, bytes: this.budgets.l1Bytes },
 			l2Bytes: this.budgets.l2Bytes,
 			importLegacy: () => this.settings.importLegacyCache,
 			now: () => Date.now(),
+			// Clearing the diagram cache clears the saved preambles kept beside it too.
+			runs: this.runs,
 		});
 
 		this.queue = new RenderQueue<TexJobSpec, TexResult>({
@@ -398,6 +418,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 		this.host = null;
 		host?.dispose();
 		this.cache?.dispose();
+		this.runs?.close();
 		for (const doc of this.touchedDocuments) doc.getElementById('tikzjax-fonts')?.remove();
 		this.touchedDocuments.clear();
 	}
@@ -410,6 +431,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 	async saveSettings(): Promise<void> {
 		this.queue?.clearPoison();
 		this.applyEngineCount();
+		this.applySavedPreambles();
 		this.showSettings();
 		await this.saveData(this.settings);
 	}
@@ -427,6 +449,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 			this.settings = migrateSettings(raw);
 			this.queue?.clearPoison();
 			this.applyEngineCount();
+			this.applySavedPreambles();
 			this.showSettings();
 		});
 	}
@@ -452,6 +475,16 @@ export default class TikzjaxNextPlugin extends Plugin {
 	 */
 	private applyEngineCount(): void {
 		this.host?.setPoolSize(this.engineCount());
+	}
+
+	/**
+	 * Saved preambles were turned off, here or through Sync: the stored ones are deleted (D36). The
+	 * engines let theirs go at their next diagram, which the host sends a budget of 0 (worker-host.ts).
+	 */
+	private applySavedPreambles(): void {
+		const on = this.settings.preambleSnapshots;
+		if (this.preamblesOn && !on) void this.runs?.clear();
+		this.preamblesOn = on;
 	}
 
 	/**

@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BootTimings, EngineInventory, WorkerRequest, WorkerResponse } from '../engine-src/protocol';
+import type {
+	BootTimings,
+	EngineInventory,
+	OkMessage,
+	SavedRunMessage,
+	StoredRun,
+	WorkerRequest,
+	WorkerResponse,
+} from '../engine-src/protocol';
 
 // The real module is the worker string and its 9.7 MB payload, produced by the build; a payload of
 // three short strings stands in for it.
@@ -13,7 +21,7 @@ vi.mock('virtual:engine', () => ({
 import { buildInput, routeOf } from '../engine-src/document';
 import { NO_WEBASSEMBLY } from '../src/engine/hints';
 import { pickEngine } from '../src/engine/route';
-import { WorkerHost } from '../src/engine/worker-host';
+import { WorkerHost, type StoredRuns } from '../src/engine/worker-host';
 import { QueueError } from '../src/queue/queue';
 import { InterruptedError, TexError, type TexResult } from '../src/types';
 
@@ -1159,6 +1167,248 @@ describe('saved preambles', () => {
 		expect(host.report().lives).toEqual([
 			{ startMs: 0, boot: null, snapshots: { runs: 2, bytes: 2 * 1048576, failures: 1 }, stop: null },
 		]);
+	});
+});
+
+describe('saved preambles kept across the engines’ stops', () => {
+	/**
+	 * Each run a worker saves is handed to the host and kept in IndexedDB (src/cache/runs.ts,
+	 * internal/DECISIONS.md D36), and a job whose run no engine holds is sent with the run kept for it.
+	 * The store is a fake here; test/runs.test.ts holds the real one.
+	 */
+	const source = '\\draw (0,0) -- (1,1);';
+	const options = { texPackages: { pgfplots: '' }, captureLog: true };
+	const route = routeOf(buildInput(source, options).text, true)!;
+	const send = (host: WorkerHost, key: string) =>
+		track(host.render({ key, source, options, timeoutMs: 1000 }, new AbortController().signal));
+	const renders = (w: FakeWorker) =>
+		w.posted.filter((m): m is Extract<WorkerRequest, { type: 'render' }> => m.type === 'render');
+	const storedRun = (bytes = 64): StoredRun => ({
+		route,
+		data: new ArrayBuffer(bytes),
+		compressed: true,
+		rawBytes: bytes * 3,
+	});
+
+	class FakeRuns implements StoredRuns {
+		keeping = true;
+		readonly stored = new Map<string, StoredRun>();
+		readonly reads: string[] = [];
+		readonly kept: SavedRunMessage[] = [];
+		readonly forgotten: string[] = [];
+		readonly measuredWith: [{ bytes: number; rawBytes: number }, number, number][] = [];
+		loads = 0;
+		/** Set to hold reads until released. */
+		hold: Promise<void> | null = null;
+		load(): Promise<void> {
+			this.loads++;
+			return Promise.resolve();
+		}
+		async read(name: string): Promise<StoredRun | undefined> {
+			this.reads.push(name);
+			if (this.hold !== null) await this.hold;
+			const run = this.stored.get(name);
+			return run === undefined ? undefined : { ...run, data: run.data.slice(0) };
+		}
+		keep(message: SavedRunMessage): Promise<void> {
+			this.kept.push(message);
+			return Promise.resolve();
+		}
+		forget(name: string): Promise<void> {
+			this.forgotten.push(name);
+			return Promise.resolve();
+		}
+		measured(run: { bytes: number; rawBytes: number }, readMs: number, restoreMs: number): void {
+			this.measuredWith.push([run, readMs, restoreMs]);
+		}
+	}
+
+	const reply = (w: FakeWorker, id: number, extra: Partial<OkMessage> = {}) =>
+		w.emit({ type: 'ok', id, svg: '<svg/>', log: [], missing: [], durationMs: 1, ...extra });
+
+	it('send a job whose run no engine holds with the run kept for it, and ask for the runs saved', async () => {
+		const runs = new FakeRuns();
+		runs.stored.set(route, storedRun(100));
+		const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+		send(host, 'a');
+		worker(0).boot();
+		await tick();
+		expect(runs.reads).toEqual([route]);
+		const posted = renders(worker(0))[0]!;
+		expect(posted.persist).toBe(true);
+		expect(posted.stored?.route).toBe(route);
+		expect(posted.stored?.data.byteLength).toBe(100);
+		expect(posted.stored?.rawBytes).toBe(300);
+	});
+
+	it('hold a job while its run is read, and post it once the read is done', async () => {
+		const runs = new FakeRuns();
+		runs.stored.set(route, storedRun());
+		let release!: () => void;
+		runs.hold = new Promise((resolve) => (release = resolve));
+		const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+		send(host, 'a');
+		worker(0).boot();
+		await tick();
+		expect(renders(worker(0))).toHaveLength(0);
+		release();
+		await tick();
+		expect(renders(worker(0))[0]?.stored?.route).toBe(route);
+	});
+
+	it('send a job without a run when none is kept for it', async () => {
+		const runs = new FakeRuns();
+		const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+		send(host, 'a');
+		worker(0).boot();
+		await tick();
+		expect(renders(worker(0))[0]?.stored).toBeUndefined();
+		expect(renders(worker(0))[0]?.persist).toBe(true);
+	});
+
+	it('read nothing for a job whose run an engine holds', async () => {
+		const runs = new FakeRuns();
+		runs.stored.set(route, storedRun());
+		const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+		send(host, 'a');
+		worker(0).boot();
+		await tick();
+		reply(worker(0), renders(worker(0))[0]!.id, { snapshots: { held: [route], bytes: 1, failures: 0 } });
+		await tick();
+		send(host, 'b');
+		await tick();
+		expect(runs.reads).toEqual([route]);
+		expect(renders(worker(0))[1]?.stored).toBeUndefined();
+	});
+
+	it('keep each run a worker hands over, from any worker still in the pool', async () => {
+		const runs = new FakeRuns();
+		const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+		send(host, 'a');
+		worker(0).boot();
+		await tick();
+		const id = renders(worker(0))[0]!.id;
+		reply(worker(0), id);
+		const message: SavedRunMessage = {
+			type: 'saved-run',
+			id,
+			run: storedRun(),
+			preambleMs: 120,
+			saveMs: 9,
+			encodeMs: 30,
+		};
+		worker(0).emit(message);
+		await tick();
+		expect(runs.kept).toEqual([message]);
+	});
+
+	it('delete a run the worker could not read back', async () => {
+		const runs = new FakeRuns();
+		runs.stored.set(route, storedRun());
+		const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+		send(host, 'a');
+		worker(0).boot();
+		await tick();
+		reply(worker(0), renders(worker(0))[0]!.id, { stored: 'corrupt' });
+		await tick();
+		expect(runs.forgotten).toEqual([route]);
+	});
+
+	it('learn what putting a run back took, and say what reading it took', async () => {
+		let now = 0;
+		const runs = new FakeRuns();
+		runs.stored.set(route, storedRun(1000));
+		let release!: () => void;
+		runs.hold = new Promise((resolve) => (release = resolve));
+		const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs, now: () => now });
+		const result = send(host, 'a');
+		worker(0).boot();
+		now = 7;
+		release();
+		await tick();
+		reply(worker(0), renders(worker(0))[0]!.id, {
+			stored: 'used',
+			timings: {
+				resetMs: 1,
+				texMs: 5,
+				svgMs: 1,
+				passes: 1,
+				resumed: true,
+				restored: true,
+				restoreMs: 4,
+			},
+		});
+		await tick();
+		expect(runs.measuredWith).toEqual([[{ bytes: 1000, rawBytes: 3000 }, 7, 4]]);
+		expect(result.value?.timings).toMatchObject({ restored: true, restoreMs: 4, fetchMs: 7 });
+	});
+
+	it('learn nothing of reading from a read made while the engine started', async () => {
+		let now = 0;
+		const runs = new FakeRuns();
+		runs.stored.set(route, storedRun(1000));
+		const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs, now: () => now });
+		send(host, 'a');
+		await tick();
+		now = 50;
+		worker(0).boot();
+		await tick();
+		const timings = {
+			resetMs: 1,
+			texMs: 5,
+			svgMs: 1,
+			passes: 1,
+			resumed: true,
+			restored: true,
+			restoreMs: 4,
+		};
+		reply(worker(0), renders(worker(0))[0]!.id, { stored: 'used', timings });
+		await tick();
+		expect(runs.measuredWith).toEqual([[{ bytes: 1000, rawBytes: 3000 }, NaN, 4]]);
+	});
+
+	it('read, send and keep nothing while saved preambles are off', async () => {
+		const runs = new FakeRuns();
+		runs.stored.set(route, storedRun());
+		const host = new WorkerHost({ snapshotBudget: () => 0, runs });
+		send(host, 'a');
+		void host.ready().catch(() => undefined);
+		worker(0).boot();
+		await tick();
+		expect(runs.loads).toBe(0);
+		expect(runs.reads).toEqual([]);
+		const posted = renders(worker(0))[0]!;
+		expect(posted.stored).toBeUndefined();
+		expect(posted.persist).toBe(false);
+		worker(0).emit({
+			type: 'saved-run',
+			id: posted.id,
+			run: storedRun(),
+			preambleMs: 1,
+			saveMs: 1,
+			encodeMs: 1,
+		});
+		await tick();
+		expect(runs.kept).toEqual([]);
+	});
+
+	it('ask for no runs where storage is not keeping them', async () => {
+		const runs = new FakeRuns();
+		runs.keeping = false;
+		runs.stored.set(route, storedRun());
+		const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+		send(host, 'a');
+		worker(0).boot();
+		await tick();
+		expect(runs.reads).toEqual([]);
+		expect(renders(worker(0))[0]?.persist).toBe(false);
+	});
+
+	it('read what is stored while the engine starts', () => {
+		const runs = new FakeRuns();
+		const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+		void host.ready();
+		expect(runs.loads).toBe(1);
 	});
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { budgetsFor, engineCount, snapshotBytes } from '../src/platform/budgets';
+import { budgetsFor, engineCount, snapshotBytes, storedRunBytes } from '../src/platform/budgets';
 
 /*
  * How many engines run at once (internal/DECISIONS.md D24): two on a computer, while diagrams queue
@@ -50,5 +50,19 @@ describe('saved preambles', () => {
 		expect(snapshotBytes(DESKTOP, { memoryGiB: null })).toBe(32 * 1024 * 1024);
 		expect(snapshotBytes(MOBILE, { memoryGiB: 2 })).toBe(12 * 1024 * 1024);
 		expect(snapshotBytes(MOBILE, { memoryGiB: null })).toBe(12 * 1024 * 1024);
+	});
+});
+
+describe('saved preambles kept across the engine’s stops', () => {
+	it('may take 64 MiB of storage on a computer, and 16 on a phone or a tablet', () => {
+		expect(budgetsFor(false).storedRunBytes).toBe(64 * 1024 * 1024);
+		expect(budgetsFor(true).storedRunBytes).toBe(16 * 1024 * 1024);
+	});
+
+	it('take 16 MiB, as on a phone, on a computer that reports less than 8 GiB, and else the platform budget', () => {
+		expect(storedRunBytes(DESKTOP, { memoryGiB: 4 })).toBe(16 * 1024 * 1024);
+		expect(storedRunBytes(DESKTOP, { memoryGiB: 8 })).toBe(64 * 1024 * 1024);
+		expect(storedRunBytes(DESKTOP, { memoryGiB: null })).toBe(64 * 1024 * 1024);
+		expect(storedRunBytes(MOBILE, { memoryGiB: null })).toBe(16 * 1024 * 1024);
 	});
 });

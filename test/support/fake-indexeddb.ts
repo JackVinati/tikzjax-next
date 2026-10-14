@@ -402,6 +402,11 @@ export class FakeIDBObjectStore {
 		return this.request(false, () => this.data.records.size);
 	}
 
+	/** Every record, in key order, as one request. */
+	getAll(): FakeIDBRequest {
+		return this.request(false, () => this.entries(null).map((entry) => structuredClone(entry.value)));
+	}
+
 	put(value: unknown, key?: Key): FakeIDBRequest {
 		const clone = structuredClone(value);
 		return this.request(true, () => {

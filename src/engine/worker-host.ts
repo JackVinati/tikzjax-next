@@ -5,7 +5,10 @@ import type {
 	EngineInventory,
 	RenderOptions,
 	RenderTimings,
+	SavedRunMessage,
 	SnapshotState,
+	StoredOutcome,
+	StoredRun,
 	WorkerRequest,
 	WorkerResponse,
 } from '../../engine-src/protocol';
@@ -136,6 +139,27 @@ export interface WorkerHostOptions {
 	 * diagrams are slow (internal/DECISIONS.md D33).
 	 */
 	onStarted?: ((boot: BootTimings | null) => void) | undefined;
+	/**
+	 * Where the runs the engines save are kept across their stops (cache/runs.ts, internal/DECISIONS.md
+	 * D36): each run a worker saves is handed to it, and a job whose run no engine holds is sent with
+	 * the run kept for it, if there is one worth sending. Omitted: runs go with their engine.
+	 */
+	runs?: StoredRuns | undefined;
+}
+
+/** What the host needs of the place saved runs are kept across the engines' stops (cache/runs.ts). */
+export interface StoredRuns {
+	/** Whether runs are kept now: storage opened, or has not been tried, and is not full. */
+	readonly keeping: boolean;
+	/** Read what is stored, once; every later call waits for the same. */
+	load(): Promise<void>;
+	/** The run kept under `route`, if one is and it is worth sending; its own copy of the bytes. */
+	read(route: string): Promise<StoredRun | undefined>;
+	keep(message: SavedRunMessage): Promise<void>;
+	/** Delete the run kept under `route`: its bytes did not read back as a run. */
+	forget(route: string): Promise<void>;
+	/** What putting a run back took: reading it, and in the worker. */
+	measured(run: { bytes: number; rawBytes: number }, readMs: number, restoreMs: number): void;
 }
 
 /** One render, from `render()` until it settles. */
@@ -151,6 +175,16 @@ interface Job {
 	readonly arrived: number;
 	/** How long it waited for the engine to start, once it has been posted; see TexTimings. */
 	startMs: number | undefined;
+	/**
+	 * The run kept for its diagram across the engines' stops (StoredRuns), while it is read, and once
+	 * it has been: sent with the job to an engine that does not hold the run, and the time the read
+	 * took. A job is not posted while its run is being read.
+	 */
+	fetching: boolean;
+	stored: StoredRun | undefined;
+	fetchMs: number | undefined;
+	/** What was sent of a stored run, for what putting it back took. */
+	sent: { bytes: number; rawBytes: number } | undefined;
 	readonly onRunning: (() => void) | undefined;
 	readonly signal: AbortSignal;
 	readonly onAbort: () => void;
@@ -225,6 +259,7 @@ export class WorkerHost implements TexHost {
 	private readonly onSize: ((engines: number) => void) | undefined;
 	private readonly snapshotBudget: () => number;
 	private readonly onStarted: ((boot: BootTimings | null) => void) | undefined;
+	private readonly runs: StoredRuns | undefined;
 
 	/**
 	 * A worker failed to start since the workers last stopped together (idle, or `kill()`), so no
@@ -262,6 +297,7 @@ export class WorkerHost implements TexHost {
 		this.onSize = options.onSize;
 		this.snapshotBudget = options.snapshotBudget ?? (() => 0);
 		this.onStarted = options.onStarted;
+		this.runs = options.runs;
 		this.told = this.poolSize;
 	}
 
@@ -294,6 +330,9 @@ export class WorkerHost implements TexHost {
 	 */
 	async ready(): Promise<void> {
 		if (this.disposed) throw unloaded();
+		// What is stored of saved runs, read while the engine starts, so that the first job's lookup
+		// waits for neither.
+		if (this.snapshotBudget() > 0 && this.runs?.keeping === true) this.runs.load().catch(() => undefined);
 		if (this.engines.some((engine) => engine.up)) return;
 		const engine = this.engines[0] ?? this.spawn();
 		this.pump();
@@ -318,6 +357,10 @@ export class WorkerHost implements TexHost {
 				route: this.routeFor(job),
 				arrived: this.now(),
 				startMs: undefined,
+				fetching: false,
+				stored: undefined,
+				fetchMs: undefined,
+				sent: undefined,
 				onRunning,
 				signal,
 				onAbort: () => this.abandon(entry),
@@ -326,6 +369,7 @@ export class WorkerHost implements TexHost {
 			};
 			signal.addEventListener('abort', entry.onAbort, { once: true });
 			this.waiting.push(entry);
+			this.fetchStored(entry);
 			this.pump();
 		});
 	}
@@ -407,7 +451,9 @@ export class WorkerHost implements TexHost {
 		// would start from, if one does (./route).
 		for (;;) {
 			const next = this.waiting[0];
-			if (next === undefined) break;
+			// A job whose stored run is being read waits for it, a few milliseconds, rather than
+			// compile its preamble: it is posted when the read is done (fetchStored).
+			if (next === undefined || next.fetching) break;
 			const idle = this.engines.filter((engine) => engine.up && engine.current === null);
 			const engine = pickEngine(
 				next.route,
@@ -445,13 +491,23 @@ export class WorkerHost implements TexHost {
 		// the engine was up is not the engine starting.
 		if (engine.readyAt !== null && job.arrived < engine.readyAt)
 			job.startMs = engine.readyAt - Math.max(job.arrived, engine.spawnedAt);
-		engine.worker.postMessage({
+		const snapshots = this.snapshotBudget();
+		// The stored run, to an engine that does not hold the run already; transferred, not copied.
+		const stored =
+			snapshots > 0 && job.route !== undefined && !engine.held.has(job.route) ? job.stored : undefined;
+		job.stored = undefined;
+		if (stored !== undefined) job.sent = { bytes: stored.data.byteLength, rawBytes: stored.rawBytes };
+		const request: WorkerRequest = {
 			type: 'render',
 			id: job.id,
 			source: job.source,
 			options: job.options,
-			snapshots: this.snapshotBudget(),
-		} satisfies WorkerRequest);
+			snapshots,
+			...(stored === undefined ? {} : { stored }),
+			persist: snapshots > 0 && this.runs?.keeping === true,
+		};
+		if (stored === undefined) engine.worker.postMessage(request);
+		else engine.worker.postMessage(request, [stored.data]);
 		try {
 			job.onRunning?.();
 		} catch {
@@ -543,8 +599,11 @@ export class WorkerHost implements TexHost {
 			return;
 		}
 
-		// A run the worker saved, handed over to keep across the engine's stops, which nothing keeps yet.
-		if (message.type === 'saved-run') return;
+		// A run the worker saved, written out once its render had replied, to keep across the stops.
+		if (message.type === 'saved-run') {
+			if (this.snapshotBudget() > 0) this.runs?.keep(message).catch(() => undefined);
+			return;
+		}
 
 		// A reply for a job we abandoned; ids make that unambiguous rather than a guess.
 		const job = engine.current;
@@ -558,13 +617,18 @@ export class WorkerHost implements TexHost {
 
 		engine.current = null;
 		if (message.snapshots !== undefined) this.heldBy(engine, message.snapshots);
+		this.storedOutcome(job, message.stored, message.timings);
 		const line = blockLine(message.line, message.bodyLine);
 		if (message.type === 'ok') {
 			const result: TexResult = {
 				svg: message.svg,
 				log: message.log,
 				durationMs: message.durationMs,
-				timings: timingsOf(message.timings, job.startMs),
+				timings: timingsOf(
+					message.timings,
+					job.startMs,
+					job.sent === undefined ? undefined : job.fetchMs,
+				),
 				firstError: message.firstError,
 				line,
 			};
@@ -722,6 +786,53 @@ export class WorkerHost implements TexHost {
 		}
 	}
 
+	/**
+	 * Read the run kept for a job's diagram across the engines' stops, while the job waits, when no
+	 * engine holds it: the job is posted once the read is done, with the run if there was one worth
+	 * sending (StoredRuns.read). The engine's start, when there is one, runs meanwhile.
+	 */
+	private fetchStored(job: Job): void {
+		const runs = this.runs;
+		const route = job.route;
+		if (runs === undefined || !runs.keeping || route === undefined) return;
+		if (this.engines.some((engine) => engine.held.has(route))) return;
+		job.fetching = true;
+		const started = this.now();
+		runs.read(route)
+			.then(
+				(run) => {
+					job.stored = run;
+					job.fetchMs = this.now() - started;
+				},
+				() => undefined,
+			)
+			.finally(() => {
+				job.fetching = false;
+				this.pump();
+			});
+	}
+
+	/**
+	 * What became of a stored run sent with a job: deleted when its bytes did not read back, and what
+	 * putting it back took, for the next estimate of whether one is worth sending.
+	 */
+	private storedOutcome(
+		job: Job,
+		outcome: StoredOutcome | undefined,
+		timings: RenderTimings | undefined,
+	): void {
+		const runs = this.runs;
+		if (runs === undefined || job.route === undefined || outcome === undefined) return;
+		if (outcome === 'corrupt') runs.forget(job.route).catch(() => undefined);
+		// A read made while the engine started is not what a read takes: the two shared the processor.
+		if (outcome === 'used' && job.sent !== undefined && timings?.restoreMs !== undefined)
+			runs.measured(
+				job.sent,
+				job.startMs === undefined ? (job.fetchMs ?? NaN) : NaN,
+				timings.restoreMs,
+			);
+	}
+
 	/** What an engine said it holds of saved runs, for routing and for the diagnostics view. */
 	private heldBy(engine: Engine, state: SnapshotState): void {
 		engine.held = new Set(state.held);
@@ -766,10 +877,21 @@ function blockLine(line: number | undefined, bodyLine: number | undefined): numb
 	return line === undefined ? undefined : line - (bodyLine ?? 2) + 1;
 }
 
-/** The worker's timings with the engine's start added, when this job waited for it. */
-function timingsOf(worker: RenderTimings | undefined, startMs: number | undefined): TexTimings | undefined {
+/**
+ * The worker's timings with the engine's start added, when this job waited for it, and the reading of
+ * a stored run sent with it.
+ */
+function timingsOf(
+	worker: RenderTimings | undefined,
+	startMs: number | undefined,
+	fetchMs: number | undefined,
+): TexTimings | undefined {
 	if (worker === undefined) return undefined;
-	return startMs === undefined ? { ...worker } : { ...worker, startMs: Math.round(startMs) };
+	return {
+		...worker,
+		...(startMs === undefined ? {} : { startMs: Math.round(startMs) }),
+		...(fetchMs === undefined ? {} : { fetchMs: Math.round(fetchMs) }),
+	};
 }
 
 function unloaded(): TexError {

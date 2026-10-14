@@ -31,6 +31,11 @@ export interface CacheOptions {
 	 */
 	importLegacy: () => boolean;
 	now: () => number;
+	/**
+	 * The saved preambles kept beside the diagrams (./runs, internal/DECISIONS.md D36), which clearing
+	 * the cache clears too.
+	 */
+	runs?: { clear(): Promise<void> } | null | undefined;
 }
 
 export interface LookupResult {
@@ -209,7 +214,7 @@ export class DiagramCache {
 
 	async clear(): Promise<void> {
 		this.l1.clear();
-		await this.l2.clear();
+		await Promise.all([this.l2.clear(), this.options.runs?.clear()]);
 	}
 
 	/** Mobile teardown: L1 is the cheap thing to give back under memory pressure. */

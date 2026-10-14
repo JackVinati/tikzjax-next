@@ -297,6 +297,8 @@ describe('settings tab — saved preambles', () => {
 			expect(settings.preambleSnapshots).toBe(false);
 			expect(saves).toBe(1);
 			expect(setting('Saved preambles').desc).toContain('Turn this off if a diagram draws differently');
+			expect(setting('Saved preambles').desc).toContain('never in the vault');
+			expect(setting('Saved preambles').desc).toContain('turning this off deletes them');
 		});
 	}
 });
