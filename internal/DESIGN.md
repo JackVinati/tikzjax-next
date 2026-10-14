@@ -438,6 +438,19 @@ It drives four things, all mechanically generated rather than hand-maintained: t
 
 A new engine is a new `TexHost` with a new `id`. Because `id` is a cache-key input, switching engines invalidates exactly the affected artifacts and no more, and two engines can coexist. Migration is validated per-diagram against the golden corpus, plus a **"Render this block with engine X" debug command**, before anyone is switched — never validated by user reports. Swapping a rebuilt bundle is: replace `vendor/tikzjax.txt`, regenerate `worker-source.ts` + `inventory.ts` + `CHECKSUMS`, run the corpus. **No plugin code changes.**
 
+### 4.7 Saved preambles (0.2.1, `internal/DECISIONS.md` D32)
+
+The format runs the engine's `\tikzjaxsnapshot` at the end of LaTeX's `begindocument/end` hook, after every package's code for it. In a diagram's first pass the worker saves TeX there: the stretches of TeX's globals that differ from the core dump (`engine-src/snapshot.ts`), the host's table of files and what TeX had said by then, under the exact text TeX had read, through the end of the line of its `\begin{document}`, and whether the log is kept. A later first pass whose input starts with that text starts from the dump with those stretches written over it and the files put back, and TeX carries on in `main_control` where the saved run stood. Nothing is saved when TeX learnt anything of the job's own file other than by reading it a line at a time (`\filesize` of it, a second `\openin` or `\input`), when the reset cannot account for the memory, or when the save itself fails; the diagram is then drawn as from the start. Second passes never resume.
+
+| | |
+|---|---|
+| Where | In the worker, per engine; gone with it (idle teardown, background, restart) |
+| Budget | 32 MiB an engine on a computer, 12 MiB on a phone (§5.4); least recently used first, never one in use or resumed from within the last 16 renders |
+| Switch | `preambleSnapshots` in `data.json`, default on, not in the settings tab; the host sends the budget, or 0, with every job |
+| Routing | The host names each job's run as the worker names what it holds (`routeOf`) and gives the job to the idle engine that holds it, else to any idle one (`src/engine/route.ts`) |
+| Reset | The reset after a resumed run also puts back the saved stretches (D31) |
+| Proof | `verify:snapshot` (every fixture and hazard, resumed against from the start, engine and worker, no golden corpus), `verify:reset` with resumed runs |
+
 ---
 
 ## 5. Subsystem spec: queue, concurrency, timeout, cancellation
@@ -499,6 +512,7 @@ A bare `setTimeout(() => pool.kill(...))` around an `await host.run(...)` is **n
 | L1 / L2 | 256 entries, 24 MB / 64 MB | 64 entries, 8 MB / 24 MB |
 | SVGO default | `targeted` (after the iOS gate) | `preset` |
 | Worker idle teardown | 5 min | 30 s, **and immediately on `visibilitychange → hidden`** |
+| Saved preambles, per engine (0.2.1, §4.7) | 32 MiB | 12 MiB |
 
 Mobile concurrency 1 is not conservatism: even after P1/P2b each worker retains ~68.75 MiB, and two workers is ~137 MiB resident inside one WKWebView content process whose measured ceiling ranges from ~100 MB (iPhone SE3, iOS 26.2) to ~450 MB.
 

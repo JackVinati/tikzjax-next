@@ -458,12 +458,11 @@ community store's review again, so I would rather put out fewer, bigger releases
 change with what people ask for.
 
 - **0.2.x: skip the preamble.** A diagram that loads packages spends much of TeX's time loading
-  them: about half for pgfplots and about three quarters for siunitx, measured on an early 0.2.0
-  build. A note often has several diagrams with the same preamble. The idea is to load it once, keep
-  a snapshot of TeX's state, and start the later diagrams from the snapshot. It stays an idea until
-  a prototype shows that it changes nothing a diagram renders to. With 0.2.0's lighter memory, a
-  second engine now runs on a computer while new diagrams queue up (0.2.1); on a phone it stays at
-  one until a phone shows it has the room.
+  them, and a note often has several diagrams with the same preamble. Since 0.2.1 the engine keeps
+  where TeX stands once a preamble is loaded and starts the later diagrams with it from there (see
+  [Questions](#questions)), and a second engine runs on a computer while new diagrams queue up; on a
+  phone it stays at one until a phone shows it has the room. Next, the saved preambles are to
+  outlast the engine's stop, which on a phone comes after 30 seconds without a diagram.
 - **0.3.0: TeX Live 2026.** Newer pgf/TikZ, pgfplots, circuitikz, chemfig and siunitx, which means
   new circuitikz components, chemfig's `\hreac` and three years of fixes. `main.js` should shrink
   from about 12.2 MB to about 8.3 MB, by an estimate from a test build. TeX itself will not get
@@ -494,6 +493,30 @@ Lockdown Mode was on (below). Later diagrams in the session are faster, and a di
 already seen comes from the cache without running TeX at all.
 
 <!-- IPHONE-FIGURES: the iPhone engine start above is one reading of 0.2.0 on the maintainer's iPhone (diagnostics view, 14 October 2026); 0.1.5 and 0.2.1 were not measured there yet. Name the device and iOS version here once the engine `iphone` entry in scripts/readme-charts.mjs is filled. -->
+
+**Why is the second diagram with the same packages faster?** Since 0.2.1 the engine keeps where TeX
+stands once a diagram's `\begin{document}` is done, with its packages and preamble loaded, and a
+later diagram whose text is the same up to there starts from that point and compiles only its body.
+"The same up to there" is everything the plugin puts in front of the block: the packages and
+libraries in its `%!tikz` line or the settings, the global preamble, a preamble file, and the
+block's own lines before `\begin{document}`; blocks that are only a `tikzpicture` all share one, but
+for a block with a character drawn in sans-serif, or one of the stand-ins for `°` `×` `£` and the
+like, which adds to what comes first. On my desktop, drawn a second time in a row, a plain TikZ
+diagram took 5 ms of TeX instead of 14 in Chromium, the engine of Obsidian's desktop app, and
+circuitikz 68 instead of 213; in WebKit, the engine of the iPhone and iPad, 7 instead of 19 and 108
+instead of 321. The first diagram of each preamble takes a few milliseconds more, to save it. An
+engine keeps up to 32 MB of saved preambles on a computer and 12 MB on a phone or tablet, and lets
+them go when it stops: on a phone, after 30 seconds without a diagram and whenever Obsidian goes to
+the background, so there the second diagram has to come soon after the first. A diagram drawn this
+way is the same, byte for byte, as one drawn from the start, and every release checks that for every
+test diagram; a preamble that asks the size of the diagram's own file, or reads it, is never saved.
+The diagnostics view says of each diagram whether it started from a saved preamble.
+
+**How do I turn saved preambles off?** Should a diagram ever draw differently because of them, close
+Obsidian, set `"preambleSnapshots": false` in `.obsidian/plugins/tikzjax-next/data.json` in your
+vault, and open it again; every diagram is then compiled from the start, as in 0.2.0. Please open an
+issue with the diagram if that changes how it draws. `true`, or removing the line, turns them back
+on.
 
 **Can I put TikZ in a `$$ … $$` math block?** No. Obsidian hands math blocks to MathJax before any
 plugin sees them, and MathJax does not run TikZ. Use a `tikz` block; for an inline-looking result,

@@ -2079,6 +2079,262 @@ diagrams end that way has not been measured. `TODO.md` lists it as open.
 
 ---
 
+## D32 — A diagram starts from the run an earlier one with the same preamble saved at its \begin{document}
+
+**Amends D24, whose closing paragraph left the preamble snapshot and routing by preamble to 0.2.3,
+D31, whose reset now also covers a run that resumed, and DESIGN.md §4.3 and §5.4. Builds on the
+0.2.x study's prototype and its review (findings M1, M3, S2, S3, S4, S5, S7, N3, N4). Date of
+record: 2026-10-14.**
+
+A diagram that loads packages spends most of TeX's time loading them, and every diagram did it
+again, also the second of two with the same preamble in one note. Since this release a diagram's
+first pass is saved where TeX stands once its `\begin{document}` is done, and a later diagram whose
+input is the same up to there starts from that point and compiles only its body.
+
+**The point in the engine.** `engine-build/changes/snapshot.ch` adds `\tikzjaxsnapshot`, a command
+of `main_control`'s own, so that when it runs the WebAssembly call stack is the program,
+`main_control` and the host, and all of TeX's state is in its memory: the input stack and the token
+lists it is reading among it. It sets a new global, `resume_pending`, to 1, calls the host's new
+`snapshotPoint` import, sets it back to 0, and then does what `\ignorespaces` does. A run started
+from a memory copied during the call finds `resume_pending` 1 at the top of the program, goes
+straight to `main_control`, and `main_control` carries on where the command left off.
+`\tracingcommands` does not show it.
+
+The prototype put the command on a line of its own after the line of `\begin{document}`, in the
+input file, and took that line out of TeX's count of lines. The review found that the line was still
+there for every other reader of the file: `\edef\sz{\filesize{\jobname.tex}}` drew 441 where 0.2.0
+drew 424, and a preamble that counted the file's lines with a second `\openin` counted one more,
+also in a run that saved nothing (M1). So the command is not in the input at all. The format runs it
+from LaTeX's `begindocument/end` hook, the last thing `\begin{document}` does before its
+`\ignorespaces`: the engine build adds `\AddToHook{begindocument/end}{\tikzjaxsnapshot}` to the
+terminal lines the format is made with (`engine-build/build-engine.sh`). Code added there from the
+preamble is the hook's top-level code, which LaTeX runs after every package's labelled code for the
+hook. `\ShowHook` in a diagram's preamble shows it so: a label of the preamble's own first, then, as
+top-level code, the snapshot point, then etoolbox's `\AfterEndPreamble` code and the preamble's own
+`\AddToHook{begindocument/end}` code, which a resumed run reads on from the saved token lists as the
+run that saved it did. standalone then appends `\standalone\ignorespaces` to `\document`, which runs
+after the point too. TeX has read its input through the end of the line holding the real
+`\begin{document}`, whichever line that is: a `\begin{document}` given by a macro or written into a
+`filecontents` file ahead of the real one moves nothing (N3), and the text after it on its line is
+part of what the run stands for.
+
+tex.wasm grows from 238,195 to 238,370 bytes, 69,861 to 69,926 gzipped, and `core.dump.gz` from
+5,938,929 to 5,939,303. Two builds from a new image, `tikzjax-engine:v021-snapshot`, gave the same
+bytes. All 44 fixtures give the golden corpus's DVI, transcript and SVG. Through the shipped worker,
+saved preambles on, each fixture and each case of `verify:snapshot` below, drawn with its first
+body, its second and its first again, gives every reply field the plugin reads as 0.2.1-beta.2's
+worker, built from its release commit, gives it, but one: with `\tracingmacros` and
+`\tracingonline`, the transcript shows the hook's top-level code as `->\tikzjaxsnapshot ` where it
+was `->`, on one of its 156,067 lines. `filesize-self` and `read-self` draw what beta.2 draws. So
+`OUTPUT_REVISION` stays where it is, and nothing cached compiles again.
+
+**What a saved run stands for.** The exact text TeX had read when the point ran, through the newline
+that ends that line, and whether the log is kept, since a run that kept none has none to say again.
+Everything else a run depends on is fixed for a worker's life: the engine, its files, its clock, and
+the first pass's job name, `input`. A later first pass resumes from the saved run whose text its
+input starts with, the longest if several do, compared as text in the worker, so two inputs that
+differ anywhere up to there never share one. Nothing is saved when TeX learnt more of the job's own
+file than the lines its main input read (M1): the host notes a `\filesize` of `input.tex` and any
+second opening of it, by `\openin`, `\input` or `\openout`, and then says nothing can be saved
+(`library.ts` `jobFileRead`), nor when the main input has read the file to its end. A second pass
+never resumes: it reads at `\begin{document}` the `.aux` the first wrote.
+
+**What is saved.** At the point, the worker reckons the parts of TeX's globals the run can have
+written so far exactly as the reset does after a run (D31: every global but the big arrays, those up
+to TeX's counters and the engine's marks, and what the host wrote), rounds them out to blocks of 256
+bytes, and keeps each block in which a byte differs from the core dump, blocks side by side as one
+stretch (`engine-src/snapshot.ts`). Not the string literals, which instantiating the engine writes
+afresh, nor the stack: its frames belong to calls a resumed run does not return to. With the
+stretches go the host's table of files, the bytes of the files TeX is writing (`input.log`,
+`input.aux`, a `\write` stream left open) copied, the files it reads by their place in them, and
+what TeX had said on the terminal and failed to find by then. The build now packs the dump's runs on
+8 bytes (`scripts/engine-assets.mjs` `packCoreDump`), so that the comparison reads TeX's memory and
+the dump a word at a time; the dump's bytes are as before. A saved run of the fixtures is 0.60 MiB
+for TikZ alone, 2.62 for siunitx, 6.42 for pgfplots and 8.83 for circuitikz, the same as the
+prototype's.
+
+**Starting from it.** The worker writes the stretches over the dump in its one Memory, after the
+reset (D31), puts the host's files back with the job's file holding the new diagram's text, says
+again what the saved run had said, and calls the engine. The reset before the next run writes the
+dump back over what the resumed run wrote and over the stretches: a string the saving run made and
+flushed before the point lies in the stretches past where the resumed run's own marks reach.
+
+**A save that fails keeps nothing (S2).** The whole save is in a `try`, and the host's
+`snapshotPoint` in another, so that nothing it throws reaches TeX, where a RangeError would read as
+the engine's stack running out. The diagram is drawn as from the start, says `saving the preamble
+failed`, and the worker counts it.
+
+**What a save costs the first diagram of its preamble (S4).** The comparison reads the 26.5 MiB of
+TeX's globals a run can have written and the dump's bytes beside them; in Node 22.19 that is 7.7 to
+13.7 ms, 19.7 for the first save of a process, and the rest of the save under 2 ms. Three ways of
+paying it were built and measured with the 0.2.x study's harness on the desktop of D27 on 2026-10-14
+(Playwright 1.63, WebKit 26.6 and Chromium 153): seven rounds per build, each a fresh browser, a
+cold `basic` first and then every fixture twice in a row, every SVG as smoke draws it. The first
+diagram is the time from posting `basic` to its reply on the main thread; medians (range) over the
+rounds, in ms:
+
+| | first diagram after the start | its save | every save | the round's renders, whole |
+|---|---:|---:|---:|---:|
+| Chromium, saved preambles off | 48 (35–53) | – | – | 10,878 (8,487–11,478) |
+| Chromium, saved there | 70 (47–79) | 16 (12–19) | 9 (7–19) | 8,911 (6,966–9,628) |
+| Chromium, copied there, compared after the reply | 60 (40–63) | 7 (6–9), the copy | 5 (4–9) | 8,996 (6,986–9,431) |
+| Chromium, saved at a preamble's second diagram | 51 (35–60) | – | 9 (7–18) | 10,139 (8,488–10,705) |
+| WebKit, saved preambles off | 65 (55–71) | – | – | 16,728 (14,750–17,548) |
+| WebKit, saved there | 70 (67–85) | 11 (10–14) | 6 (3–14) | 12,789 (11,118–13,747) |
+| WebKit, copied there, compared after the reply | 72 (49–78) | 7 (6–11), the copy | 8 (3–12) | 12,637 (9,963–13,388) |
+| WebKit, saved at a preamble's second diagram | 62 (41–67) | – | 6 (3–10) | 15,028 (11,308–15,780) |
+
+The first ships. Comparing after the reply took 10 ms off the first diagram in Chromium and nothing
+in WebKit, the engine of the phones this is for, for a copy of 26.5 MiB at every save, which on a
+phone is memory it may not have. Saving at the second diagram of a preamble spared the first its
+save and cost 23 of the 74 resumes of a round. A further variant, saving at the second sighting only
+once the budget is full, so that a note drawn a second time finds what was saved first, resumed 66 a
+round against 74, 48 against 52 in the note of 74 below, and 32 against 33 in the spread one, and
+was not kept either. In the build that ships the save's time is its own step, not TeX's.
+
+**What is kept, and the switch.** An engine holds saved runs up to a budget the host sends with
+every job: 32 MiB on a computer, which holds the three largest preambles of the fixtures beside
+TikZ's, and 12 MiB on a phone or a tablet, well under that until a phone has been measured (S7).
+Least recently used goes first, but never the run the render under way resumed from, nor one resumed
+from within the last 16 renders, so that diagrams cycling through more preambles than the budget
+holds do not each save and evict the one the next needed; a run that would not be kept is not saved.
+The runs go with the engine: its idle stop, the app going to the background, Restart the TeX engine
+(S3, and `TODO.md` for keeping them across restarts). `"preambleSnapshots": false` in the plugin's
+`data.json` turns them off without a release: the host then sends 0, and the worker neither saves
+nor resumes and lets what it holds go. It is not in the settings tab, which saves a string to
+translate and a setting nobody should need, and a release can change its default the same way.
+
+**Two engines (S5).** Each engine keeps its own runs, so the host names each job's run as the worker
+names those it holds (`engine-src/document.ts` `routeOf`, from the input's first `\begin{document}`
+line that is not in a comment) and gives the job to the idle engine that holds it; else to one that
+holds none of the runs the other waiting jobs want, else to the first idle one
+(`src/engine/route.ts`). It never keeps a job waiting for a busy engine. The worker reports the
+names with each reply. In a note the queue hands the host as many jobs as there are engines (D24),
+and in this harness's note of 0.2.0's 37 fixtures twice, handed over that way, routing changed
+little:
+
+| a note of 74, 0.2.0's 37 fixtures twice, two engines, ms | 0.2.1-beta.2 | routed | not routed |
+|---|---:|---:|---:|
+| each fixture twice in a row, Chromium | 2,194 (2,166–2,201) | 2,233 (2,218–2,242), 32 resumed | 2,249 (2,227–2,260), 32 resumed |
+| each fixture twice in a row, WebKit | 3,188 (3,183–3,208) | 3,128 (3,083–3,138), 32 resumed | 3,152 (3,109–3,157), 32 resumed |
+| every fixture, then every fixture again, Chromium | 2,168 (2,160–2,183) | 1,999 (1,982–2,243), 33–40 resumed | 1,973 (1,765–2,186), 34–44 resumed |
+| every fixture, then every fixture again, WebKit | 3,198 (3,184–3,212) | 2,814 (2,761–3,153), 33–41 resumed | 2,797 (2,739–3,136), 34–42 resumed |
+
+Time from the first job to the last reply, median (range) of five rounds, each a fresh browser, the
+builds interleaved, on the desktop of D27 on 2026-10-14, with the harness's note handing the host
+two jobs at a time as the queue does, and every SVG as smoke draws it.
+
+With the fixtures in pairs, both diagrams of a pair start together, one on each engine, and neither
+has a run to resume; spread out, an engine's budget no longer holds every preamble of the note.
+Routing helps a note whose diagrams share a preamble but are not side by side, and a block typed in
+while another engine is busy.
+
+**The proof (M3).** `npm run verify:snapshot`, in CI and in the Engine workflow, renders every
+fixture and every case of `scripts/snapshot-hazards.mjs`, each with two bodies under one preamble,
+from the start, saving, resumed from its own run and resumed from the other body's, and compares:
+
+- in the engine, run with the worker's own modules: the DVI, the terminal output, `input.log`, the
+  files TeX did not find and every other file it wrote, byte for byte, and the resumed runs again
+  with the stack filled with 0xAA, which a run may not read before it writes (N4, the review's R7);
+  and, at every save, that every byte of TeX's globals that differs from the dump lies in what the
+  save compared, the prototype's `validate-ranges` over the layout the build writes;
+- in the shipped worker: every reply field the plugin reads, and that each case saved and resumed,
+  or did not, as it says;
+- and that a save that fails at its first copy, or at its comparison, keeps nothing, draws the
+  diagram as from the start, and is counted.
+
+It reads no golden output, so it holds when the corpus is recorded again for TeX Live 2026. The
+hazards are the prototype's eighteen (counters, `\jobname`, two passes, a `\write` and a `\read`
+left open, catcodes, an error in the preamble and in the body, random numbers, the clock, a preamble
+of several lines, a block's own `\begin{document}`, `\AtBeginDocument` and `\AtEndDocument`,
+`\batchmode`, `\inputlineno`, a group and a conditional left open, the point redefined, tracing),
+the review's two, a `\filesize` of the job's own file and a second `\openin` of it read to the end,
+both saving nothing, and ten of this release's: a missing package, a fatal error in the preamble,
+which saves nothing, the body on `\begin{document}`'s line, `\begin{document}` from a macro, a
+`filecontents` file holding one, the hook's order, characters the Unicode bridge declares, the job's
+file read in the body, a terminal line unfinished at the point, and two blocks that differ only
+after `\begin{document}` on its line, which must not share a run. On 2026-10-14: 74 cases, 844 runs
+in the engine, 548 of them resumed, and in the worker 140 renders that saved and 205 that resumed,
+every one as from the start, in two and a half minutes. `npm run verify:reset` now sends the budget
+with every render and requires a resumed run's Memory to be the dump with the globals of the run it
+resumed from, as they stood at the point, and nothing else: 285 runs in five orders, 159 of them
+resumed, every Memory as required. `verify:worker` sends the budget too, so the fixtures run there
+as the plugin runs them.
+
+What the checks catch, each tried as one change in a copy of the repository: the job file's size or
+second opening no longer stopping a save (`filesize-self` and `read-self` resume a run that saw the
+first body, in the engine and in the worker); the save leaving out `eqtb` (4,102 to 4,160 bytes of
+the globals changed outside what was compared, and every resumed run differs); the saved terminal
+lines not said again (every resumed reply differs); the unfinished terminal line not put back (the
+unfinished-line case, and only it); and the reset after a resumed run leaving out the stretches
+(`verify:reset`, in two of its five orders, a byte of `str_pool` past where the resumed run's marks
+reach). Copying the written files again when a run resumes is a guard none can show failing: the
+saved copies are exactly as long as what was written, so the first write grows them into a new array
+anyway.
+
+**What it gains**, against 0.2.1-beta.2 built from its release commit, on the desktop of D27 on
+2026-10-14 with the harness as above, the build that ships with saved preambles on as the plugin
+sends them:
+
+| | 0.2.1-beta.2 | this release |
+|---|---:|---:|
+| TeX, the 44 fixtures' second render in a row, sum of each one's fastest, Chromium 153 | 4,197 ms | 2,639 ms (−37.1%) |
+| the same, WebKit 26.6 | 5,861 ms | 3,876 ms (−33.9%) |
+| TeX, their first render, after a cold `basic`, Chromium | 4,164 ms | 3,734 ms (−10.3%) |
+| the same, WebKit | 5,907 ms | 5,443 ms (−7.9%) |
+| every render of the round, wall time, median (range), Chromium | 10,441 (8,808–10,850) | 8,367 (6,949–8,510) (−19.9%) |
+| the same, WebKit | 13,839 (12,487–15,276) | 11,892 (10,056–12,416) (−14.1%) |
+| the first diagram after the start, `basic`, wall time, Chromium | 46 (37–55) | 63 (47–75), its save 14 (12–20) |
+| the same, WebKit | 42 (41–59) | 69 (50–75), its save 10 (8–14) |
+| every save, median (range), 90th percentile | – | Chromium 9 (7–20), 11; WebKit 5 (3–14), 6 |
+| a note of 74, each of 0.2.0's 37 fixtures twice in a row, one engine, Chromium | 4,180 (4,165–4,202) | 3,114 (3,096–3,135) (−25.5%) |
+| the same, WebKit | 6,237 (6,187–6,285) | 4,491 (4,487–4,517) (−28.0%) |
+| the same note spread, every fixture and then every fixture again, one engine, Chromium | 4,183 (4,157–4,199) | 4,240 (4,200–4,284) (+1.4%) |
+| the same, WebKit | 6,211 (6,183–6,270) | 6,023 (5,988–6,064) (−3.0%) |
+
+Seven rounds for the fixtures and five for the notes, each round a fresh browser per build, the
+builds interleaved, the order of the browsers reversed every other round; TeX is the worker's own
+`texMs`, which leaves the save out, and each sum is of each fixture's fastest over the rounds. Every
+reply was as smoke draws it. The second render of a diagram resumes, the first resumes when an
+earlier diagram had its preamble, which for the fixtures without packages of their own is the cold
+`basic`: by each one's fastest, a second render of `basic` took 14 → 5 ms in Chromium and 19 → 7 in
+WebKit, `siunitx` 93 → 10 and 127 → 19, `tikz-cd` 68 → 34 and 105 → 53, `circuitikz` 213 → 68 and
+321 → 108, `pgfplots-axis` 209 → 81 and 311 → 130, `feynhand` 242 → 166 and 388 → 278. The spread
+note gains nothing on one engine: its preambles do not all fit in the budget, so a run is let go
+before its second diagram comes. The first diagram after the start pays its save; in the rounds in
+which both builds compiled it equally fast, that is all it paid. The absolute figures differ from
+D27's to D31's: these campaigns ran at another hour, beside other work on the desktop, and only
+figures from the same campaign are compared.
+
+**What it costs.** `main.js` grows by 11,416 bytes, 12,182,125 to 12,193,541: the worker's code by
+6,802 characters, the engine by 364, and the host by the input's assembly, which it now runs for
+each job to name its run. Memory: over the fixtures' round above, the peak working set went from 235
+to 280 MiB in Chromium and from 427 to 449 in WebKit, the peak private commit from 582 to 632 MiB
+and from 1,756 to 1,790 MiB, and the working set after the last render, the saved runs still held,
+from 205 to 259 MiB and from 344 to 351 (medians of seven rounds); in the one-engine note, the peak
+working set from 238 to 290 MiB and from 411 to 469, and WebKit's peak commit from 1,748
+(1,746–1,757) to 1,956 (1,766–1,983) MiB. Nothing has been measured on a phone.
+
+**Without the JIT.** WebKit with `JSC_useJIT=false`, which runs JavaScript and WebAssembly as
+Lockdown Mode does on an iPhone, on the same desktop: `basic`, `siunitx`, `circuitikz` and
+`pgfplots-axis` twice each after a cold `basic`, three rounds per build. The second render's TeX, by
+each one's fastest, went from 415 to 148 ms, 3,402 to 362, 8,659 to 3,028 and 7,862 to 3,709, and
+the round from 45,201 to 30,758 ms (medians, −32%); the first diagram after the start from 497
+(437–531) to 612 (553–847) ms, its save 124 (115–169) ms, and every save 114 (92–169). Without the
+JIT a save costs a tenth of a second where it costs ten milliseconds, and a resumed diagram saves
+seconds.
+
+**Not done, and open.** Saved runs do not survive the engine's stop; keeping them in IndexedDB,
+keyed by ENGINE_ID, is the 0.2.4 plan's, and on a phone, where the engine stops after 30 s idle and
+in the background, they matter most (S3). `\ShowHook{begindocument/end}` and `\tracingmacros` show
+the command, and a diagram that calls `\tikzjaxsnapshot` itself saves where it calls it, which
+stands for the text read up to there as well as any other point; one that redefines it saves
+nothing. TeX Live 2026 (0.3.0) has to apply `snapshot.ch` (tie stops the build otherwise), keep
+`\document`'s `begindocument/end` hook and its top-level code last, and pass `verify:snapshot`
+before the corpus is recorded again (S9).
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

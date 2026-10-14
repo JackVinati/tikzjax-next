@@ -102,6 +102,39 @@ top of its notes on GitHub, and will not publish a version that has none.
   that the block TeX is handed is the same as a new one, byte for byte.
 - Neither the faster start nor the one block of memory changes what a diagram looks like, so nothing
   cached is compiled again for them.
+- A diagram whose preamble an earlier diagram has already compiled starts where that one stood once
+  its `\begin{document}` was done, and TeX compiles only its body. That is every diagram after the
+  first with the same packages, libraries and preamble text, the blocks of a note that are only a
+  `tikzpicture` among them, and a diagram you are typing in, each time it is compiled again. The
+  first diagram of each preamble takes a few milliseconds more, to save where TeX stands. Measured
+  on a Windows desktop against 0.2.1-beta.2, rendering each of the 44 test diagrams twice in a row,
+  the second took 37% less TeX time in Chromium, the browser engine of Obsidian's desktop app, and
+  34% less in WebKit, the one of the iPhone and iPad: a plain TikZ diagram 5 ms instead of 14 in
+  Chromium and 7 instead of 19 in WebKit, circuitikz 68 instead of 213 and 108 instead of 321. The
+  first diagram after the engine started took 63 ms instead of 46 in Chromium and 69 instead of 42
+  in WebKit, of which saving its preamble was 14 and 10 ms. A note of 74 diagrams, 37 test diagrams
+  twice each, one after the other, took 26% less time with one engine, as on a phone, in Chromium
+  and 28% less in WebKit; spread out, every diagram and then every one again, it took as long as
+  before, because one engine's 32 MB do not hold all of its preambles. Without the JIT, as with
+  Lockdown Mode on an iPhone, a save took about a tenth of a second on the same desktop, and the
+  second render of circuitikz 3.0 s of TeX instead of 8.7. A diagram drawn this way is the same,
+  byte for byte, as one drawn from the start: every release now checks that for every test diagram
+  and for thirty cases written to break it, and a preamble that reads the diagram's own file is
+  never saved. An engine keeps up to 32 MB of saved preambles on a computer and 12 MB on a phone or
+  tablet, and lets them go when it stops. Nothing has been measured on a phone yet.
+- With two engines on a computer, a diagram goes to the engine that holds its preamble when that one
+  is free. In the notes above that made no measurable difference: two diagrams of one preamble next
+  to each other start together, one on each engine, so neither has a saved preamble to start from.
+  Two engines with saved preambles took from 2% more to 2% less time than beta.2's two with the
+  diagrams in pairs, and 8 to 12% less spread out.
+- `"preambleSnapshots": false` in the plugin's `data.json` turns saved preambles off, should a
+  diagram ever draw differently from one: the README says how. Please report the diagram if one
+  does.
+- The diagnostics view says of each diagram whether it started from a saved preamble, or saved its
+  own and in how long, and of each engine how many preambles it holds, in how many MB, and how many
+  saves failed; Copy includes it.
+- The TeX engine is rebuilt with the point where a diagram is saved. Nothing draws differently, so
+  nothing cached is compiled again.
 
 ## 0.2.0 — 2026-10-13
 
