@@ -66,3 +66,10 @@ describe('saved preambles kept across the engine’s stops', () => {
 		expect(storedRunBytes(MOBILE, { memoryGiB: null })).toBe(16 * 1024 * 1024);
 	});
 });
+
+describe('the idle stop', () => {
+	it('stops a phone’s engine after 15 s with nothing to do, and a computer’s after 5 minutes', () => {
+		expect(budgetsFor(true).idleTeardownMs).toBe(15_000);
+		expect(budgetsFor(false).idleTeardownMs).toBe(5 * 60_000);
+	});
+});

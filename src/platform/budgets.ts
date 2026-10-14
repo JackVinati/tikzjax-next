@@ -109,8 +109,14 @@ const MOBILE: Budgets = {
 	 * Aggressive on purpose, and paired with teardown on `visibilitychange → hidden`: WebKit
 	 * discards JIT code at 65% memory pressure and reloads the page at 100%, so being near zero
 	 * while backgrounded is the difference between surviving and being jetsam-killed.
+	 *
+	 * 15 s since 0.2.1-beta.4, where it was 30 (internal/DECISIONS.md D37). An idle engine holds what
+	 * its diagrams left until it stops: in WebKit on the desktop, 170 to 380 MiB more working set than
+	 * once stopped, which neither letting go of its Memory nor waiting gave back. Stopping costs the
+	 * next diagram a start, 48 ms on the maintainer's iPhone, and the putting back of its preamble from
+	 * storage (cache/runs.ts), where it used to cost the whole preamble.
 	 */
-	idleTeardownMs: 30_000,
+	idleTeardownMs: 15_000,
 	/**
 	 * Well under the desktop's until a phone has been measured with the snapshot on: TikZ's run and
 	 * one large package preamble, or two of the size of siunitx's (internal/DECISIONS.md D32).
