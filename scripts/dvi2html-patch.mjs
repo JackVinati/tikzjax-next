@@ -148,7 +148,7 @@ export async function importEngineForNode(root, name) {
 				"export { writtenSpans, restoreSpans } from './engine-src/reset.ts';",
 				"export { unpackCoreDump } from './engine-src/core-dump.ts';",
 				"export { saveSpans, diffAgainstDump, writeStretches } from './engine-src/snapshot.ts';",
-				"export { encodeSavedRun, decodeSavedRun } from './engine-src/stored-run.ts';",
+				"export { encodeSavedRun, decodeSavedRun, sealSavedRun } from './engine-src/stored-run.ts';",
 				"export { dvi2html } from '@drgrice1/dvi2html';",
 			].join('\n'),
 			resolveDir: root,

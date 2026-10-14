@@ -601,8 +601,34 @@ for (const logging of [true, false])
 	const saving = await send(body, basic.options, BUDGET, true, { persist: true });
 	const message = await handedOver(saving);
 	await letGo();
-	const raw = new Uint8Array(gunzipSync(new Uint8Array(message.run.data)));
-	const plain = () => ({ ...message.run, compressed: false, data: raw.slice().buffer });
+	// The same run handed over by a worker without CompressionStream: uncompressed, its checksum taken
+	// a slice at a time while the worker is idle, which must be the one taken whole of the same bytes,
+	// gzipped above without it (engine-src/stored-run.ts sealing).
+	await send(body, basic.options, 0);
+	const gzip = globalThis.CompressionStream;
+	globalThis.CompressionStream = undefined;
+	let unzipped;
+	try {
+		unzipped = await handedOver(await send(body, basic.options, BUDGET, true, { persist: true }));
+	} finally {
+		globalThis.CompressionStream = gzip;
+	}
+	const raw = new Uint8Array(unzipped.run.data);
+	const sealed = new Uint8Array(gunzipSync(new Uint8Array(message.run.data)));
+	lib.sealSavedRun(sealed);
+	if (
+		unzipped.run.compressed === false &&
+		raw.length > 512 * 1024 &&
+		Buffer.compare(Buffer.from(sealed), Buffer.from(raw)) === 0
+	)
+		pass(
+			`a run handed over uncompressed is sealed a slice at a time as it would be whole (${(raw.length / 1048576).toFixed(2)} MiB)`,
+		);
+	else
+		fail(
+			`a run handed over uncompressed: compressed ${unzipped.run.compressed}, ${raw.length} B, not as sealed whole`,
+		);
+	const plain = () => ({ ...unzipped.run, data: raw.slice().buffer });
 	const changed = (stored, at) => {
 		const data = new Uint8Array(stored.data.slice(0));
 		data[at] ^= 0x40;

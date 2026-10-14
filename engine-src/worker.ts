@@ -44,7 +44,7 @@ import * as library from './library';
 import { describeConvertError } from './convert-error';
 import { buildInput, routeKey, routeOf } from './document';
 import { gunzipExactly } from './inflate';
-import { decodeSavedRun, encodeSavedRun, type ContentSources } from './stored-run';
+import { decodeSavedRun, encodeSavedRun, sealing, type ContentSources } from './stored-run';
 import { compileProbeAsync, probeJit } from './jit';
 import { checkCoreDump, packedLength, startingMemory, unpackCoreDump, type CoreDump } from './core-dump';
 import { restoreSpans, writtenSpans, type RunMarks, type Span } from './reset';
@@ -384,8 +384,9 @@ const readStored = async (stored: StoredRun): Promise<SavedRun | undefined> => {
  * it, which the platform does on this thread, over 200 ms for circuitikz's 8.9 MiB on the desktop
  * (D36). Spent right after the reply, it held up the next diagram by as much. So it waits until no
  * render has been under way for HANDOVER_QUIET_MS, as when the host has nothing more for this engine,
- * and gzips a slice at a time, each in a task of its own once the worker is idle again: a render
- * posted meanwhile starts first, and waits at most for the slice under way.
+ * and gzips a slice at a time, each in a task of its own once the worker is idle again, or, with no
+ * gzip, takes the checksum the same way (./stored-run sealing): a render posted meanwhile starts
+ * first, and waits at most for the slice under way, or for the writing out, which is one step.
  */
 const HANDOVER_QUIET_MS = 100;
 const HANDOVER_SLICE = 256 * 1024;
@@ -456,6 +457,21 @@ const gzipWhenIdle = async (bytes: Uint8Array, spent: { ms: number }): Promise<U
 	return out;
 };
 
+/**
+ * The checksum of `bytes`, a run written out unsealed, taken a slice at a time, each when the worker
+ * is idle (whenIdle), for a run handed over uncompressed. The time spent in it is added to `spent.ms`.
+ */
+const sealWhenIdle = async (bytes: Uint8Array, spent: { ms: number }): Promise<void> => {
+	const steps = sealing(bytes, HANDOVER_SLICE);
+	for (;;) {
+		await whenIdle();
+		const t = performance.now();
+		const { done } = steps.next();
+		spent.ms += performance.now() - t;
+		if (done === true) return;
+	}
+};
+
 /** A run saved by a render, with what TeX took to reach it and what saving it took (PassPlan). */
 interface Saving {
 	run: SavedRun;
@@ -501,8 +517,10 @@ const handOver = async (id: number, saving: Saving): Promise<void> => {
 	const spent = { ms: 0 };
 	try {
 		const t = performance.now();
-		const raw = encodeSavedRun(saving.run, ENGINE_ID, storedContent);
-		spent.ms += performance.now() - t;
+		// Without its checksum, which only a run kept uncompressed needs (./stored-run).
+		const raw = encodeSavedRun(saving.run, ENGINE_ID, storedContent, false);
+		const writeMs = performance.now() - t;
+		spent.ms += writeMs;
 		let data = raw;
 		let compressed = false;
 		if (hasNativeGzip()) {
@@ -513,6 +531,7 @@ const handOver = async (id: number, saving: Saving): Promise<void> => {
 				// Kept as it is: the host counts what it stores by the bytes it is given.
 			}
 		}
+		if (!compressed) await sealWhenIdle(raw, spent);
 		const message: SavedRunMessage = {
 			type: 'saved-run',
 			id,
@@ -525,6 +544,7 @@ const handOver = async (id: number, saving: Saving): Promise<void> => {
 			preambleMs: Math.round(saving.preambleMs),
 			saveMs: Math.round(saving.saveMs),
 			encodeMs: Math.round(spent.ms),
+			writeMs: Math.round(writeMs),
 		};
 		post(message, [message.run.data]);
 	} catch {

@@ -5,6 +5,8 @@ import {
 	checksum,
 	decodeSavedRun,
 	encodeSavedRun,
+	sealing,
+	sealSavedRun,
 	STORED_RUN_FORMAT,
 	StoredRunError,
 	type ContentSources,
@@ -285,6 +287,31 @@ describe('bytes that are refused', () => {
 });
 
 describe('checksum', () => {
+	it('is left out of bytes to be gzipped, and taken a slice at a time is the one taken whole', () => {
+		const big = run({
+			stretches: [
+				{ offset: 0, bytes: block(3) },
+				{ offset: 8 * BLOCK, bytes: block(5) },
+			],
+		});
+		const whole = encodeSavedRun(big, ENGINE, sources);
+		const bare = encodeSavedRun(big, ENGINE, sources, false);
+		expect(new DataView(bare.buffer).getInt32(12, true)).toBe(0);
+		// Read as gzipped bytes are, without the checksum; refused where it is read.
+		expect(decodeSavedRun(bare, ENGINE, GLOBALS_END, sources, false).prefix).toBe(big.prefix);
+		expect(() => decodeSavedRun(bare, ENGINE, GLOBALS_END, sources)).toThrow(/checksum/);
+		for (const slice of [4, 64, 1000, BLOCK, Infinity]) {
+			const copy = bare.slice();
+			let steps = 0;
+			for (const _ of sealing(copy, slice)) steps++;
+			expect(copy).toEqual(whole);
+			if (slice < bare.length / 2) expect(steps).toBeGreaterThan(0);
+		}
+		const copy = bare.slice();
+		sealSavedRun(copy);
+		expect(copy).toEqual(whole);
+	});
+
 	it('moves with any one word changed, and with the length', () => {
 		const words = new Int32Array(1001).map((_, i) => i * 2654435761);
 		const sum = checksum(words);

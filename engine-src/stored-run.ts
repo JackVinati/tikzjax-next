@@ -13,14 +13,19 @@
  *
  *   0   'TJSR'           4   the format, 1
  *   8   the header's length in bytes
- *   12  a checksum of everything from byte 24 on
+ *   12  a checksum of everything from byte 24 on, or 0 in bytes to be gzipped
  *   16  the whole length          20  0, which a later format may use
  *   24  the header, then the blobs
  *
  * Anything that does not read back as written, or names what this worker cannot put back, is
  * refused whole: a run started from wrong bytes draws a wrong diagram, where a run refused costs
  * only the preamble's compile. The checksum is there for the bytes the host keeps uncompressed,
- * where nothing else would see a byte changed in storage, and is checked on all of them.
+ * where nothing else would see a byte changed in storage, and is checked on all of them. Bytes kept
+ * gzipped are covered by gzip's CRC-32, which the inflate checks, and their checksum is neither
+ * taken nor read: taken over the whole run in one step, it was most of what writing a run out cost
+ * without a JIT, about 120 ms for circuitikz's 8.9 MiB in WebKit (D36). So the bytes are written
+ * without it (`encodeSavedRun`), and the worker takes it, a slice at a time (`sealing`), only for a
+ * run it hands over uncompressed.
  *
  * A module of its own, apart from worker.ts, so that it can be tested and run by
  * scripts/verify-snapshot.mjs without booting an engine.
@@ -79,7 +84,14 @@ const align8 = (n: number): number => (n + 7) & ~7;
  * value, and in more than one, almost always. About a millisecond a MiB with a JIT.
  */
 export function checksum(words: Int32Array): number {
-	let h = 0x2545f491 ^ words.length;
+	return mix(0x2545f491 ^ words.length, words) | 0;
+}
+
+/**
+ * `h` with each of `words` mixed in, in order, one word at a time: a checksum taken a slice at a time,
+ * the running value carried from one to the next, is the one taken whole.
+ */
+function mix(h: number, words: Int32Array): number {
 	const n = words.length;
 	let i = 0;
 	for (; i + 4 <= n; i += 4) {
@@ -96,14 +108,44 @@ export function checksum(words: Int32Array): number {
 		h = Math.imul(h ^ words[i]!, 0x9e3779b1);
 		h = Math.imul((h << 13) | (h >>> 19), 5) + 0xe6546b64;
 	}
-	return h | 0;
+	return h;
+}
+
+/**
+ * Write the checksum of `bytes`, a run as `encodeSavedRun` writes it, into its head, about `slice`
+ * bytes of it at a step: the generator stops between slices, so that the caller can spread the work
+ * over tasks of its own.
+ */
+export function* sealing(bytes: Uint8Array, slice = Infinity): Generator<void, void, void> {
+	const words = new Int32Array(bytes.buffer, bytes.byteOffset + HEAD, (bytes.length - HEAD) >>> 2);
+	const step = Math.max(1, Math.floor(slice / 4));
+	let h = 0x2545f491 ^ words.length;
+	for (let at = 0; ; at += step) {
+		h = mix(h, words.subarray(at, at + step));
+		if (at + step >= words.length) break;
+		yield;
+	}
+	new DataView(bytes.buffer, bytes.byteOffset, bytes.length).setInt32(12, h | 0, true);
+}
+
+/** The same, at once. */
+export function sealSavedRun(bytes: Uint8Array): void {
+	const steps = sealing(bytes);
+	let done = false;
+	while (!done) done = steps.next().done === true;
 }
 
 /**
  * `run` as bytes. The files it reads from the bundle are named, not copied (`sources`); everything
- * else it holds is in the bytes, each array once however many of its entries share it.
+ * else it holds is in the bytes, each array once however many of its entries share it. With `seal`
+ * false the checksum is left 0, for bytes that will be gzipped, or sealed later (`sealing`).
  */
-export function encodeSavedRun(run: SavedRun, engineId: string, sources: ContentSources): Uint8Array {
+export function encodeSavedRun(
+	run: SavedRun,
+	engineId: string,
+	sources: ContentSources,
+	seal = true,
+): Uint8Array {
 	const blobs: Uint8Array[] = [];
 	const seen = new Map<Uint8Array, number>();
 	const blob = (bytes: Uint8Array): number => {
@@ -167,7 +209,7 @@ export function encodeSavedRun(run: SavedRun, engineId: string, sources: Content
 	// The rest of the room left for the header is spaces, which JSON reads past.
 	out.fill(32, HEAD + text.length, HEAD + sized.length);
 	blobs.forEach((bytes, i) => out.set(bytes, header.blobs[i]![0]));
-	head.setInt32(12, checksum(new Int32Array(out.buffer, HEAD, (total - HEAD) >>> 2)), true);
+	if (seal) sealSavedRun(out);
 	return out;
 }
 

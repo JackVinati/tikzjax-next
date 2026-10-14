@@ -108,6 +108,11 @@ export interface SavedRunMessage {
 	saveMs: number;
 	/** What writing it out as bytes and compressing them took, after the reply. */
 	encodeMs: number;
+	/**
+	 * What writing it out took of that, in one step before the slices of the rest: the longest a
+	 * render posted meanwhile waits for it (worker.ts handOver).
+	 */
+	writeMs?: number | undefined;
 }
 
 export interface PingRequest {
