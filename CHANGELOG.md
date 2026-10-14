@@ -66,6 +66,29 @@ top of its notes on GitHub, and will not publish a version that has none.
   allows.", as it did past the old limit. The deepest real diagrams tried draw as before, a `forest`
   tree 80 levels deep, 4,000 groups inside each other and a plot of 2,000 coordinates among them,
   and those three are now among the diagrams every release is tested with.
+- The TeX engine starts in well under half the time. Measured on a Windows desktop, from 145 to
+  57 ms in WebKit and from 160 to 51 ms in Chromium. The plugin now hands the engine its files when
+  it starts it, instead of carrying them inside the engine's own code, which every start had to read
+  through first, and the engine unpacks them with the system's own decompression where there is
+  one, from iOS 16.4 on. With that and the system's base64 decoding hidden from it, as on iOS 14.5
+  to 16.3, the start went from 155 to 114 ms in WebKit on the same desktop. The diagnostics view shows, beside each engine start, how
+  long unpacking and compiling took inside the engine, and whether the system's decompression and
+  base64 decoding were used. Nothing has been measured on a phone yet.
+- TeX takes 4 to 5% less time again, on top of the third above: the engine's calls into the
+  plugin, for every line and every character TeX reads or prints, no longer make new arrays each
+  time. Over the same 37 diagrams on the same desktop, from 2,832 to 2,733 ms in WebKit, from 1,897
+  to 1,809 ms in Chromium and from 2,295 to 2,181 ms in Node.
+- The engine keeps one block of memory for TeX and, before each diagram, puts back only what the
+  diagram before it changed. It used to take a new 156 MiB block for every diagram and leave the
+  old ones for WebKit or Chromium to free when they got round to it. Over a run of 85 diagrams on
+  the same desktop, the most memory the page had in use at once went from 679 to 423 MiB in WebKit
+  and from 344 to 236 MiB in Chromium, and the memory it had committed from 3,139 to 1,755 MiB and
+  from 1,099 to 582 MiB. After a diagram TeX gave up on, with an emergency stop or "TeX capacity
+  exceeded", the next one starts from a new block; the diagnostics view says "new memory" for it,
+  and "memory reset" for the others. Every release now checks, after each diagram of the test set in
+  five different orders, that the block TeX is handed is the same as a new one, byte for byte.
+- None of the three changes what a diagram looks like, so nothing cached is compiled again for
+  them.
 
 ## 0.2.0 — 2026-10-13
 

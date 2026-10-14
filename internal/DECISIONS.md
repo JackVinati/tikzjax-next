@@ -1714,6 +1714,226 @@ same depth, and says nothing about a phone's stack. `TODO.md` has the note to re
 
 ---
 
+## D29 — TeX's calls into the host make no new arrays
+
+**Amends D10, under which the host's per-call code stayed as upstream wrote it. Date of record:
+2026-10-14.**
+
+TeX calls the host for every line it reads (`inputln`), every byte of a binary file (`get`) and
+every character of its transcript (`printChar`, twice when it prints to the terminal and the log).
+Each `inputln` made a view of TeX's buffer and two of its `first` and `last`, each `get` and `put` a
+view of the whole memory, and each `printChar` to a file an array of one byte: a pgfplots run reads
+some 60,000 lines and prints 18,000 characters, counted in the 0.2.x study's profile of
+`pgfplots-axis`. The views are now made once a run, in `setMemory`, and a character is appended
+where it was wrapped in an array of its own (`engine-src/library.ts` change 9).
+
+They answer as before, and fail as before: a RangeError wherever a view of the old kind would have
+refused one, which matters because a RangeError out of TeX is how the worker recognises a run cut
+off by the engine's stack. `test/library.test.ts` keeps `inputln` as it was and runs it beside the
+new one over empty, blank, long and over-long lines, into buffers that fit, end at `first`, are too
+small, misplaced or outside the memory, with `first` and `last` misaligned or one variable, and
+compares every byte of the memory after each call. Changing either new check, the one for a
+negative pointer or the one for a line that does not fit, fails it.
+
+**What it gains.** Measured on 2026-10-14 on the desktop of D27 (Windows 11, i9-13900K, 128 GiB),
+quiet at the start (9% CPU), with the 0.2.x study's harness as D27 measured: each build's worker as
+its `main.js` carries it, in a real Web Worker of Playwright 1.63's WebKit 26.6 and Chromium 153,
+and on Node 22.19's main thread; seven rounds, a fresh browser or process per build per round, the
+builds' order rotated; the 37 fixtures of 0.2.0's corpus twice each; TeX is the worker's own
+`texMs`, each fixture's minimum over the rounds, summed. Against the commit before, D28's:
+
+| TeX time, 37 fixtures | before | without the allocations | each round against before's |
+|---|---:|---:|---|
+| WebKit 26.6 | 2,832 ms | 2,723 ms (−3.8%) | −4.4% median, −3.9% to −5.2% |
+| Chromium 153 | 1,897 ms | 1,819 ms (−4.1%) | −5.1% median, −4.6% to −5.9% |
+| Node 22.19 | 2,295 ms | 2,197 ms (−4.3%) | −3.8% median, −1.8% to −5.0% |
+
+Every reply of the campaign was byte-identical to the golden corpus. Fewer allocations also means
+V8 collects less often during a run, which left more of the old per-run Memories uncollected at a
+time; D31 has that, and why it no longer matters.
+
+---
+
+## D30 — The engine starts from a payload the host sends it, and inflates it natively where it can
+
+**Amends D10, under which the build writes the engine's assets into the worker's script, and D18,
+which inflates the dump with pako. Date of record: 2026-10-14.**
+
+Until 0.2.1 the worker carried tex.wasm, the core dump and the 247 TeX files as 10,143,443
+characters of string literals, which every start parsed before it ran a line, and then decoded
+every TeX file, inflated the dump with pako, JavaScript's zlib, and compiled tex.wasm, one after
+another. The 0.2.x study timed the parts in WebKit and Chromium on the desktop: pako's inflate of
+the dump was 105 to 114 ms of a 192 to 205 ms start.
+
+- **The payload is data.** The worker's script is its 481,107 characters of code; tex.wasm, the
+  dump and the files, 9,669,247 characters of base64, go to the worker as the first message to each
+  worker the host starts (`engine-src/protocol.ts` EngineAssets), which starts from it and answers
+  `ready`. `main.js` holds the payload as an object beside the worker's code, instead of inside it.
+- **The platform's own gzip.** Both tex.wasm and the dump are inflated by `DecompressionStream`
+  where the platform has one (iOS and Safari 16.4, Chrome 80), read a chunk at a time into one
+  buffer of exactly the size the build recorded, and by pako where it has none. A native attempt
+  that fails for any reason falls back to pako once, so a platform that has the API and gets it
+  wrong costs time, not the start; a payload that is really wrong then fails in pako too.
+- **tex.wasm compiles while the dump inflates**, with `WebAssembly.compile`, which the platform
+  runs off the worker's thread.
+- **The TeX files stay base64** until TeX first opens one, which is then decoded and inflated, and
+  kept as before (D10's item 3).
+- **Without `Uint8Array.fromBase64`** (Safari before 18.2, Chromium before 140, so Obsidian's
+  desktop app before it is built on that, and Node 22), base64 is decoded four characters at a time
+  straight into the bytes, where `atob` made a string to copy out a character at a time. The study
+  measured the dump's decode at 15.2 → 9.1 ms in Chromium and 12.0 → 7.0 ms in WebKit, cold, with
+  the API hidden.
+- **ENGINE_ID** hashes the worker's code and then the payload, so it still moves with anything the
+  worker runs, a TeX file changed under its name among them (`test/engine-id.test.ts`).
+- **The diagnostics view** shows, beside each engine start, the worker's own breakdown from `ready`:
+  decode, inflate, what the compile added once the dump was ready, the total, and whether the
+  platform's gzip and base64 were used. On a phone, which iOS has which is what to read there.
+
+**A start that fails ends in the worker's error event**, as one always has (`worker-host.ts`
+`crashed`): the worker throws the failure again outside the promise, since a promise that rejects
+in a worker raises none, and the host would otherwise wait for a `ready` that never comes.
+`test/worker-boot.test.ts` starts the shipped worker on a thread of its own with the dump or
+tex.wasm changed, cut short, of the wrong size or missing, with and without the platform's
+decoders, and each ends in the error event. A changed and a cut dump do the same in Chromium 153 and
+WebKit 26.6, run with the study's harness on 2026-10-14: the error event, with pako's "incorrect
+data check" and "buffer error", each whole run taking 2.7 to 4.6 s with the browser's launch. `verify:worker` starts the
+worker as the host does, and runs a second time in CI and in the Engine workflow with `--legacy`,
+without `DecompressionStream` and `Uint8Array.fromBase64`, as on iOS 14.5 to 16.3.
+
+**What it gains.** The campaign of D29, the median of the seven rounds' engine starts, from the
+`Blob` on the main thread to `ready` arriving there, and the worker's own breakdown:
+
+| Engine start | before | this | in the worker: decode, inflate, compile |
+|---|---:|---:|---|
+| WebKit 26.6 | 145 ms (141–156) | 57 ms (56–59) | 3, 32, 1 ms |
+| Chromium 153 | 160 ms (158–162) | 51 ms (50–52) | 3, 31, 0 ms |
+| Node 22.19 | 155 ms (155–156) | 101 ms (90–105) | 13, 68, 0 ms |
+| WebKit, without the native decoders | 155 ms (153–157) | 114 ms (114–121) | 13, 80, 1 ms |
+| Chromium, without them | 174 ms (174–177) | 127 ms (127–128) | 14, 96, 1 ms |
+
+The two rows without them are seven more rounds the same day, with the harness hiding both APIs
+from the worker as `--legacy` does, a stand-in for iOS 14.5 to 16.3. The main thread's own share of a start,
+creating the worker and posting it the payload, went from 8 to 5 ms in WebKit and from 15.7 to 4.6
+ms in Chromium. Node 22 has no `Uint8Array.fromBase64`, so it decodes with the worker's own loop;
+it is not where the plugin runs. Nothing has been measured on a phone.
+
+**What it costs.** `main.js` grows by 2,081 B, the worker's start code. Chromium's working set
+right after a start is about 24 MiB higher (159 → 183 MiB, medians of the same campaign) and
+WebKit's 32 MiB lower (176 → 144).
+
+The study had also measured Chromium's private commit 281 MiB higher over a round with this build,
+and left the cause open. It is not the start, after which commit rose only 34 MiB (114 → 148 MiB): it
+is per-run Memories not yet collected, D29's fewer allocations giving V8 fewer reasons to collect.
+D31 measured it, and ends it.
+
+---
+
+## D31 — One memory per engine, and only what a run wrote is put back
+
+**Amends D18, under which every run starts from a new Memory with the dump's non-zero runs written
+into it. Date of record: 2026-10-14.**
+
+Every run of TeX took a new `WebAssembly.Memory` of 156.25 MiB with the dump written into it, and
+the old ones waited for the collector. Engines commit a Memory whole when it is made, and count
+every page a run touched as resident until it is freed. In the campaign of D29, the harness counted
+the Memories made and not yet collected (a `FinalizationRegistry` on each) at every reply: up to 5
+to 9 in Chromium 153 over a round of 85 renders, depending on the build, and up to 8 to 17 in
+WebKit 26.6, the engine of every iPhone. The content process committed a median of 3,139 MiB over
+such a round in WebKit, and its working set peaked at 679 MiB.
+
+**The 281 MiB.** That count explains what the 0.2.x study found and D30 inherited: Chromium's peak
+commit over a round rose 945 → 1,232 MiB with D29's change alone and to 1,372 with D30's (three
+rounds each, measured with the study's harness on 2026-10-14), while the most Memories alive at a
+reply rose 5 → 7 → 8, 156.25 MiB each. With a full collection forced after every reply
+(`--js-flags=--expose-gc`), three rounds each, both builds held 2 at most, and the build with D30
+committed less, 310 to 323 MiB against 480. It was garbage the collector had not got to: nothing
+leaked, and nothing about it was the start's.
+
+**What changes.** A worker keeps the Memory of its last run, and before the next one writes the
+dump's bytes back over only the parts that run can have written (`engine-src/reset.ts`):
+
+- every global of TeX's whole, but for its big arrays;
+- of those, the part TeX's own counters say is in use, since TeX never writes past them and they
+  only move outwards: `mem` up to `lo_mem_max` and from `hi_mem_min` to `mem_end`, `font_info` up to
+  `fmem_ptr` (only the engine's own fonts load, so none stops half-way), the hash table's primary
+  slots and from `hash_used` up, `save_stack` up to `max_save_stack` and the seven entries e-TeX
+  may write past a check for room, and `trie` up to `trie_max`;
+- the pattern arrays not at all: TeX refuses `\patterns` once a format is loaded;
+- `str_pool` and `str_start` up to the highest `pool_ptr` and `str_ptr` reached in the run, and the
+  shadow stack from the lowest point it reached to the top of the memory: three marks TeX does not
+  keep, which the engine now does (below);
+- the string literals after the globals, which nothing writes, as a guard;
+- whatever the host wrote into the memory (`library.ts` `hostWrites`): TeX's buffer and the file
+  variables `get` reads into, all among the globals.
+
+That is 26.5 to 27.3 MiB over the fixtures, in 14 stretches, and takes 2 ms a run in both browsers
+where a new Memory took 4 to 5, medians of the campaign. A run that jumped out of TeX, overflowed
+the engine's stack or trapped leaves a new Memory to the next, rather than trusting what it left
+behind, and so does a memory whose counters do not lie within their arrays. The diagnostics view
+says "new memory" for a diagram that took one, and "memory reset" for the rest.
+
+**Why the engine had to mark three things.** TeX's counters are where a run ended, not how far it
+went, for two arrays. A string TeX builds and then flushes, as `\detokenize`, `\meaning` and
+`\string` do, leaves its characters past where `pool_ptr` ends: `stress-plot-coordinates` leaves
+40,228 bytes there, a `\detokenize` of 10,400 characters 9,249, and `str_ptr` comes back down the
+same way. The snapshot prototype of the 0.2.x study bounded the pool at `pool_ptr` plus 4,096,
+which its 37 fixtures never exceeded, and `verify:reset` fails at once with that bound. Nothing
+records how far down the shadow stack went: 200 nested `\frac` take it 3,297 bytes below the top of
+the memory, 300 nested `\sqrt` 2,497 bytes, of which only the top 37 differ from the dump, so its
+contents cannot say how far a run went either, and six of the eighteen procedures that grow it are
+recursive.
+D27's code generator, ours, now keeps `getPoolPtrHigh`, `getStrPtrHigh` and `getStackLow`,
+WebAssembly globals each instance starts afresh: every store to `pool_ptr` and `str_ptr` raises its
+mark, and every growth of the stack lowers that one. Taking the address of either variable stops
+the build, since a write through it would not move the mark, and so does a `tex.wasm` without the
+three exports. The core dump, its layout and the TeX files come out byte-identical; `tex.wasm` grows
+from 236,378 to 238,195 bytes, 69,594 to 69,861 gzipped, and TeX's time does not move measurably
+(the campaign's two builds either side of the marks: WebKit 2,740 and 2,737 ms, Chromium 1,800 and
+1,811, Node 2,219 and 2,220). Two builds from a new image, `tikzjax-engine:v021-reset`, gave the
+same bytes.
+
+**The proof** is `npm run verify:reset`, in CI and in the Engine workflow. It runs the worker that
+ships over every fixture and five inputs the fixtures do not reach (the `\detokenize`, the
+`\frac`s, a stack overflow, a fatal error, two passes), in five orders shuffled from fixed seeds, a
+worker each. Before each run of TeX it compares the Memory the worker hands TeX with the dump, all
+163,840,000 bytes, which is what a new Memory holds; it requires a new Memory after a run that did
+not end normally and the worker's own after any other; and it requires the same reply for an input
+in every order, and a fixture's SVG to be the one smoke drew. On 2026-10-14: 250 runs, 211 on the
+worker's Memory, reset, 39 on a new one, every one equal. It fails when the pool is bounded at
+`pool_ptr` plus 4,096, `str_start` at `str_ptr`, `font_info` 600 entries short of `fmem_ptr`, or the
+stack at 64 bytes below the top, each tried. `verify:golden` now runs the corpus on one Memory too,
+38 of the 44 fixtures on the run before's, and `test/reset.test.ts` holds the stretches to the
+committed dump's counters and the writing back to the dump.
+
+**What it gains.** The campaign of D29, the content process's peak working set and private commit
+over the round, median (range) of the seven rounds, against D28's commit, before any of D29 to D31:
+
+| | peak working set | peak commit | most Memories alive at a reply |
+|---|---:|---:|---|
+| WebKit 26.6, before | 679 MiB (502–782) | 3,139 MiB (2,145–3,440) | 9 to 17 |
+| WebKit 26.6, one Memory | 423 MiB (405–471) | 1,755 MiB (1,533–1,786) | 7 to 8 |
+| Chromium 153, before | 344 MiB (322–346) | 1,099 MiB (943–1,102) | 5 to 6 |
+| Chromium 153, one Memory | 236 MiB (234–239) | 582 MiB (581–585) | 3 |
+
+Node 22.19's peak resident memory went 192 → 171 MiB. TeX's time does not change: the paired
+rounds against the commit before put the whole of D29 to D31 at −4.2% in WebKit, −5.5% in
+Chromium and −4.6% in Node, D29's gain. Every reply was byte-identical to the golden corpus.
+`main.js` grows by 4,492 B for the reset and the places of the 23 globals it reads. Nothing has
+been measured on a phone.
+
+**Not taken, for the maintainer to decide: trusting a run that jumped out of TeX.** The round's
+fixtures include five that end in a jump out of TeX, each rendered twice, so each round makes ten
+new Memories, and they are what WebKit still holds at a reply. A jump is TeX's own end of a fatal
+error (D17), at a point where its counters hold, and the marks are kept however the run ends: with
+the worker trusting it like a normal end, `verify:reset` passed with every Memory equal (240 runs
+on the worker's own, 10 new), and five rounds against this build, the same day, gave WebKit a peak
+commit of 662 MiB (635–665) against 1,752 (1,726–1,760), a working set of 301 against 423, and
+Chromium 323 against 582 MiB of commit. It is not taken because a jump is an exception through the
+engine, after which the design this follows takes a new Memory, and how often a real note's
+diagrams end that way has not been measured. `TODO.md` lists it as open.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

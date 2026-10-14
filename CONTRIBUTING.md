@@ -44,6 +44,8 @@ npm test               # unit tests; `npm run test:coverage` adds coverage and i
 npm run smoke          # every fixture through the engine, headless
 npm run verify:golden  # every fixture against the output recorded in test/fixtures/golden
 npm run verify:worker  # the exact worker string that goes into main.js
+npm run verify:worker -- --legacy  # the same, without DecompressionStream and Uint8Array.fromBase64
+npm run verify:reset   # the engine's memory, reset between runs, against a new one, byte for byte
 npm run build
 npm run scan:native -- --check   # about a minute
 ```
@@ -129,7 +131,12 @@ the sha256 of the one ours was written against, and stops if one has moved: movi
 means carrying its change into ours and updating the sum. binaryen 132's `wasm-opt` then optimises
 the engine. Values in WebAssembly locals take room on the JavaScript engine's own stack, which bounds
 how deep TeX can nest, so `verify:worker` requires a floor of nested `\number` to render and prints
-how deep they go (D28).
+how deep they go (D28). Our files also have the engine mark how far a run took `pool_ptr`, `str_ptr`
+and the shadow stack, which TeX itself does not record: the worker keeps one memory and, before each
+run, writes the core dump back over only what the run before can have written, found from those
+marks, TeX's own counters and `engine-build/out/memory-layout.json` (D31). `verify:reset` holds that
+to a new memory, byte for byte, before every run of every fixture in five orders; a change to the
+engine, to `engine-src/reset.ts` or to what the host writes into TeX's memory has to keep it passing.
 
 Building the image is the only step that touches the network: it pins the upstream sources by commit
 (`engine-build/pins.env`), the font archive by SHA-256 and binaryen by the integrity npm publishes
