@@ -37,6 +37,7 @@
     "verify:golden": "node scripts/verify-golden.mjs",
     "verify:worker": "node scripts/verify-worker.mjs",
     "verify:reset": "node scripts/verify-reset.mjs",
+    "verify:snapshot": "node scripts/verify-snapshot.mjs",
     "scan:native": "node scripts/scan-native-unicode.mjs",
     "engine:image": "docker build -t tikzjax-engine:apt --build-arg TEXLIVE=apt engine-build",
     "engine:image:latest": "docker build -t tikzjax-engine:net --build-arg TEXLIVE=net engine-build",

@@ -115,6 +115,14 @@ console.log(
  */
 const REPLY_WITHIN_MS = 60_000;
 
+/**
+ * What the plugin lets a computer's worker hold of saved runs (src/platform/budgets.ts), sent with every
+ * render as the host sends it, so that the fixtures run here as they run in the plugin: each saves at
+ * the end of its \begin{document} or starts from a run an earlier one saved (internal/DECISIONS.md
+ * D32). scripts/verify-snapshot.mjs holds a resumed run to one from the start.
+ */
+const SNAPSHOTS = 32 * 1024 * 1024;
+
 const send = (request) =>
 	new Promise((resolve, reject) => {
 		const before = inbox.length;
@@ -126,7 +134,7 @@ const send = (request) =>
 			else setTimeout(settle, 5);
 		};
 		try {
-			onmessage({ data: request });
+			onmessage({ data: { snapshots: SNAPSHOTS, ...request } });
 			settle();
 		} catch (e) {
 			reject(e);

@@ -46,6 +46,7 @@ npm run verify:golden  # every fixture against the output recorded in test/fixtu
 npm run verify:worker  # the exact worker string that goes into main.js
 npm run verify:worker -- --legacy  # the same, without DecompressionStream and Uint8Array.fromBase64
 npm run verify:reset   # the engine's memory, reset between runs, against a new one, byte for byte
+npm run verify:snapshot  # a diagram resumed from a saved preamble against one drawn from the start
 npm run build
 npm run scan:native -- --check   # about a minute
 ```
@@ -142,6 +143,16 @@ before can have written, found from those marks, TeX's own counters and
 `engine-build/out/memory-layout.json` (D31). `verify:reset` holds that to a new memory, byte for
 byte, before every run of every fixture in five orders; a change to the engine, to
 `engine-src/reset.ts` or to what the host writes into TeX's memory has to keep it passing.
+
+A diagram's first pass is saved at the end of its `\begin{document}`, where the format runs the
+engine's `\tikzjaxsnapshot` (`engine-build/changes/snapshot.ch`), and a later diagram with the same
+input up to there starts from it (D32). `\tikzjaxsnapshot` is the engine's own: a diagram that calls
+or redefines it gets no saved run, or one saved where it called it, never a wrong drawing. `npm run
+verify:snapshot` holds every fixture and every case in `scripts/snapshot-hazards.mjs`, resumed, to
+the same diagram from the start, in the engine and in the shipped worker, and does not read the
+golden corpus, so it still holds when that is recorded again for a new TeX Live. A new way for a
+preamble to learn something about the diagram after it, or a change to `engine-src/snapshot.ts` or
+to what the host keeps of a run (`library.ts` `captureHostState`), wants a hazard of its own there.
 
 Building the image is the only step that touches the network: it pins the upstream sources by commit
 (`engine-build/pins.env`), the font archive by SHA-256 and binaryen by the integrity npm publishes

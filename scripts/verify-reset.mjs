@@ -12,7 +12,11 @@
  *  - every fixture, and the inputs below that take TeX where the fixtures do not, in five orders,
  *    each shuffled from its own fixed seed, in a worker of its own;
  *  - before every run of TeX, the Memory the worker hands it is compared with the core dump, all
- *    163,840,000 bytes of it, which is what a new Memory holds;
+ *    163,840,000 bytes of it, which is what a new Memory holds; with saved runs on, as the plugin
+ *    sends every render (internal/DECISIONS.md D32), a first pass that resumes from a run an earlier
+ *    one saved at the end of its \begin{document} must be handed the dump with that run's globals,
+ *    as they stood when it was saved, and nothing else, so that the reset after a resumed run is held
+ *    to what the run and the saved run's stretches wrote as well;
  *  - a run that jumped out of TeX, overflowed the engine's stack or was cut off at a line longer
  *    than TeX's buffer must leave a new Memory to the next, and every other run its own, reset;
  *  - each input must get the same reply in every order, and each fixture the SVG smoke recorded;
@@ -194,6 +198,34 @@ function where(offset) {
 
 /** Every run of TeX in the order being checked: the Memory it was handed, and how that went. */
 let runs = [];
+
+/** The end of the last 4 KiB block that holds any of TeX's globals. */
+const globalsLimit = Math.ceil(layout.globalsEnd / 4096) * 4096;
+
+/** The blocks of 4 KiB of `memory` below `limit` that differ from the dump, each with a copy of its bytes. */
+function differingBlocks(memory, limit) {
+	const out = [];
+	for (let at = 0; at < limit; at += 4096) {
+		const end = Math.min(at + 4096, limit);
+		if (memory.subarray(at, end).equals(fresh.subarray(at, end))) continue;
+		out.push({ offset: at, bytes: Buffer.from(memory.subarray(at, end)) });
+	}
+	return out;
+}
+
+/** Where in a block of differingBlocks it first differs from the dump. */
+function firstDifference(block) {
+	for (let i = 0; i < block.bytes.length; i++) if (block.bytes[i] !== fresh[block.offset + i]) return i;
+	return 0;
+}
+
+/** Whether two lists of differingBlocks are the same blocks with the same bytes. */
+const sameBlocks = (a, b) =>
+	a.length === b.length &&
+	a.every((block, i) => block.offset === b[i].offset && block.bytes.equals(b[i].bytes));
+
+/** What a computer's worker may hold of saved runs (src/platform/budgets.ts), sent with every render. */
+const SNAPSHOT_BUDGET = 32 * 1024 * 1024;
 /** Whether the engine's marks throw when the worker reads them (the last check below). */
 let faultyMarks = false;
 const realInstantiate = WebAssembly.instantiate;
@@ -202,17 +234,11 @@ WebAssembly.instantiate = function (module, imports, ...rest) {
 	if (!(memory instanceof WebAssembly.Memory) || imports.library === undefined)
 		return realInstantiate.call(this, module, imports, ...rest);
 	const got = Buffer.from(memory.buffer);
-	let first = -1;
-	let blocks = 0;
-	if (!got.equals(fresh)) {
-		for (let at = 0; at < got.length; at += 65536) {
-			const end = Math.min(at + 65536, got.length);
-			if (got.subarray(at, end).equals(fresh.subarray(at, end))) continue;
-			blocks++;
-			for (let i = at; i < end && first < 0; i++) if (got[i] !== fresh[i]) first = i;
-		}
-	}
-	const run = { memory, equal: first < 0, first, blocks, abnormal: false };
+	// Where the Memory differs from the dump, in blocks of 4 KiB, with their bytes: nothing for a run
+	// from the start, and the saved run's stretches for one that resumes.
+	const differs = got.equals(fresh) ? [] : differingBlocks(got, got.length);
+	const first = differs.length === 0 ? -1 : differs[0].offset + firstDifference(differs[0]);
+	const run = { memory, differs, first, abnormal: false, saved: null };
 	runs.push(run);
 	// TeX's jump out of its program goes through the host's jumpOut (engine-src/library.ts), which
 	// is the one way a run ends that the reply does not always say.
@@ -220,6 +246,12 @@ WebAssembly.instantiate = function (module, imports, ...rest) {
 	library.jumpOut = (...a) => {
 		run.abnormal = true;
 		return imports.library.jumpOut(...a);
+	};
+	// At \tikzjaxsnapshot, TeX's globals as they stand, where they differ from the dump: what a run
+	// resumed from this one, if the worker keeps it, must be handed, and nothing else.
+	library.snapshotPoint = (...a) => {
+		if (run.saved === null) run.saved = differingBlocks(got, globalsLimit);
+		return imports.library.snapshotPoint(...a);
 	};
 	const instance = realInstantiate.call(this, module, { ...imports, library }, ...rest);
 	if (!faultyMarks) return instance;
@@ -255,9 +287,15 @@ async function startWorker() {
 		await new Promise((resolve) => setTimeout(resolve, 2));
 	if (!inbox.some((m) => m.type === 'ready')) throw new Error('the worker did not start');
 	let id = 0;
-	return (input) =>
+	return (input, snapshots = SNAPSHOT_BUDGET) =>
 		new Promise((resolve, reject) => {
-			const request = { type: 'render', id: ++id, source: input.source, options: input.options };
+			const request = {
+				type: 'render',
+				id: ++id,
+				source: input.source,
+				options: input.options,
+				snapshots,
+			};
 			const deadline = Date.now() + 120_000;
 			const settle = () => {
 				const reply = inbox.find(
@@ -289,13 +327,15 @@ const gist = (reply) =>
 
 let failures = 0;
 const replies = new Map();
-const totals = { runs: 0, reused: 0, fresh: 0, afterAbnormal: 0 };
+const totals = { runs: 0, reused: 0, fresh: 0, afterAbnormal: 0, resumed: 0 };
 
 for (let order = 1; order <= ORDERS; order++) {
 	const seed = 0x5eed0000 + order;
 	const list = shuffled(inputs, seed);
 	const send = await startWorker();
 	runs = [];
+	/** The globals of each run this worker saved, at \tikzjaxsnapshot (differingBlocks). */
+	const saves = [];
 	let orderFailures = 0;
 	const fail = (what) => {
 		orderFailures++;
@@ -315,16 +355,30 @@ for (let order = 1; order <= ORDERS; order++) {
 		)
 			mine[mine.length - 1].abnormal = true;
 
+		// A first pass that saved its run at \tikzjaxsnapshot, which later ones may resume from.
+		if (reply.timings?.saveMs !== undefined && mine[0]?.saved) saves.push(mine[0].saved);
+		const resumed = reply.timings?.resumed === true;
 		for (const run of mine) {
 			const previous = runs[runs.indexOf(run) - 1];
 			const reused = previous !== undefined && run.memory === previous.memory;
 			totals.runs++;
 			if (reused) totals.reused++;
 			else totals.fresh++;
-			if (!run.equal)
+			if (resumed && run === mine[0]) {
+				// The dump with the globals of a run the worker saved, as they stood when it was
+				// saved, and nothing else: whatever the run before wrote, and whatever the run this
+				// one resumes from had, was put back.
+				totals.resumed++;
+				if (!saves.some((saved) => sameBlocks(saved, run.differs)))
+					fail(
+						`${input.name}: resumed on a Memory that is not the dump with a saved run's globals: ` +
+							`${run.differs.length} block(s) of 4 KiB differ from the dump, first at byte ${run.first}, ` +
+							`in ${where(run.first)}`,
+					);
+			} else if (run.differs.length > 0)
 				fail(
-					`${input.name}: the Memory TeX was handed differs from a new one in ${run.blocks} ` +
-						`block(s) of 64 KiB, first at byte ${run.first}, in ${where(run.first)}`,
+					`${input.name}: the Memory TeX was handed differs from a new one in ${run.differs.length} ` +
+						`block(s) of 4 KiB, first at byte ${run.first}, in ${where(run.first)}`,
 				);
 			if (previous === undefined) continue;
 			// After a run that did not end normally, a new Memory; after any other, the worker's own.
@@ -372,11 +426,18 @@ for (let order = 1; order <= ORDERS; order++) {
 
 console.log(
 	`\n${totals.runs} runs of TeX: ${totals.reused} on the worker's Memory, reset, and ${totals.fresh} on a new ` +
-		`one, ${totals.afterAbnormal} of them after a run that did not end normally.`,
+		`one, ${totals.afterAbnormal} of them after a run that did not end normally; ${totals.resumed} ` +
+		`resumed from a run saved at the end of its \\begin{document}.`,
 );
 if (totals.reused === 0) {
 	failures++;
 	console.log('\x1b[31mFAIL\x1b[0m  no run reused a Memory: the reset was never exercised');
+}
+if (totals.resumed === 0) {
+	failures++;
+	console.log(
+		'\x1b[31mFAIL\x1b[0m  no run resumed from a saved run: the reset after one was never exercised',
+	);
 }
 
 // A fault in the reset's own bookkeeping, after TeX has ended well, must cost the next run a new
@@ -387,14 +448,14 @@ if (totals.reused === 0) {
 	const send = await startWorker();
 	runs = [];
 	faultyMarks = true;
-	const reply = await send(basic);
+	const reply = await send(basic, 0);
 	faultyMarks = false;
-	const next = await send(basic);
+	const next = await send(basic, 0);
 	// As smoke drew it where smoke has run, and as the run after it draws it in any case.
 	const asDrawn = (r) =>
 		r.type === 'ok' && r.svg.includes('<svg') && (basic.reference === null || r.svg === basic.reference);
 	const drawn = asDrawn(reply) && reply.svg === next.svg;
-	const renewed = runs.length === 2 && runs[1].memory !== runs[0].memory && runs[1].equal;
+	const renewed = runs.length === 2 && runs[1].memory !== runs[0].memory && runs[1].differs.length === 0;
 	const ok = drawn && renewed && asDrawn(next);
 	if (!ok) failures++;
 	console.log(
@@ -406,6 +467,7 @@ if (totals.reused === 0) {
 console.log(
 	failures
 		? `\n${failures} failure(s).`
-		: '\nEvery Memory TeX was handed equals a new one, byte for byte, and every input got the same reply in every order.',
+		: '\nEvery Memory TeX was handed equals a new one, byte for byte, or for a resumed run a new one with the ' +
+				'globals of the run it resumed from, and every input got the same reply in every order.',
 );
 process.exit(failures ? 1 : 0);

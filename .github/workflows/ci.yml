@@ -121,6 +121,15 @@ jobs:
         # the Memory TeX is handed must equal a new one, all 156.25 MiB of it.
         run: npm run verify:reset
 
+      - name: A diagram resumed from a saved preamble is the diagram drawn from the start
+        # The worker saves a first pass at the end of its \begin{document}, and later diagrams with the
+        # same preamble start from it (internal/DECISIONS.md D32). Every fixture and every hazard of
+        # scripts/snapshot-hazards.mjs, from the start, saved, resumed from its own run and from
+        # another's, in the engine and in the shipped worker: the DVI, the transcript, input.log and
+        # every reply field the same, byte for byte, and nothing saved where it may not be. It does not
+        # read the golden corpus, so it holds when that is recorded again.
+        run: npm run verify:snapshot
+
       - name: Build
         # The sha256 is printed, not just computed. A release asset has to match what anyone gets by
         # building the same commit — the community store checks exactly that — and this is where a
