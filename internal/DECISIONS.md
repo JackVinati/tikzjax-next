@@ -1910,8 +1910,9 @@ dump's bytes back over only the parts that run can have written (`engine-src/res
 
 That is 26.5 to 27.3 MiB over the fixtures, in 14 stretches, and takes 2 ms a run in both browsers
 where a new Memory took 4 to 5, medians of the campaign. A run that jumped out of TeX, overflowed
-the engine's stack or trapped leaves a new Memory to the next, rather than trusting what it left
-behind, and so does a memory whose counters do not lie within their arrays. So does a run whose
+the engine's stack, was cut off at a line longer than TeX's buffer (D29) or trapped leaves a new
+Memory to the next, rather than trusting what it left behind, and so does a memory whose counters
+do not lie within their arrays. So does a run whose
 reset bookkeeping fails once TeX has ended, and its diagram is drawn all the same: the worker works
 out what to keep in a try of its own, since an error there read as a run that wrote nothing ("TeX
 produced no output", with the marks made to throw), and a fault in the reset must cost a new
@@ -2031,14 +2032,14 @@ been measured on a phone.
 iPhone: across the reset its working set went 239 → 347 MiB and its commit 774 → 1,268 MiB, where
 it was 306 and 1,047 before D29. The ranges are wide and the sample falls wherever the collector
 happens to be, so this is not a proven regression, but the review of this release reproduced it in
-three paired rounds of its own (the 0.2.0 corpus twice each: 257, 235 and 235 MiB against 352, 349
-and 349). Most of it is the new Memories taken after the round's ten runs that jump out of TeX: in
-the five rounds of the trial below, trusting those runs left WebKit at 300 MiB and 659 MiB committed
-at the end of a round, against 337 and 1,232. A kept Memory also stays committed while its worker
-idles, 156.25 MiB a worker, until the idle stop: 30 s on a phone, 5 minutes on a computer, which can
-have two. Nothing has measured that. The end of a round is the figure nearest to what an idle
-iPhone holds, so the iPhone's memory check in `TODO.md` reads the memory once the diagrams have
-settled, not only at the peak.
+three paired rounds of its own (the 0.2.0 corpus twice each, working set after the last render:
+257, 235 and 235 MiB against 352, 349 and 349). Most of it is the new Memories taken after the
+round's ten runs that jump out of TeX: in the five rounds of the trial below, trusting those runs
+left WebKit at 300 MiB and 659 MiB committed at the end of a round, against 337 and 1,232. A kept
+Memory also stays committed while its worker idles, 156.25 MiB a worker, until the idle stop: 30 s
+on a phone, 5 minutes on a computer, which can have two. Nothing has measured that. The end of a
+round is the figure nearest to what an idle iPhone holds, so the iPhone's memory check in `TODO.md`
+reads the memory once the diagrams have settled, not only at the peak.
 
 **0.2.1 against 0.2.1-beta.1**, the figures the CHANGELOG gives: a campaign of seven rounds on
 2026-10-14, on the desktop of D27 and with the harness as D29 ran it, of 0.2.1-beta.1's published
