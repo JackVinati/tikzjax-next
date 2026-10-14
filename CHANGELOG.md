@@ -3,7 +3,7 @@
 What changed in each release, newest first. The release workflow puts a version's section at the
 top of its notes on GitHub, and will not publish a version that has none.
 
-## 0.2.1-beta.1 — 2026-10-14
+## 0.2.1-beta.2 — 2026-10-14
 
 - Updating from 0.2.0 recompiles only the diagrams that contain a character the engine has no font
   for, such as Chinese, Greek or Cyrillic, so that their labels show it (see the next point); every
