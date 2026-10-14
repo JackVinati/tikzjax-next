@@ -23,8 +23,9 @@ import type { JitProbe } from './protocol';
  *
  * What it costs the start: about half a millisecond with a JIT on the desktop, as it ends with the
  * first attempt that is not slow, and about three milliseconds an attempt without one, as each stops
- * at PROBE_SLOW_MS. It runs once tex.wasm is compiled, which in JavaScriptCore has already paid for
- * what the first WebAssembly module of a process costs, about 5 ms.
+ * at PROBE_SLOW_MS. Its module is compiled beside tex.wasm, off the worker's thread, which also pays
+ * there for what the first WebAssembly module of a process costs in JavaScriptCore, about 5 ms, and
+ * it runs once both are compiled (compileProbeAsync).
  */
 
 /**
@@ -75,9 +76,24 @@ export type Spin = (n: number, x: number) => number;
 
 /** The probe's function, compiled. Synchronously: the module is 68 bytes, and this is a worker. */
 export function compileProbe(): Spin {
-	const module = new WebAssembly.Module(Uint8Array.from(PROBE_WASM));
-	return (new WebAssembly.Instance(module).exports as { spin: Spin }).spin;
+	return spinOf(new WebAssembly.Module(Uint8Array.from(PROBE_WASM)));
 }
+
+/**
+ * The probe's function, compiled off the worker's thread, as tex.wasm is: what the worker starts
+ * beside tex.wasm's compile, so that only the warm-up call and the attempts run on its thread before
+ * `ready`. Compiled on it, with `new WebAssembly.Module`, the probe took WebKit's starts on a loaded
+ * desktop a median of 13 ms and up to 242, though each of its attempts took a millisecond at most
+ * (internal/DECISIONS.md D33). Undefined where the platform refuses the module.
+ */
+export function compileProbeAsync(): Promise<Spin | undefined> {
+	return WebAssembly.compile(Uint8Array.from(PROBE_WASM))
+		.then(spinOf)
+		.catch(() => undefined);
+}
+
+const spinOf = (module: WebAssembly.Module): Spin =>
+	(new WebAssembly.Instance(module).exports as { spin: Spin }).spin;
 
 /**
  * Time the loop, and say whether it ran as compiled code runs: see the top of this file. Undefined

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	compileProbe,
+	compileProbeAsync,
 	PROBE_ATTEMPTS,
 	PROBE_CALLS,
 	PROBE_SLOW_MS,
@@ -60,6 +61,12 @@ describe('the module the probe times', () => {
 		] as const) {
 			expect(spin(n, x), `${n} from ${x}`).toBe(lcg(n, x));
 		}
+	});
+
+	it('compiles off the thread to the same function, as the worker starts it beside tex.wasm', async () => {
+		const spin = await compileProbeAsync();
+		expect(spin?.(75_000, -123_456)).toBe(lcg(75_000, -123_456));
+		expect(probeJit(undefined, spin)).toMatchObject({ on: true });
 	});
 });
 

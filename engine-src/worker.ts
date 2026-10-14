@@ -42,7 +42,7 @@ import * as library from './library';
 import { describeConvertError } from './convert-error';
 import { buildInput, routeKey, routeOf } from './document';
 import { gunzipExactly } from './inflate';
-import { probeJit } from './jit';
+import { compileProbeAsync, probeJit } from './jit';
 import { checkCoreDump, packedLength, startingMemory, unpackCoreDump, type CoreDump } from './core-dump';
 import { restoreSpans, writtenSpans, type RunMarks, type Span } from './reset';
 import {
@@ -154,8 +154,9 @@ let coreDump: CoreDump | null = null;
  *    corruption that would surface much later as garbage output, so it fails here instead;
  *  - the bundled TeX files stay base64 text until TeX first asks for one, when that one is decoded
  *    and inflated, and library.ts keeps it inflated for the rest of the worker's life;
- *  - once tex.wasm is compiled, a loop of known cost is timed, to say whether WebAssembly runs with a
- *    JIT here, which Lockdown Mode on an iPhone turns off (./jit, internal/DECISIONS.md D33).
+ *  - a loop of known cost, compiled beside tex.wasm and off this thread too, is timed once both are
+ *    compiled, to say whether WebAssembly runs with a JIT here, which Lockdown Mode on an iPhone
+ *    turns off (./jit, internal/DECISIONS.md D33).
  */
 async function boot(assets: EngineAssets): Promise<BootTimings> {
 	const started = performance.now();
@@ -165,6 +166,8 @@ async function boot(assets: EngineAssets): Promise<BootTimings> {
 	// A failure is handled where the result is awaited, below; this keeps an early one from being
 	// reported as unhandled meanwhile.
 	compiled.catch(() => undefined);
+	// The JIT probe's module, compiled beside it, off this thread too (./jit).
+	const probe = compileProbeAsync();
 
 	const dumpGz = fromBase64(assets.dump);
 	const decoded = performance.now();
@@ -178,7 +181,8 @@ async function boot(assets: EngineAssets): Promise<BootTimings> {
 	coreDump = dump;
 	library.setBundledFiles(new Map(Object.entries(assets.files)), (b64: string) => ungzip(fromBase64(b64)));
 	const done = performance.now();
-	const jit = probeJit();
+	const spin = await probe;
+	const jit = spin === undefined ? undefined : probeJit(undefined, spin);
 
 	return {
 		decodeMs: Math.round(decoded - started),
