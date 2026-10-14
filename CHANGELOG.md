@@ -135,6 +135,20 @@ top of its notes on GitHub, and will not publish a version that has none.
   saves failed; Copy includes it.
 - The TeX engine is rebuilt with the point where a diagram is saved. Nothing draws differently, so
   nothing cached is compiled again.
+- The diagnostics view says whether TeX runs with the JIT compiler on your device: "on (probably)"
+  or "off (probably)". The engine times a short loop when it starts, which took a millisecond or less
+  with the JIT on a Windows desktop and stops after about 13 ms without it. Without the JIT, as with
+  Lockdown Mode on an iPhone or iPad, TeX is about twenty times slower; there the view says that
+  Lockdown Mode is the usual cause and how to exclude Obsidian from it, with a link to the README,
+  and a notice says so once, the first time the engine starts without the JIT. On that desktop, in
+  WebKit, Chromium and Node, idle and with every core busy, 425 starts with the JIT all said on and
+  53 without it all said off. Nothing has been measured on a phone yet.
+- When the `main.js` a device runs is not the version its `manifest.json` says, the plugin says so
+  once, with how to put it right, and the diagnostics view shows both versions. Obsidian Sync
+  Standard leaves a plugin like this when it carries installed plugins: it copies the new
+  `manifest.json` and not `main.js`, which is over its 5 MB limit, so the device shows the new
+  version and runs the old one. Only a `main.js` from this release on can tell; on a device whose
+  `main.js` is older, the README says what to do.
 
 ## 0.2.0 — 2026-10-13
 

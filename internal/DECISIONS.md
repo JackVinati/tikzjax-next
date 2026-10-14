@@ -2335,6 +2335,176 @@ before the corpus is recorded again (S9).
 
 ---
 
+## D33 — The engine says whether WebAssembly runs with a JIT, and an iPhone without one says why diagrams are slow
+
+**Extends D21's diagnostics and D30's `ready`. Date of record: 2026-10-14.**
+
+On the maintainer's iPhone with 0.2.0, read off the diagnostics view, a circuitikz diagram took
+7.3 s of TeX with Lockdown Mode on and 0.27 s with Obsidian excluded from it, and the engine started
+in 1.3 s instead of 0.13 s. Lockdown Mode runs Obsidian's web content without the JIT compiler, and
+the TeX engine with it. Nothing in a WebView says whether it has a JIT, and `navigator.userAgent`
+is out of bounds anyway (D21), so someone in that state saw slow diagrams and nothing to say why.
+
+**The probe** (`engine-src/jit.ts`). At the end of each start, once tex.wasm is compiled, the worker
+compiles a module of its own, 68 bytes of WebAssembly 1.0 with one function that takes a step of a
+linear congruential generator `n` times: a chain of dependent integer multiplies and adds that no
+compiler can shorten, whose result it returns. It calls it once for 2,000 steps, untimed, so that
+no attempt pays for the function's first compile, and then times attempts of 600,000 steps, each in
+8 calls of 75,000, by the worker's `performance.now()`. An attempt that reaches 3 ms before it is
+done stops there and is slow. The JIT is taken to be off when 4 attempts in a row are slow, and on
+at the first that is not. `ready` carries what it found in its BootTimings (`jit`: on or off, the
+fastest attempt, how many attempts, what the probe took).
+
+- **WebAssembly, not JavaScript**, because TeX is WebAssembly: whichever of an engine's compilers
+  is off, the probe says what TeX gets. JavaScriptCore with its WebAssembly compiler off and its
+  JavaScript ones on, below, is taken for without; with only its optimising JavaScript compiler
+  off, for with.
+- **After tex.wasm is compiled**, because in JavaScriptCore the first WebAssembly module of a
+  process costs more: in the calibration below, the probe's module took 4 to 5 ms to compile in the
+  first worker of each fresh WebKit with its JIT, and under a millisecond by its clock in every later
+  one. tex.wasm's compile, off the worker's thread, has paid that by then.
+- **Four attempts**, because an attempt the system takes the thread away from in the middle is
+  slow whatever the JIT does. With three, on the loaded desktop below, one start of 130 with the JIT
+  needed its third.
+
+**Calibration**, on the desktop of D27 (Windows 11, i9-13900K) on 2026-10-14, with Playwright 1.63's
+WebKit 26.6 and Chromium 153, and Node 22.19; each worker started from a Blob of its source, as the
+host starts one. The loop alone first, in nanoseconds a step, the fastest of five calls of at least
+8 ms, in fresh workers, two browsers or processes of two workers each:
+
+| | WebAssembly | the same loop in JavaScript |
+| --- | ---: | ---: |
+| Chromium 153 | 0.77–0.83 | 0.77–0.82 |
+| WebKit 26.6 | 0.78–0.86 | 0.78–0.86 |
+| Node 22.19 | 0.80–0.83 | 0.81–0.85 |
+| WebKit, `JSC_useJIT=false`, as Lockdown Mode runs it | 13.75–15 | 22.5–25 |
+| WebKit, `JSC_useBBQJIT=false`: WebAssembly interpreted | 13.75–15 | 0.78 |
+| WebKit, `JSC_useDFGJIT=false`: JavaScript's baseline compiler only | 0.78 | 8.75–10 |
+| Chromium, `--js-flags=--jitless` | no WebAssembly | 32–35.25 |
+| Node, `--jitless` | no WebAssembly | 21.94–23.69 |
+
+Interpreted, the loop is 16 to 19 times slower in WebAssembly. TeX lost more: in D32's campaigns
+circuitikz's second render took 8,659 ms of TeX in WebKit without the JIT, and 321 ms with it. V8 without its JIT has no WebAssembly at all, so the engine does
+not start there: the shipped worker in Node 22.19 with `--jitless` fails its start with
+"WebAssembly is not defined", before the probe.
+
+Then the shipped worker's own probe, at each of its starts, a fresh browser for each round and
+every worker terminated once ready; idle is the desktop as it was, with other work on it, and loaded
+is the same with 48 processes spinning on its 32 threads at normal priority:
+
+| starts of the shipped worker | with the JIT: said on | without it: said off | what the probe took |
+| --- | ---: | ---: | --- |
+| Chromium 153, idle | 50 of 50 | | 0.5–0.8 ms |
+| WebKit 26.6, idle | 50 of 50 | | 0–1 ms |
+| WebKit, idle, left to Windows' power throttling | 30 of 30 | | 0–1 ms |
+| WebKit, `JSC_useDFGJIT=false`, idle | 15 of 15 | | 0–1 ms |
+| Chromium and WebKit without the platform's decoders, idle | 30 of 30 | | 0.5–0.7 and 0–1 ms |
+| Node 22.19, idle | 10 of 10 | | 0.6–0.8 ms |
+| WebKit, `JSC_useJIT=false`, idle | | 20 of 20 | 12–13 ms |
+| WebKit, `JSC_useBBQJIT=false`, idle | | 12 of 12 | 12–13 ms |
+| WebKit, `JSC_useJIT=false`, without the platform's decoders, idle | | 9 of 9 | 12–14 ms |
+| Chromium 153, loaded | 100 of 100, one at its second attempt | | 0.8–6 ms |
+| WebKit 26.6, loaded | 100 of 100, four at their second | | 1–242 ms |
+| WebKit, loaded, left to power throttling | 30 of 30, one at its second | | 1–73 ms |
+| Chromium without the platform's decoders, loaded | 10 of 10 | | 0.8–1.1 ms |
+| WebKit, `JSC_useJIT=false`, loaded | | 12 of 12 | 12–16 ms |
+
+The loaded figures are of a build whose worker is this one byte for byte (the same ENGINE_ID); the
+hundreds of milliseconds there are the thread waiting for a processor, not the loop. With the JIT,
+the fastest attempt read 0.4 to 0.6 ms in Chromium idle and 1.8 at most loaded, and 0 or 1 ms in
+WebKit idle and 2 at most loaded: WebKit's clock moves a millisecond at a time in a page that is
+not cross-origin isolated, as Obsidian's is not. Without the JIT, every attempt reached the
+threshold.
+
+**The threshold** is 5 ns a step, or 3.3 where WebKit's clock reads 3 for anything over 2 ms.
+Compiled code would have to run the loop four times slower than this desktop does to come near it,
+and an interpreter almost three times faster than JavaScriptCore's here to stay under it. Where it
+is likeliest to be wrong is a slow Android phone, whose V8 runs the loop compiled but nobody has
+measured how slowly; so the diagnostics say "on (probably)" and "off (probably)", and only iOS acts
+on it (below).
+
+**What it costs the start.** With the JIT, under a millisecond in Chromium and Node and 0 to 1 ms by
+WebKit's clock, the start being 27 to 38 ms there; without, 12 to 16 ms, four attempts of about 3 ms,
+where the start without the JIT took 52 to 59 ms with the platform's gzip and base64 and 1,762 to
+1,794 ms without them. `main.js` grows by 2,615 bytes, 692 of them the probe in the worker and the
+rest what the view and the notice below say.
+
+**What it says.** The diagnostics view has a JIT line, "on (probably)", "off (probably)" or "not
+measured yet", from the latest engine to start that timed it, and each engine's line says what its
+probe found and took; Copy carries both. On iOS and iPadOS, when it is off, the view says that TeX
+runs without the JIT compiler there, about twenty times slower, that Lockdown Mode is the usual
+cause, and where to exclude Obsidian from it (Settings → Privacy & Security → Lockdown Mode →
+Configure Web Browsing), with a link to the README's answer. The first time an engine starts there
+without the JIT, a notice says the same once, and stays until it is tapped; `"jitNoticeShown": true`
+in `data.json` remembers it, and false shows it again. Not on Android: nothing a user knows of turns
+the JIT off there, and a slow phone is where the probe is likeliest to be wrong. Not on a computer,
+where Obsidian runs V8, which without its JIT has no WebAssembly and would not start the engine.
+
+**Not measured, and open.** No phone has run the probe. An iPhone with Lockdown Mode on has to say
+off, and with Obsidian excluded on, and the oldest iPhone and Android device at hand have to say on;
+`TODO.md` §9 has it. The desktop also suggests why the start took 1.3 s with Lockdown Mode: 0.2.0
+inflated the dump with pako, in JavaScript, which the interpreter runs, and here the start without
+the JIT took 1.8 s with pako and 0.05 s with the platform's gzip, which iOS has from 16.4. Whether
+0.2.1 starts faster under Lockdown Mode is for the phone to say.
+
+Tests: `test/jit.test.ts` (the module is WebAssembly 1.0 and takes the generator's steps; on at the
+first attempt with a JIT's speed, off only when every attempt is slow, each stopped at the
+threshold; on after one or two interrupted attempts; just over and just under the threshold; on in
+Node), `test/worker-boot.test.ts` (the shipped worker's `ready` carries it), `test/worker-host.test.ts`
+(the plugin hears of each start), `test/report.test.ts`, `test/debug-view.test.ts` and
+`test/notices.test.ts` (what is said, and only on iOS), and `test/readme.test.ts` (the README has the
+answer the link points to).
+
+---
+
+## D34 — main.js says which version it was built as, and a device Sync left an old one on says so
+
+**Date of record: 2026-10-14.**
+
+The maintainer's devices showed it on 2026-10-14: Obsidian Sync Standard caps a file at 5 MB, and
+with "Installed community plugins" on it copied a new `manifest.json` to another device and left the
+old `main.js`, about 12 MB, in place. Obsidian and BRAT read the version from `manifest.json`, so that
+device showed the new version, offered no update, and ran the old code. Nothing said so. The README
+says what to do; this makes the plugin say it.
+
+- **The build bakes the version in.** `scripts/plugin-version.mjs` reads `manifest.json`'s version,
+  and the build hands it to esbuild as the `define` for `__TIKZJAX_NEXT_VERSION__`, which
+  `src/platform/version.ts` reads; the minified `main.js` holds it as a string literal. Nothing but
+  `manifest.json` goes into it, so a commit still builds to the same bytes.
+- **The plugin compares it at load** with `this.manifest.version`, which Obsidian reads from the
+  `manifest.json` beside it, right after its settings are loaded. When they differ, a notice says
+  which version each is, that Obsidian Sync Standard leaves a plugin so, and how to put it right:
+  reinstall the plugin on that device, with BRAT's "Choose a single plugin to reinstall" or by
+  uninstalling it and installing it again from the community store, and with Sync Standard, turn
+  off "Installed community plugins". It links to the README's answer and stays until it is tapped.
+  Either way round warns: an old `manifest.json` beside a new `main.js` too.
+- **Once for each pair.** `data.json` keeps the pair it was shown for, `"outOfStepNoticeShown":
+  "0.2.1-beta.3 → 0.2.1"` (`main.js`'s version first), so it is not shown at every start, and is
+  shown again when the pair changes. Not in the app's `localStorage`, which would be this device's
+  alone: `App#saveLocalStorage` came in Obsidian 1.8.7, above the floor of 1.7.2 (D6), and the
+  store's rules flag `localStorage` itself. `data.json` is synced with the plugin, so a second device
+  out of step in the same way is not told again; its diagnostics view still says so.
+- **The diagnostics view** has the plugin's version by `manifest.json` and the version `main.js` was
+  built as, and when they differ, what the notice says. Copy carries both, as `Plugin: 0.2.1, main.js
+  0.2.1-beta.3, out of step: reinstall the plugin on this device`.
+- **A normal build never warns**: `test/version.test.ts` builds `src/platform/version.ts` with the
+  build's own `define` and holds what it gives to `manifest.json`'s version, and the release workflow
+  already refuses a tag that is not the manifest's version, from whose commit `main.js` is built.
+
+**What it cannot do.** Only a `main.js` that has this can tell, so a device whose `main.js` is
+0.2.1-beta.2 or older says nothing, however far behind it is: the first update it can tell about is
+the one after 0.2.1-beta.3, or after 0.2.1 for someone on the store. Nor can the plugin put it right
+itself: that would mean fetching its own release, and the plugin makes no network request
+(CONTRIBUTING.md).
+
+`main.js` grows by 1,652 bytes.
+
+Tests: `test/version.test.ts`, `test/notices.test.ts` (once per pair; never for the same version or
+an unknown one), `test/report.test.ts`, `test/debug-view.test.ts`, `test/settings.test.ts` and
+`test/readme.test.ts`.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

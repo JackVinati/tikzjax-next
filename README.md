@@ -553,23 +553,27 @@ cable; then in Safari on the Mac, Develop → the device → the Obsidian window
 report on the original repository is untriageable for want of this paragraph, so if you are filing
 one, this is how to get something worth attaching.
 
-<a id="lockdown-mode"></a>**Diagrams are very slow on my iPhone or iPad.** See whether Lockdown Mode is on: Settings →
-Privacy & Security → Lockdown Mode. It runs Obsidian's web content without the JIT compiler, and
-the TeX engine with it, which costs a factor of about twenty. On my iPhone with 0.2.0, a circuitikz
-diagram took 7.3 s of TeX with Lockdown Mode on and 0.27 s with Obsidian excluded from it, and the
-engine started in 1.3 s instead of 0.13 s. Lockdown Mode can stay on for everything else: under
-Configure Web Browsing in its settings you can exclude Obsidian alone, then restart Obsidian. The
-exclusion takes Lockdown Mode's protection away from Obsidian's web content, so whether it is worth
-it is your call.
+<a id="lockdown-mode"></a>**Diagrams are very slow on my iPhone or iPad.** See whether Lockdown
+Mode is on: Settings → Privacy & Security → Lockdown Mode. It runs Obsidian's web content without
+the JIT compiler, and the TeX engine with it, which costs a factor of about twenty. On my iPhone
+with 0.2.0, a circuitikz diagram took 7.3 s of TeX with Lockdown Mode on and 0.27 s with Obsidian
+excluded from it, and the engine started in 1.3 s instead of 0.13 s. Lockdown Mode can stay on for
+everything else: under Configure Web Browsing in its settings you can exclude Obsidian alone, then
+restart Obsidian. The exclusion takes Lockdown Mode's protection away from Obsidian's web content,
+so whether it is worth it is your call. Since 0.2.1 the diagnostics view says whether TeX runs with
+the JIT, "on (probably)" or "off (probably)", and an iPhone or iPad without it says so once, the
+first time the engine starts.
 
-<a id="out-of-step"></a>**After an update, another device shows the new version but nothing changed.** Obsidian Sync
-Standard does not copy a file over 5 MB, and `main.js` is about 12 MB. When Sync carries your
-installed plugins, the other device gets the new `manifest.json`, which names the new version, and
-keeps the old `main.js`; Obsidian and BRAT then see the new version number and offer no update. With
-Sync Standard, turn off "Installed community plugins" in Sync's settings and update the plugin on
-each device. To repair a device already in this state, reinstall the plugin there: with BRAT, its
-"Choose a single plugin to reinstall"; from the community store, uninstall it and install it again,
-which also resets its settings on that device.
+<a id="out-of-step"></a>**After an update, another device shows the new version but nothing changed.**
+Obsidian Sync Standard does not copy a file over 5 MB, and `main.js` is about 12 MB. When Sync
+carries your installed plugins, the other device gets the new `manifest.json`, which names the new
+version, and keeps the old `main.js`; Obsidian and BRAT then see the new version number and offer
+no update. With Sync Standard, turn off "Installed community plugins" in Sync's settings and update
+the plugin on each device. To repair a device already in this state, reinstall the plugin there:
+with BRAT, its "Choose a single plugin to reinstall"; from the community store, uninstall it and
+install it again, which also resets its settings on that device. Since 0.2.1 a device in this state
+says so once, and the diagnostics view shows both versions, but only when its `main.js` is 0.2.1 or
+later: an older one cannot tell.
 
 **Where can I ask something, or suggest a feature?** In
 [Discussions](https://github.com/JackVinati/tikzjax-next/discussions):
