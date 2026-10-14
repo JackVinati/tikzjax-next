@@ -121,10 +121,11 @@ export interface BlockDeps {
 	/**
 	 * Start the engine, if none is running or starting, without waiting for it. Called when the
 	 * cache misses, so that the engine's start runs while the block waits for the viewport gate and
-	 * its turn in the queue rather than after them (internal/DECISIONS.md D23). Omitted: the engine
-	 * starts when the queue hands it the first job.
+	 * its turn in the queue rather than after them (internal/DECISIONS.md D23), with the block's own
+	 * document, whose visibility says whether anyone can see it. Omitted: the engine starts when the
+	 * queue hands it the first job.
 	 */
-	startEngine?: (() => void) | undefined;
+	startEngine?: ((doc: Document) => void) | undefined;
 	now: () => number;
 	report?: ((outcome: BlockOutcome) => void) | undefined;
 }
@@ -416,7 +417,7 @@ export class TikzBlock extends MarkdownRenderChild {
 		// start runs while the block waits for that. A diagram that waits for a button press does not
 		// start it. One engine at most is started this way, and the host stops it when it has been
 		// idle for its budget, which is what happens to one started for a diagram never scrolled to.
-		if (lazy !== 'manual') this.deps.startEngine?.();
+		if (lazy !== 'manual') this.deps.startEngine?.(this.body.doc);
 		this.dispatch({
 			type: 'miss',
 			isExport: this.spec.isExport,

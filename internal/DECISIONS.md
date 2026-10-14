@@ -1286,7 +1286,8 @@ allowance gave up on a start that never finished, and one started early has no j
   0.2.0's worker, measured in Node 22 by the 0.2.x boot study, and the start's CPU.
 - **Never in the background.** On a phone the app going to the background stops the engine and
   pauses the queue so that nothing starts another (main.ts `registerTeardown`); the early start is
-  not the queue, so it checks `document.visibilityState` itself.
+  not the queue, so it checks the visibility itself, of the block's own document: on a desktop the
+  main window can be minimized while a pop-out window shows the note.
 - **What it costs.** Creating the worker takes the main thread 9–11 ms in WebKit and 19–21 ms in
   Chromium on the desktop, with 0.2.0's worker (the 0.2.x boot study), which the first job used to
   pay at the same moment of its life anyway.

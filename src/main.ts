@@ -164,9 +164,11 @@ export default class TikzjaxNextPlugin extends Plugin {
 				editing: (notePath) => edits.editing(notePath),
 				// At the first diagram that is not cached, never at load: a session that only shows
 				// cached diagrams never pays for an engine. Never in the background either, where the
-				// mobile teardown has just stopped one and paused the queue so that none starts.
-				startEngine: () => {
-					if (document.visibilityState === 'hidden') return;
+				// mobile teardown has just stopped one and paused the queue so that none starts. The
+				// block's own document, not the main window's: on a desktop the main window may be
+				// minimized while a pop-out window shows the note.
+				startEngine: (doc) => {
+					if (doc.visibilityState === 'hidden') return;
 					this.host?.ready().catch(() => undefined);
 				},
 				onBlock: (spec, el) => {

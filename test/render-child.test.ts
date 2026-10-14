@@ -1065,6 +1065,19 @@ describe('the engine started ahead of the first job', () => {
 		child.onunload();
 	});
 
+	it("is asked with the block's own document, whose visibility is what counts", async () => {
+		// A pop-out window shows the note while the main window is minimized, hidden: the block in
+		// the pop-out is in view, and its document says so.
+		const popout = document.implementation.createHTMLDocument('pop-out');
+		const el = popout.body.appendChild(popout.createElement('div'));
+		const startEngine = vi.fn();
+		const child = new TikzBlock(el, spec(), deps({ startEngine, observe: () => undefined }));
+		child.onload();
+		await vi.waitFor(() => expect(startEngine).toHaveBeenCalledTimes(1));
+		expect(startEngine).toHaveBeenCalledWith(popout);
+		child.onunload();
+	});
+
 	it('is not started for a diagram from the cache', async () => {
 		const startEngine = vi.fn();
 		const child = new TikzBlock(
