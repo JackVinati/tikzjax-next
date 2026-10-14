@@ -162,6 +162,8 @@ export class TikzBlock extends MarkdownRenderChild {
 	 */
 	private seenAt: number | null = null;
 	private submittedAt: number | null = null;
+	/** When the cache missed, which is "seen" for a block the viewport gate gives up on. */
+	private missedAt: number | null = null;
 	private pipelineEndAt: number | null = null;
 
 	constructor(containerEl: HTMLElement, spec: TexJobSpec, deps: BlockDeps) {
@@ -279,9 +281,10 @@ export class TikzBlock extends MarkdownRenderChild {
 			case 'observe':
 				this.deps.observe(this.body, (visible, escaped) => {
 					// The gate gave up waiting for a record: the lowest band, no debounce. Taken for
-					// plain visibility, it went in with the diagrams the reader was looking at.
+					// plain visibility, it went in with the diagrams the reader was looking at. Seen
+					// at its cache miss, so that its `waited` holds the time the gate waited.
 					if (escaped) {
-						this.seen();
+						this.seenAt = this.missedAt ?? this.deps.now();
 						this.dispatch({ type: 'noRecordsAfter2s' });
 						return;
 					}
@@ -411,8 +414,9 @@ export class TikzBlock extends MarkdownRenderChild {
 		}
 
 		const lazy = this.spec.options.presentation.lazy ?? 'on';
+		this.missedAt = this.deps.now();
 		// A block that skips the viewport gate is as seen as it will ever be.
-		if (this.spec.isExport || lazy === 'off') this.seen();
+		if (this.spec.isExport || lazy === 'off') this.seenAt = this.missedAt;
 		// Not cached, so it will be compiled once it has been seen: start the engine now, so that its
 		// start runs while the block waits for that. A diagram that waits for a button press does not
 		// start it. One engine at most is started this way, and the host stops it when it has been

@@ -1279,6 +1279,29 @@ describe('what a block reports when it comes to rest', () => {
 		]);
 	});
 
+	it("a diagram the viewport gate gave up on: waited from its cache miss, so the gate's wait is in it", async () => {
+		const { reports, report } = reporting();
+		let now = 100;
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({
+				queue: answering({ svg: SVG, log: [], durationMs: 42 }),
+				now: () => now,
+				report,
+				// Missed at 100; no record ever came, and the gate gave up two seconds later.
+				observe: (_el, onChange) => {
+					now += 2000;
+					onChange(true, true);
+				},
+			}),
+		);
+		child.onload();
+		await child.settled;
+		await vi.waitFor(() => expect(reports).toHaveLength(2));
+		expect(reports[0]?.timings?.waitedMs).toBe(2000);
+	});
+
 	it('a diagram from a cache: no timings, since nothing was compiled', async () => {
 		const { reports, report } = reporting();
 		const child = new TikzBlock(container(), spec(), deps({ cache: fakeCache(artifact(SVG)), report }));
