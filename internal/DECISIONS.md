@@ -1163,11 +1163,14 @@ the one with a `<g/>`, were those with Chinese in a `text width` node, now wrapp
 without `text width`, maths, Korean and text outside the picture came out byte for byte the same.
 `unicode-wrap` in the golden corpus holds the breaks, and verify-worker the text of each line.
 
-What it costs, measured in Node 22.19 on the Windows desktop of D14 through the worker, the shortest
-TeX time of three runs, against the same nodes holding as many `M`s: 1,000 different CJK characters
-in 20 nodes, 140 ms against 85; 3,000 in 60 nodes, 352 against 204; 6,000 in 120 nodes, 683 against
-370; 250 nodes of the same two characters, 742 against 725. Finding the characters in 147 KB of
-source takes 0.8 ms, and writing back the flowchart fixture's 21 markers 0.04 ms.
+What it costs, measured in Node 22.19 on the Windows desktop of D14 through the worker with the line
+breaks above, the shortest of three runs, against the same nodes holding as many `M`s, as TeX's
+time, the SVG converter's, and the worker's whole run up to the converter's SVG: 1,000 different CJK
+characters in 20 nodes, 127 ms against 73, 22 against 2, and 157 against 80; 3,000 in 60 nodes, 355
+against 190, 45 against 5, and 407 against 199; 6,000 in 120 nodes, 666 against 358, 81 against 10,
+and 754 against 373, about twice the time; 250 nodes of the same two characters, 714 against 692, 19
+against 13, and 738 against 712. Finding the characters in 147 KB of source takes 0.8 ms, and
+writing back the flowchart fixture's 21 markers 0.04 ms.
 
 `unicode-bridge-probe`, the flowchart of the report the pull request began with, and
 `unicode-names`, names in Chinese and Greek beside labels in Chinese and Cyrillic, are in the golden
