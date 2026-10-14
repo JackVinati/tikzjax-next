@@ -65,8 +65,9 @@ export function saveSpans(
  * it is kept alive by a saved run.
  *
  * The pieces start on a block, as saveSpans gives them, and the dump's runs on 8 bytes, as the
- * build packs them, so both sides are read a word at a time; a run that is not, from a dump packed
- * some other way, is read a byte at a time, which gives the same stretches more slowly.
+ * build packs them, so both sides are read a word at a time. A run that is not, from a dump packed
+ * some other way, is read a byte at a time, and so are the bytes of a word that lies partly in it
+ * and partly in the zeros beside it, which gives the same stretches more slowly.
  */
 export function diffAgainstDump(pieces: readonly Stretch[], dump: CoreDump): Stretch[] {
 	const runs = dump.runs;
@@ -120,11 +121,10 @@ function blockDiffers(
 	let k = r;
 	while (p < end) {
 		const run = runs[k];
-		if (run === undefined || run.offset >= end)
-			return anyNonZero(m, (s + p - at) >>> 2, (s + BLOCK) >>> 2);
+		if (run === undefined || run.offset >= end) return anyByteNonZero(src, m, s + p - at, s + BLOCK);
 		if (run.offset > p) {
 			// Zero in the dump up to the run.
-			if (anyNonZero(m, (s + p - at) >>> 2, (s + run.offset - at) >>> 2)) return true;
+			if (anyByteNonZero(src, m, s + p - at, s + run.offset - at)) return true;
 			p = run.offset;
 		}
 		const q = Math.min(end, run.offset + run.bytes.length);
@@ -149,6 +149,24 @@ function blockDiffers(
 		p = q;
 		k++;
 	}
+	return false;
+}
+
+/**
+ * Whether any of bytes [from, to) of `src` is not zero: the words that lie whole within them a word
+ * at a time, `m` being `src` as words, and the bytes of a word cut by either end one by one. A word
+ * cut by an end lies partly outside, in a run of the dump's where it starts or ends off a word, and
+ * read whole it would be compared with zero there, or be left out.
+ */
+function anyByteNonZero(src: Uint8Array, m: Int32Array, from: number, to: number): boolean {
+	let i = from;
+	for (; i < to && (i & 3) !== 0; i++) if (src[i] !== 0) return true;
+	const whole = to - (to & 3);
+	if (i < whole) {
+		if (anyNonZero(m, i >>> 2, whole >>> 2)) return true;
+		i = whole;
+	}
+	for (; i < to; i++) if (src[i] !== 0) return true;
 	return false;
 }
 

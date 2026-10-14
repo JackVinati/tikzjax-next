@@ -152,6 +152,29 @@ describe('what a save keeps', () => {
 		expect(byWords.map((s) => s.offset)).toEqual([256, 1280, 1792]);
 	});
 
+	it('reads the bytes of a word cut by either end of a run of the dump one by one', () => {
+		const size = 4 * BLOCK;
+		const spans: Span[] = [[0, size]];
+		/** The dump of one run of 7s over [from, to), and what a save keeps of it with `changed` set. */
+		const kept = (from: number, to: number, changed: number | null): number[] => {
+			const image = new Uint8Array(size);
+			image.fill(7, from, to);
+			const one: CoreDump = { size, runs: [{ offset: from, bytes: image.slice(from, to) }] };
+			const memory = new Uint8Array(image);
+			if (changed !== null) memory[changed] = 5;
+			return diffAgainstDump(pieces(memory, spans), one).map((s) => s.offset);
+		};
+		// A run that starts off a word: a byte changed in the zeros of the word it starts in is kept.
+		expect(kept(299, 400, null)).toEqual([]);
+		expect(kept(299, 400, 297)).toEqual([256]);
+		expect(kept(299, 400, 298)).toEqual([256]);
+		// One that ends off a word: the word it ends in is not taken for a change, and a byte changed
+		// in the zeros after it is kept.
+		expect(kept(300, 401, null)).toEqual([]);
+		expect(kept(300, 401, 401)).toEqual([256]);
+		expect(kept(300, 401, 403)).toEqual([256]);
+	});
+
 	it('is refused for a piece that is not whole blocks', () => {
 		expect(() => diffAgainstDump([{ offset: 10, bytes: new Uint8Array(BLOCK) }], dump)).toThrow();
 	});
