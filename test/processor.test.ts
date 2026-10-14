@@ -514,6 +514,48 @@ describe('an error TeX found in a preamble file', () => {
 		});
 	}
 
+	/**
+	 * A preamble file whose last line is a comment and that ends without a newline: what the worker
+	 * and the plugin write after it, the `\standaloneconfig` of `border=` and `\begin{document}`, goes
+	 * on a line of its own, where TeX reads it, and not on the comment's (internal/DECISIONS.md D35).
+	 */
+	for (const directives of ['%!tikz lazy=off', '%!tikz lazy=off border=2pt']) {
+		it(`writes nothing of its own on a comment the preamble ends with (${directives})`, async () => {
+			const app = fakeApp({ 'tikz-preamble.tex': '\\usepackage{amsmath}\n% end of preamble' });
+			let text = '';
+			const submit = vi.fn(
+				(
+					_key: string,
+					job: TexJobSpec,
+					_band: number,
+					_timeout: number,
+					opts?: { onStart?: () => void },
+				) => {
+					opts?.onStart?.();
+					text = buildInput(job.source, job.texOptions).text;
+					return Promise.reject(new TexError('tex-error', [], 'stop', 1));
+				},
+			);
+			const { deps, seen } = processorDeps(
+				{
+					queue: { submit, release: () => undefined } as never,
+					budgets: { ...budgetsFor(false), debounceMs: 0 },
+				},
+				app,
+			);
+			const { settled } = await processBlock(deps, seen, `${directives}\n${SOURCE}`);
+			await settled;
+			const lines = text.split('\n');
+			const comment = lines.indexOf('% end of preamble');
+			expect(comment).toBeGreaterThan(-1);
+			expect(lines[comment + 1]).toMatch(
+				directives.includes('border')
+					? /^\\standaloneconfig\{border=2pt\}\\begin\{document\}$/
+					: /^\\begin\{document\}$/,
+			);
+		});
+	}
+
 	it('leaves a block with no preamble files nothing to look up', async () => {
 		const { deps, seen } = processorDeps();
 		const { spec } = await processBlock(deps, seen, SOURCE, { load: false });

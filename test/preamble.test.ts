@@ -230,7 +230,8 @@ describe('nesting', () => {
 
 		const resolved = await resolve(vault, { blockPath: 'base.tex' });
 
-		expect(resolved.text).toBe('%:inputs child.tex');
+		// A comment, which as the last line of the preamble ends with a newline (below).
+		expect(resolved.text).toBe('%:inputs child.tex\n');
 		expect(resolved.diagnostics).toEqual([]);
 	});
 });
@@ -525,6 +526,55 @@ describe('where each line came from', () => {
 
 	it('is empty when there is no preamble', async () => {
 		expect((await resolve(new FakeVault({}))).lines).toEqual([]);
+	});
+});
+
+/*
+ * The worker writes its own `\begin{document}`, and a block's `\standaloneconfig`, on the end of the
+ * preamble's last line (engine-src/document.ts). A preamble file saved without a newline at its end,
+ * as VS Code saves one, whose last line is a comment, had both taken for the rest of the comment, and
+ * every block under it drew "Missing \begin{document}" (internal/DECISIONS.md D35).
+ */
+describe('a preamble whose last line is a comment', () => {
+	it('ends with a newline, and the line it adds is the file’s next', async () => {
+		const vault = new FakeVault({ 'notes/pre.tex': '\\usepackage{amsmath}\n% end of preamble' });
+		const resolved = await resolve(vault, { inputs: ['pre.tex'] });
+		expect(resolved.text).toBe('\\usepackage{amsmath}\n% end of preamble\n');
+		expect(resolved.lines).toEqual([
+			{ path: 'notes/pre.tex', line: 1 },
+			{ path: 'notes/pre.tex', line: 2 },
+			{ path: 'notes/pre.tex', line: 3 },
+		]);
+		expect(resolved.lines).toHaveLength(resolved.text.split('\n').length);
+	});
+
+	it('is the last line of all of it: a comment an included file ends with, or a comment after code', async () => {
+		const vault = new FakeVault({
+			'notes/a.tex': '\\def\\a{1}\n%:input b.tex',
+			'notes/b.tex': '\\def\\b{2} % b',
+			'notes/c.tex': '% c\n\\def\\c{3}',
+		});
+		expect((await resolve(vault, { inputs: ['a.tex'] })).text).toBe('\\def\\a{1}\n\\def\\b{2} % b\n');
+		// A comment on an earlier line, or in an earlier file, ends at the newline after it already.
+		expect((await resolve(vault, { inputs: ['b.tex', 'c.tex'] })).text).toBe(
+			'\\def\\b{2} % b\n% c\n\\def\\c{3}',
+		);
+	});
+
+	it('is left as it is when the % is escaped, or when the file ends in a newline already', async () => {
+		const vault = new FakeVault({
+			'notes/pct.tex': '\\newcommand\\pc{50\\%}',
+			'notes/slashes.tex': '\\def\\x{\\\\\\%}',
+			'notes/done.tex': '% done\n',
+			'notes/line.tex': '\\def\\y{1}\\\\% a comment after \\\\',
+		});
+		expect((await resolve(vault, { inputs: ['pct.tex'] })).text).toBe('\\newcommand\\pc{50\\%}');
+		expect((await resolve(vault, { inputs: ['slashes.tex'] })).text).toBe('\\def\\x{\\\\\\%}');
+		expect((await resolve(vault, { inputs: ['done.tex'] })).text).toBe('% done\n');
+		// `\\` and then a comment.
+		expect((await resolve(vault, { inputs: ['line.tex'] })).text).toBe(
+			'\\def\\y{1}\\\\% a comment after \\\\\n',
+		);
 	});
 });
 

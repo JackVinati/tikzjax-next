@@ -1,3 +1,4 @@
+import { commentStart } from '../../engine-src/comment';
 import type { Diagnostic } from '../types';
 
 /**
@@ -137,8 +138,21 @@ export async function resolvePreamble(
 	const deps = [...ctx.hashes.keys()].sort();
 	const depHashes = deps.map((path) => `${path}:${ctx.hashes.get(path) ?? ''}`).sort();
 
+	// A preamble whose last line is a comment, from a file saved without a newline at its end, ends
+	// with one. What the worker writes next goes on that line, `\standaloneconfig` and its own
+	// `\begin{document}` (engine-src/document.ts), and TeX took it for the rest of the comment:
+	// every block drew "Missing \begin{document}" instead of its diagram. The newline is in the text,
+	// and so in the key (cache/key.ts), so that exactly those blocks compile again, as from a file
+	// that ended in one; the line it adds is the file's next, as such a file's would be.
+	let text = parts.join('\n');
+	const last = lines[lines.length - 1];
+	if (last !== undefined && commentStart(text.slice(text.lastIndexOf('\n') + 1)) >= 0) {
+		text += '\n';
+		lines.push({ path: last.path, line: last.line + 1 });
+	}
+
 	return {
-		text: parts.join('\n'),
+		text,
 		lines,
 		deps,
 		depHashes,
