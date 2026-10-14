@@ -3,7 +3,7 @@
 What changed in each release, newest first. The release workflow puts a version's section at the
 top of its notes on GitHub, and will not publish a version that has none.
 
-## 0.2.1 — unreleased
+## 0.2.1-beta.1 — 2026-10-14
 
 - Updating from 0.2.0 recompiles nothing: every diagram 0.2.0 cached is shown from the cache, as
   before. Updating from 0.1.x compiles every cached diagram once more, the next time it is shown, as
