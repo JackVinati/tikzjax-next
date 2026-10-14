@@ -1,13 +1,16 @@
 import { WORKER_SOURCE, ENGINE_ASSETS, ENGINE_ID, ENGINE_INVENTORY } from 'virtual:engine';
+import { buildInput, routeOf } from '../../engine-src/document';
 import type {
 	BootTimings,
 	EngineInventory,
 	RenderOptions,
 	RenderTimings,
+	SnapshotState,
 	WorkerRequest,
 	WorkerResponse,
 } from '../../engine-src/protocol';
 import { isQueueError } from '../queue/queue';
+import { pickEngine } from './route';
 import {
 	InterruptedError,
 	TexError,
@@ -129,6 +132,8 @@ interface Job {
 	readonly source: string;
 	readonly options: RenderOptions;
 	readonly log: string[];
+	/** The name of the saved run its diagram would start from (engine-src/document.ts routeOf). */
+	readonly route: string | undefined;
 	/** When `render` was called, by the host's clock. */
 	readonly arrived: number;
 	/** How long it waited for the engine to start, once it has been posted; see TexTimings. */
@@ -148,6 +153,8 @@ interface Engine {
 	up: boolean;
 	/** The job inside it. */
 	current: Job | null;
+	/** The names of the saved runs it holds, as its last reply said. */
+	held: ReadonlySet<string>;
 	/** When it was created, and when it said it was ready, by the host's clock. */
 	readonly spawnedAt: number;
 	readyAt: number | null;
@@ -177,7 +184,8 @@ interface Engine {
  * Up to `poolSize` workers run side by side (internal/DECISIONS.md D24): two on a desktop, one on a
  * phone. A second one starts only while a job waits that no worker running or starting can take, a
  * timeout or a crash takes down only its own worker, `kill()` stops them all, and they idle down
- * together. Once a worker has failed to start, the pool is one until they next stop together.
+ * together. Once a worker has failed to start, the pool is one until they next stop together. A job
+ * goes to the idle worker that holds the run its preamble saved, if one does (./route, D32).
  */
 export class WorkerHost implements TexHost {
 	readonly id = ENGINE_ID;
@@ -292,6 +300,7 @@ export class WorkerHost implements TexHost {
 				source: job.source,
 				options: job.options,
 				log: [],
+				route: this.routeFor(job),
 				arrived: this.now(),
 				startMs: undefined,
 				onRunning,
@@ -379,10 +388,18 @@ export class WorkerHost implements TexHost {
 			);
 		}
 
-		for (const engine of this.engines) {
+		// The waiting jobs, oldest first, each to an idle engine: the one that holds the run its diagram
+		// would start from, if one does (./route).
+		for (;;) {
 			const next = this.waiting[0];
 			if (next === undefined) break;
-			if (!engine.up || engine.current !== null) continue;
+			const idle = this.engines.filter((engine) => engine.up && engine.current === null);
+			const engine = pickEngine(
+				next.route,
+				idle,
+				this.waiting.slice(1).map((job) => job.route),
+			);
+			if (engine === undefined) break;
 			this.waiting.shift();
 			this.post(engine, next);
 		}
@@ -464,6 +481,7 @@ export class WorkerHost implements TexHost {
 			blobUrl,
 			up: false,
 			current: null,
+			held: new Set(),
 			spawnedAt: this.now(),
 			readyAt: null,
 			ready,
@@ -511,6 +529,7 @@ export class WorkerHost implements TexHost {
 		}
 
 		engine.current = null;
+		if (message.snapshots !== undefined) this.heldBy(engine, message.snapshots);
 		const line = blockLine(message.line, message.bodyLine);
 		if (message.type === 'ok') {
 			const result: TexResult = {
@@ -659,6 +678,25 @@ export class WorkerHost implements TexHost {
 		if (this.idleTimer === null) return;
 		this.timers?.clearTimeout(this.idleTimer);
 		this.idleTimer = null;
+	}
+
+	/**
+	 * The name of the saved run a job's diagram would start from, as the worker names the runs it
+	 * holds; undefined while saved preambles are off, or for an input with no \begin{document} line.
+	 */
+	private routeFor(job: TexJob): string | undefined {
+		if (this.snapshotBudget() <= 0) return undefined;
+		try {
+			return routeOf(buildInput(job.source, job.options).text, job.options.captureLog !== false);
+		} catch {
+			// A name only decides which engine a job goes to; without one it goes to any.
+			return undefined;
+		}
+	}
+
+	/** What an engine said it holds of saved runs, for routing. */
+	private heldBy(engine: Engine, state: SnapshotState): void {
+		engine.held = new Set(state.held);
 	}
 
 	/** How many workers run at once now: the pool's size, or one once a worker failed to start. */

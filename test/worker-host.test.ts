@@ -10,6 +10,8 @@ vi.mock('virtual:engine', () => ({
 	ENGINE_INVENTORY: null,
 }));
 
+import { buildInput, routeOf } from '../engine-src/document';
+import { pickEngine } from '../src/engine/route';
 import { WorkerHost } from '../src/engine/worker-host';
 import { QueueError } from '../src/queue/queue';
 import { InterruptedError, TexError, type TexResult } from '../src/types';
@@ -1000,8 +1002,9 @@ describe('a pool whose second worker fails to start', () => {
 
 describe('saved preambles', () => {
 	/**
-	 * Each engine keeps the runs it saved at the end of a diagram's \begin{document}, within the
-	 * budget the host sends it with every job (internal/DECISIONS.md D32).
+	 * Each engine keeps the runs it saved at the end of a diagram's \begin{document}, and the host
+	 * sends a diagram to the engine that holds its preamble's (internal/DECISIONS.md D32). A job's run
+	 * is named as the worker names the runs it holds: here, by the package the preamble loads.
 	 */
 	const withPackage = (key: string, pkg: string) => ({
 		key,
@@ -1009,8 +1012,23 @@ describe('saved preambles', () => {
 		options: { texPackages: { [pkg]: '' }, captureLog: true },
 		timeoutMs: 1000,
 	});
+	const nameOf = (pkg: string) =>
+		routeOf(
+			buildInput('\\draw (0,0) -- (1,1);', { texPackages: { [pkg]: '' }, captureLog: true }).text,
+			true,
+		)!;
 	const send = (host: WorkerHost, key: string, pkg: string) =>
 		track(host.render(withPackage(key, pkg), new AbortController().signal));
+	const holding = (w: FakeWorker, id: number, held: string[], failures = 0) =>
+		w.emit({
+			type: 'ok',
+			id,
+			svg: '<svg/>',
+			log: [],
+			missing: [],
+			durationMs: 1,
+			snapshots: { held, bytes: held.length * 1048576, failures },
+		});
 	const lastRender = (w: FakeWorker) => {
 		const renders = w.posted.filter((m) => m.type === 'render');
 		return renders[renders.length - 1];
@@ -1032,5 +1050,59 @@ describe('saved preambles', () => {
 		send(plain, 'c', 'pgfplots');
 		worker(1).boot();
 		expect(lastRender(worker(1))).toMatchObject({ snapshots: 0 });
+	});
+
+	it('send a job to the idle engine that holds its run, not to the first idle one', async () => {
+		const host = new WorkerHost({ poolSize: 2, snapshotBudget: () => 32 * 1048576 });
+		send(host, 'a', 'pgfplots');
+		send(host, 'b', 'circuitikz');
+		worker(0).boot();
+		worker(1).boot();
+		expect(worker(0).renders).toHaveLength(1);
+		expect(worker(1).renders).toHaveLength(1);
+		// The first engine saved pgfplots' preamble, the second circuitikz's.
+		holding(worker(0), worker(0).renders[0]!, [nameOf('pgfplots')]);
+		holding(worker(1), worker(1).renders[0]!, [nameOf('circuitikz')]);
+		await tick();
+
+		// Both idle: circuitikz's diagram goes to the second, though the first is idle too.
+		send(host, 'c', 'circuitikz');
+		expect(worker(1).renders).toHaveLength(2);
+		expect(worker(0).renders).toHaveLength(1);
+		send(host, 'd', 'pgfplots');
+		expect(worker(0).renders).toHaveLength(2);
+	});
+
+	it('never keep a job waiting for a busy engine that holds its run while another is idle', async () => {
+		const host = new WorkerHost({ poolSize: 2, snapshotBudget: () => 32 * 1048576 });
+		send(host, 'a', 'pgfplots');
+		send(host, 'b', 'circuitikz');
+		worker(0).boot();
+		worker(1).boot();
+		holding(worker(1), worker(1).renders[0]!, [nameOf('circuitikz'), nameOf('pgfplots')]);
+		await tick();
+		// The second holds pgfplots' run but is busy again; the first is busy too, then idle.
+		send(host, 'c', 'siunitx');
+		expect(worker(1).renders).toHaveLength(2);
+		holding(worker(0), worker(0).renders[0]!, []);
+		await tick();
+		send(host, 'd', 'pgfplots');
+		expect(worker(0).renders).toHaveLength(2);
+	});
+});
+
+describe('the engine a job goes to', () => {
+	const engine = (...held: string[]) => ({ held: new Set(held) });
+
+	it('is the idle one that holds its run, else one no other waiting job wants, else the first', () => {
+		const a = engine('x');
+		const b = engine('y');
+		const c = engine();
+		expect(pickEngine('y', [a, b, c], [])).toBe(b);
+		expect(pickEngine('z', [a, b, c], ['x', 'y'])).toBe(c);
+		expect(pickEngine('z', [a, b], ['x'])).toBe(b);
+		expect(pickEngine('z', [a, b], ['x', 'y'])).toBe(a);
+		expect(pickEngine(undefined, [a, b], [undefined, 'x'])).toBe(b);
+		expect(pickEngine('x', [], [])).toBeUndefined();
 	});
 });
