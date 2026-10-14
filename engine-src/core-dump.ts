@@ -2,10 +2,12 @@
  * The core dump, and the memory every TeX run starts from.
  *
  * The dump is the engine's whole WebAssembly.Memory, 2500 pages, as it stood once the LaTeX format
- * was loaded (internal/DECISIONS.md D12). Each run gets a fresh Memory with the dump in it, because
- * a run leaves its own state all over the one it had. Upstream copies the whole 156.25 MiB into
- * every one: 24 to 29 ms a render on the desktop (V8), and every page of the new Memory written,
- * so it all counts against the worker's footprint until the collector frees it.
+ * was loaded (internal/DECISIONS.md D12). A worker's first run, and a run after one that did not end
+ * normally, starts from a new Memory with the dump in it; every other run starts from the worker's
+ * own, with the dump written back over what the run before can have written (./reset, D31).
+ * Upstream copies the whole 156.25 MiB into a new Memory for every run: 24 to 29 ms a render on the
+ * desktop (V8), and every page of it written, so it all counts against the worker's footprint until
+ * the collector frees it.
  *
  * 134 MiB of the dump is zero — TeX's arrays are sized for the largest document it will take, and
  * a diagram fills a corner of them — and a fresh Memory is zero already: the WebAssembly spec fills
@@ -83,7 +85,10 @@ export function checkCoreDump(dump: CoreDump, pages: number): void {
 	if (dump.size !== size) throw new Error(`the core dump is ${dump.size} B, the memory ${size} B`);
 }
 
-/** A new Memory of `pages` pages holding the dump: what a TeX run starts from. */
+/**
+ * A new Memory of `pages` pages holding the dump: what a worker's first run starts from, and a run
+ * after one that did not end normally (./reset).
+ */
 export function startingMemory(dump: CoreDump, pages: number): WebAssembly.Memory {
 	checkCoreDump(dump, pages);
 	const memory = new WebAssembly.Memory({ initial: pages, maximum: pages });

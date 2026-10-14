@@ -116,15 +116,15 @@ const fromBase64 = (b64: string): Uint8Array => {
 
 /**
  * Compiled once. Upstream calls WebAssembly.instantiate() with the raw bytes on every render,
- * which recompiles its 526 KB of wasm each time (this engine is 236 KB); instantiating a Module
+ * which recompiles its 526 KB of wasm each time (this engine is 238 KB); instantiating a Module
  * reuses the compiled code. Null until the worker has started.
  */
 let texModule: WebAssembly.Module | null = null;
 
 /**
  * The dump's non-zero runs, 22.3 MiB of its 156.25, which the build packed back to back
- * (scripts/engine-assets.mjs `packCoreDump`): they are all a run's fresh Memory needs written into
- * it (./core-dump). Null until the worker has started.
+ * (scripts/engine-assets.mjs `packCoreDump`): they are all a new Memory needs written into it
+ * (./core-dump), and what the reset writes back from (./reset). Null until the worker has started.
  */
 let coreDump: CoreDump | null = null;
 

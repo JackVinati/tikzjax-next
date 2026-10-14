@@ -425,7 +425,7 @@ export class WorkerHost implements TexHost {
 			worker = new Worker(blobUrl);
 			// The engine's payload, as data: the worker starts once it has it, and answers `ready`
 			// (internal/DECISIONS.md D30). Posted at once, so it waits in the worker's queue while the
-			// thread starts and the script is parsed, which is now 0.45 MB rather than 10.
+			// thread starts and the script is parsed, which is now under half a megabyte rather than ten.
 			if (ENGINE_ASSETS !== null)
 				worker.postMessage({ type: 'boot', assets: ENGINE_ASSETS } satisfies WorkerRequest);
 		} catch (cause) {

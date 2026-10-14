@@ -72,10 +72,11 @@ const DESKTOP: Budgets = {
 
 const MOBILE: Budgets = {
 	/**
-	 * Hard-clamped to 1, and not offered as a preference. Each worker is an engine of its own, and
-	 * each compile in it a new 156.25 MiB WebAssembly memory (DECISIONS.md D18), inside one WKWebView
-	 * content process whose ceiling ranges from ~100 MB on an iPhone SE3 to ~450 MB. Upstream #111,
-	 * #91, #74 are all this. A second worker on a phone waits for a measurement on one.
+	 * Hard-clamped to 1, and not offered as a preference. Each worker is an engine of its own, with a
+	 * 156.25 MiB WebAssembly memory it keeps between compiles, and takes anew after one that did not
+	 * end normally (DECISIONS.md D31), inside one WKWebView content process whose ceiling ranges from
+	 * ~100 MB on an iPhone SE3 to ~450 MB. Upstream #111, #91, #74 are all this. A second worker on a
+	 * phone waits for a measurement on one.
 	 */
 	concurrency: 1,
 	timeoutMs: 20_000,

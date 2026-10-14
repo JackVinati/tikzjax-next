@@ -42,10 +42,12 @@ export const hasNativeGunzip = (): boolean => typeof DecompressionStream === 'fu
  * zlib written in JavaScript: it took 105 to 114 ms of the desktop's 192 to 205 ms engine start in
  * WebKit and Chromium, and the platform's takes less than half that (internal/DECISIONS.md D30).
  *
- * pako inflates instead where there is no DecompressionStream, iOS before 16.4 above all, and after
- * any failure of the native attempt, once: a platform that has the API and gets it wrong costs a
- * start some time, not the engine. A stream that really is wrong then fails in pako too, with the
- * same checks as before, and the start fails with it.
+ * pako inflates instead where there is no DecompressionStream, iOS before 16.4 above all, and once
+ * after a native attempt that rejects or throws: a platform that has the API and fails with it costs
+ * a start some time, not the engine. A stream that really is wrong then fails in pako too, with the
+ * same checks as before, and the start fails with it. A native attempt that never settles is not
+ * bounded here; the host's startup allowance ends that start (src/engine/worker-host.ts), and no
+ * platform is known to do it.
  */
 export async function gunzipExactly(
 	gz: Uint8Array,

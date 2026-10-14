@@ -1772,21 +1772,26 @@ time; D31 has that, and why it no longer matters.
 **Amends D10, under which the build writes the engine's assets into the worker's script, and D18,
 which inflates the dump with pako. Date of record: 2026-10-14.**
 
-Until 0.2.1 the worker carried tex.wasm, the core dump and the 247 TeX files as 10,143,443
-characters of string literals, which every start parsed before it ran a line, and then decoded
-every TeX file, inflated the dump with pako, JavaScript's zlib, and compiled tex.wasm, one after
-another. The 0.2.x study timed the parts in WebKit and Chromium on the desktop: pako's inflate of
-the dump was 105 to 114 ms of a 192 to 205 ms start.
+Until 0.2.1 the worker carried tex.wasm, the core dump and the 247 TeX files in its script, as
+string literals of base64, which every start parsed before it ran a line, and then decoded every
+TeX file, inflated the dump with pako, JavaScript's zlib, and compiled tex.wasm, one after another.
+With D27's engine the script was 10,143,443 characters, 9,796,494 of them in the 289 literals of a
+thousand characters or more. The 0.2.x study timed the parts in WebKit and Chromium on the desktop:
+pako's inflate of the dump was 105 to 114 ms of a 192 to 205 ms start.
 
-- **The payload is data.** The worker's script is its 481,107 characters of code; tex.wasm, the
-  dump and the files, 9,669,247 characters of base64, go to the worker as the first message to each
-  worker the host starts (`engine-src/protocol.ts` EngineAssets), which starts from it and answers
-  `ready`. `main.js` holds the payload as an object beside the worker's code, instead of inside it.
+- **The payload is data.** The worker's script is its code, 481,510 characters as 0.2.1 ships it;
+  tex.wasm, the dump and the files, 9,669,247 characters of base64, go to the worker as the first
+  message to each worker the host starts (`engine-src/protocol.ts` EngineAssets), which starts from
+  it and answers `ready`. `main.js` holds the payload as an object beside the worker's code, instead
+  of inside it.
 - **The platform's own gzip.** Both tex.wasm and the dump are inflated by `DecompressionStream`
   where the platform has one (iOS and Safari 16.4, Chrome 80), read a chunk at a time into one
   buffer of exactly the size the build recorded, and by pako where it has none. A native attempt
-  that fails for any reason falls back to pako once, so a platform that has the API and gets it
-  wrong costs time, not the start; a payload that is really wrong then fails in pako too.
+  that rejects falls back to pako once, so a platform that has the API and fails with it costs time,
+  not the start; a payload that is really wrong then fails in pako too. One that never settles is
+  not bounded: it holds the start until the host's startup allowance gives up on it, 20 s on a
+  computer and 30 s on a phone, and every start after it the same way. No platform is known to do
+  that, and a bound would have to be long enough for the slowest phone's real inflate.
 - **tex.wasm compiles while the dump inflates**, with `WebAssembly.compile`, which the platform
   runs off the worker's thread.
 - **The TeX files stay base64** until TeX first opens one, which is then decoded and inflated, and
@@ -1807,11 +1812,12 @@ the dump was 105 to 114 ms of a 192 to 205 ms start.
 in a worker raises none, and the host would otherwise wait for a `ready` that never comes.
 `test/worker-boot.test.ts` starts the shipped worker on a thread of its own with the dump or
 tex.wasm changed, cut short, of the wrong size or missing, with and without the platform's
-decoders, and each ends in the error event. A changed and a cut dump do the same in Chromium 153 and
-WebKit 26.6, run with the study's harness on 2026-10-14: the error event, with pako's "incorrect
-data check" and "buffer error", each whole run taking 2.7 to 4.6 s with the browser's launch. `verify:worker` starts the
-worker as the host does, and runs a second time in CI and in the Engine workflow with `--legacy`,
-without `DecompressionStream` and `Uint8Array.fromBase64`, as on iOS 14.5 to 16.3.
+decoders, and each ends in the error event. A changed and a cut dump do the same in Chromium 153
+and WebKit 26.6, run with the study's harness on 2026-10-14: the error event, with pako's
+"incorrect data check" and "buffer error", each whole run taking 2.7 to 4.6 s with the browser's
+launch. `verify:worker` starts the worker as the host does, and runs a second time in CI and in the
+Engine workflow with `--legacy`, without `DecompressionStream` and `Uint8Array.fromBase64`, as on
+iOS 14.5 to 16.3.
 
 **What it gains.** The campaign of D29, the median of the seven rounds' engine starts, from the
 `Blob` on the main thread to `ready` arriving there, and the worker's own breakdown:
@@ -1825,19 +1831,19 @@ without `DecompressionStream` and `Uint8Array.fromBase64`, as on iOS 14.5 to 16.
 | Chromium, without them | 174 ms (174–177) | 127 ms (127–128) | 14, 96, 1 ms |
 
 The two rows without them are seven more rounds the same day, with the harness hiding both APIs
-from the worker as `--legacy` does, a stand-in for iOS 14.5 to 16.3. The main thread's own share of a start,
-creating the worker and posting it the payload, went from 8 to 5 ms in WebKit and from 15.7 to 4.6
-ms in Chromium. Node 22 has no `Uint8Array.fromBase64`, so it decodes with the worker's own loop;
-it is not where the plugin runs. Nothing has been measured on a phone.
+from the worker as `--legacy` does, a stand-in for iOS 14.5 to 16.3. The main thread's own share of
+a start, creating the worker and posting it the payload, went from 8 to 5 ms in WebKit and from
+15.7 to 4.6 ms in Chromium. Node 22 has no `Uint8Array.fromBase64`, so it decodes with the worker's
+own loop; it is not where the plugin runs. Nothing has been measured on a phone.
 
 **What it costs.** `main.js` grows by 2,081 B, the worker's start code. Chromium's working set
 right after a start is about 24 MiB higher (159 → 183 MiB, medians of the same campaign) and
 WebKit's 32 MiB lower (176 → 144).
 
 The study had also measured Chromium's private commit 281 MiB higher over a round with this build,
-and left the cause open. It is not the start, after which commit rose only 34 MiB (114 → 148 MiB): it
-is per-run Memories not yet collected, D29's fewer allocations giving V8 fewer reasons to collect.
-D31 measured it, and ends it.
+and left the cause open. It is not the start, after which commit rose only 34 MiB (114 → 148 MiB):
+it is per-run Memories not yet collected, D29's fewer allocations giving V8 fewer reasons to
+collect. D31 measured it, and ends it.
 
 ---
 
