@@ -142,6 +142,58 @@ describe('the settings a block is built with', () => {
 	});
 });
 
+describe("a block's cache key", () => {
+	/**
+	 * The key holds what the engine draws, OUTPUT_REVISION, not which build of the worker drew it:
+	 * an engine that only got faster finds every diagram where the one before it left it
+	 * (internal/DECISIONS.md D20).
+	 */
+	it('is the same whichever build of the engine is running', async () => {
+		const one = processorDeps();
+		const other = processorDeps({ host: { ...one.deps.host, id: 'another-build' } });
+		const a = await processBlock(one.deps, one.seen, SOURCE, { load: false });
+		const b = await processBlock(other.deps, other.seen, SOURCE, { load: false });
+		expect(b.spec.key).toBe(a.spec.key);
+	});
+});
+
+describe('whether a block waits for typing to pause', () => {
+	/**
+	 * Only a block of a note being typed in waits for the debounce (internal/DECISIONS.md D22), and
+	 * the note is the one the block is rendered from: the one Live Preview's editor, a Reading view
+	 * or an embed names as its source.
+	 */
+	it('is asked of the note the block is rendered from, once the cache has missed', async () => {
+		const asked: string[] = [];
+		const { deps, seen } = processorDeps({
+			editing: (notePath) => {
+				asked.push(notePath);
+				return false;
+			},
+		});
+		await processBlock(deps, seen, SOURCE, { path: 'Folder/Typed in.md' });
+		await flush();
+		expect(asked).toEqual(['Folder/Typed in.md']);
+	});
+});
+
+describe('the engine', () => {
+	it('is started by a block that is not cached, and not by one that is', async () => {
+		const startEngine = vi.fn();
+		const { deps, seen, l1 } = processorDeps({ startEngine });
+		const cached = await processBlock(deps, seen, SOURCE, { load: false });
+		l1.set(cached.spec.key, artifact());
+
+		await processBlock(deps, seen, SOURCE);
+		await flush();
+		expect(startEngine).not.toHaveBeenCalled();
+
+		await processBlock(deps, seen, `${SOURCE}%`);
+		await flush();
+		expect(startEngine).toHaveBeenCalledTimes(1);
+	});
+});
+
 describe('a block in a list item', () => {
 	/**
 	 * Live Preview hands the processor the block's lines as they stand in the note, the list's

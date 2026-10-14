@@ -2,7 +2,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { installObsidianDom } from './stubs/obsidian-dom';
 import { TikzBlock, type BlockDeps, type BlockOutcome, type TexJobSpec } from '../src/block/render-child';
-import { RenderQueue } from '../src/queue/queue';
+import { isQueueError, RenderQueue } from '../src/queue/queue';
 import type { Artifact, BlockOptions, EngineCapabilities, TexHost, TexResult } from '../src/types';
 import { InterruptedError, TexError } from '../src/types';
 
@@ -546,6 +546,32 @@ describe('a compile the engine was stopped under', () => {
 	});
 });
 
+describe('a block that goes away while its job waits for the engine to start', () => {
+	/**
+	 * A note switched away from on a cold engine: the queue started the job at once, and it waits
+	 * in the host for the engine. Nothing has been paid for, so the job is dropped and its slot
+	 * freed for the next note's diagrams (DECISIONS.md D25), and the block settles.
+	 */
+	it('is dropped, and the block settles', async () => {
+		const { queue, runs } = realQueue(60_000);
+		const reports: BlockOutcome[] = [];
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ queue, report: (outcome) => void reports.push(outcome) }),
+		);
+		child.onload();
+		await vi.waitFor(() => expect(runs).toHaveLength(1));
+		expect(queue.inflightCount()).toBe(1);
+
+		child.onunload();
+		await expect(child.settled).resolves.toBeUndefined();
+		expect(isQueueError(runs[0]?.signal.reason, 'cancelled')).toBe(true);
+		await vi.waitFor(() => expect(queue.inflightCount()).toBe(0));
+		expect(reports).toEqual([{ state: 'cancelled' }]);
+	});
+});
+
 /** Press the button with this label, as a reader would. */
 function press(el: HTMLElement, label: string): void {
 	const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === label);
@@ -964,6 +990,119 @@ describe('a block the viewport never reports on', () => {
 	});
 });
 
+describe('the debounce', () => {
+	/**
+	 * It exists for typing (#24): a block remade at every keystroke must not compile at every
+	 * keystroke. Every block used to wait for it, so a note opened on a phone waited 500 ms before
+	 * its first diagram was even queued. Now only a block of a note being typed in waits.
+	 */
+	const LONG = 60_000;
+
+	it('is not waited for by a block shown for the first time: it is queued as soon as it is seen', async () => {
+		const { queue, bands } = recordingBands();
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ queue, debounceMs: LONG, editing: () => false }),
+		);
+		child.onload();
+		await vi.waitFor(() => expect(bands).toEqual([1]));
+	});
+
+	it('is waited for by a block of a note being typed in, which the next keystroke unloads unqueued', async () => {
+		const { queue, bands } = recordingBands();
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ queue, debounceMs: LONG, editing: () => true }),
+		);
+		child.onload();
+		for (let i = 0; i < 20; i++) await Promise.resolve();
+		expect(bands).toEqual([]);
+
+		child.onunload();
+		await child.settled;
+		expect(bands).toEqual([]);
+	});
+
+	it('runs out for a block being typed in that the typing left alone, which is then queued as one in view', async () => {
+		const { queue, bands } = recordingBands();
+		const child = new TikzBlock(container(), spec(), deps({ queue, debounceMs: 1, editing: () => true }));
+		child.onload();
+		await vi.waitFor(() => expect(bands).toEqual([1]));
+	});
+
+	it('asks whether the note is being typed in when the cache misses, not before', async () => {
+		const asked = vi.fn(() => false);
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ cache: fakeCache(artifact(SVG)), editing: asked }),
+		);
+		child.onload();
+		await child.settled;
+		// A cached diagram never waits for anything, so nothing is asked.
+		expect(asked).not.toHaveBeenCalled();
+	});
+});
+
+describe('the engine started ahead of the first job', () => {
+	/**
+	 * A diagram that is not cached will be compiled once it has been seen, so the engine is started
+	 * when the cache misses, and its start runs while the block waits for the viewport gate and the
+	 * queue. Never for a cached diagram, nor for one waiting for a button press.
+	 */
+	it('is started when the cache misses, before the block is even seen', async () => {
+		const startEngine = vi.fn();
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			// Never in view, so never queued: only the miss can have started the engine.
+			deps({ startEngine, observe: () => undefined }),
+		);
+		child.onload();
+		await vi.waitFor(() => expect(startEngine).toHaveBeenCalledTimes(1));
+		child.onunload();
+	});
+
+	it("is asked with the block's own document, whose visibility is what counts", async () => {
+		// A pop-out window shows the note while the main window is minimized, hidden: the block in
+		// the pop-out is in view, and its document says so.
+		const popout = document.implementation.createHTMLDocument('pop-out');
+		const el = popout.body.appendChild(popout.createElement('div'));
+		const startEngine = vi.fn();
+		const child = new TikzBlock(el, spec(), deps({ startEngine, observe: () => undefined }));
+		child.onload();
+		await vi.waitFor(() => expect(startEngine).toHaveBeenCalledTimes(1));
+		expect(startEngine).toHaveBeenCalledWith(popout);
+		child.onunload();
+	});
+
+	it('is not started for a diagram from the cache', async () => {
+		const startEngine = vi.fn();
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ cache: fakeCache(artifact(SVG)), startEngine }),
+		);
+		child.onload();
+		await child.settled;
+		expect(startEngine).not.toHaveBeenCalled();
+	});
+
+	it('is not started for a lazy=manual diagram, which waits for its button', async () => {
+		const startEngine = vi.fn();
+		const child = new TikzBlock(
+			container(),
+			spec({ options: options({ presentation: { lazy: 'manual' } }) }),
+			deps({ startEngine }),
+		);
+		child.onload();
+		await child.settled;
+		expect(startEngine).not.toHaveBeenCalled();
+	});
+});
+
 describe('fast mode', () => {
 	/**
 	 * Fast mode is a preset (settings: "Preset: no SVGO, no pre-flight lint, one priority band up"),
@@ -1081,7 +1220,12 @@ describe('what a block reports when it comes to rest', () => {
 		);
 		child.onload();
 		await child.settled;
-		expect(reports).toEqual([{ state: 'ok', durationMs: 42, timings: { queueMs: 0, postMs: 0 } }]);
+		await vi.waitFor(() => expect(reports).toHaveLength(2));
+		const timings = { waitedMs: 0, queueMs: 0, postMs: 0 };
+		expect(reports).toEqual([
+			{ state: 'ok', durationMs: 42, timings },
+			{ state: 'ok', durationMs: 42, timings: { ...timings, mountMs: 0, totalMs: 0 } },
+		]);
 	});
 
 	it('a compiled diagram: where its time went, before the engine, in it and after it', async () => {
@@ -1098,17 +1242,64 @@ describe('what a block reports when it comes to rest', () => {
 			release: () => undefined,
 		} as unknown as BlockDeps['queue'];
 		pipeline.during = () => void (now += 7);
+		const restore = measurable();
+		// The measurement, which waits for the fonts and reframes the diagram, takes 25 ms.
+		(window.SVGSVGElement.prototype as unknown as { getBBox: () => DOMRect }).getBBox = () => {
+			now += 25;
+			return { x: 0, y: 0, width: 40, height: 20 } as DOMRect;
+		};
 		try {
-			const child = new TikzBlock(container(), spec(), deps({ queue, now: () => now, report }));
+			const child = new TikzBlock(
+				container(),
+				spec(),
+				deps({
+					queue,
+					now: () => now,
+					report,
+					// Seen at 100, and asked for 300 ms later, after its debounce.
+					observe: (_el, onChange) => {
+						onChange(true);
+						now += 300;
+					},
+				}),
+			);
 			child.onload();
 			await child.settled;
+			await vi.waitFor(() => expect(reports).toHaveLength(2));
 		} finally {
 			pipeline.during = null;
+			restore();
 		}
 
+		// When it came to rest, and again once it had been drawn, with the mount and the whole wait.
+		const atRest = { ...engine, waitedMs: 300, queueMs: 30, postMs: 7 };
 		expect(reports).toEqual([
-			{ state: 'ok', durationMs: 80, timings: { ...engine, queueMs: 30, postMs: 7 } },
+			{ state: 'ok', durationMs: 80, timings: atRest },
+			{ state: 'ok', durationMs: 80, timings: { ...atRest, mountMs: 25, totalMs: 362 } },
 		]);
+	});
+
+	it("a diagram the viewport gate gave up on: waited from its cache miss, so the gate's wait is in it", async () => {
+		const { reports, report } = reporting();
+		let now = 100;
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({
+				queue: answering({ svg: SVG, log: [], durationMs: 42 }),
+				now: () => now,
+				report,
+				// Missed at 100; no record ever came, and the gate gave up two seconds later.
+				observe: (_el, onChange) => {
+					now += 2000;
+					onChange(true, true);
+				},
+			}),
+		);
+		child.onload();
+		await child.settled;
+		await vi.waitFor(() => expect(reports).toHaveLength(2));
+		expect(reports[0]?.timings?.waitedMs).toBe(2000);
 	});
 
 	it('a diagram from a cache: no timings, since nothing was compiled', async () => {
@@ -1131,6 +1322,7 @@ describe('what a block reports when it comes to rest', () => {
 		expect(reports).toEqual([
 			{
 				state: 'error',
+				reason: 'missing-file',
 				message: 'siunitx.sty is not bundled with this TeX engine.',
 				log: ['! LaTeX Error'],
 			},
@@ -1170,7 +1362,8 @@ describe('what a block reports when it comes to rest', () => {
 		press(el, 'Retry');
 		await vi.waitFor(() => expect(runs).toHaveLength(2));
 		runs[1]?.resolve(RESULT);
-		await vi.waitFor(() => expect(reports).toHaveLength(2));
-		expect(reports.map((r) => r.state)).toEqual(['error', 'ok']);
+		// At rest, and once drawn.
+		await vi.waitFor(() => expect(reports).toHaveLength(3));
+		expect(reports.map((r) => r.state)).toEqual(['error', 'ok', 'ok']);
 	});
 });

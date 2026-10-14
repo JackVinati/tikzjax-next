@@ -5,6 +5,10 @@ top of its notes on GitHub, and will not publish a version that has none.
 
 ## 0.2.1 — unreleased
 
+- Updating recompiles nothing: every diagram cached by 0.2.0 is shown from the cache, as before.
+  From this release on, the cache is tied to what the engine draws rather than to the exact build of
+  it, so a release that only makes the engine faster no longer compiles every cached diagram once
+  more. A release that changes what diagrams look like still does, and says so here.
 - Labels in Chinese, Greek, Cyrillic, Arabic, Hebrew, Thai, Devanagari, IPA and emoji are drawn.
   The engine has no fonts for them, so TeX sets each character as a box one em wide, and the
   plugin writes the character over it in your system's sans-serif font; nodes and arrows are
@@ -15,13 +19,34 @@ top of its notes on GitHub, and will not publish a version that has none.
   other scripts where a space is typed. Names in these scripts, of nodes, coordinates, styles,
   colours and `\label`s, work as they did in 0.2.0. The README lists what the text drawn this way
   cannot do. From pull request #2.
-- After updating, every cached diagram is compiled once more, the next time it is shown: the
-  engine's id is part of the cache key, and the change above moved it. A diagram with none of
-  these characters in its text comes out the same, byte for byte.
 - Pre-flight no longer warns about characters the engine cannot typeset, in a label or in a name:
   the engine, its stand-ins for `°` `×` `£` `€` and the rest, or the sans-serif text above now draw
   every one of them, and names in any script work since 0.2.0. In maths, TeX's own `$\alpha$`
   still gives Computer Modern's α, where a typed `α` is drawn upright in sans-serif.
+- The diagnostics view shows the rest of a diagram's wait: how long it waited between coming into
+  view and being handed to the engine, how long it took to be drawn in the note once its SVG was
+  ready, and the whole time from coming into view to drawn. It also says how many times the engine
+  started this session, how long each start took, and why it stopped. A Copy button copies the
+  whole view as text, for a bug report: the plugin and Obsidian versions, the kind of device, what
+  its WebView supports, the engine, and every step's time, and none of your diagrams' code, error
+  messages or note names. Where the device does not let the plugin copy, the text is shown, to
+  copy by hand.
+- A diagram that is not cached goes to the engine as soon as it comes into view. Until now each
+  one waited first, half a second on a phone and 300 ms on a desktop, also when you had just
+  opened the note. Only a diagram in a note you are typing in still waits for you to pause, so that
+  typing in it, in a second pane or beside a Reading view, compiles it once per pause and not at
+  every keystroke.
+- The TeX engine starts as soon as a diagram turns out not to be in the cache, while the diagram is
+  still on its way into view, instead of when it is about to be compiled. It still never starts
+  when every diagram shown is cached, and an engine started for a diagram you never scroll to stops
+  again once it has had nothing to do for a while, as before.
+- On a computer, two diagrams compile at once when several new ones are waiting, each in a TeX
+  engine of its own. Handed a note of 37 new diagrams at once, two engines drew them all in 45–46%
+  less time than one, in WebKit and in Chromium, measured on a Windows desktop with this release's
+  engine; a note you scroll through one diagram at a time gains less. The second engine starts only
+  while diagrams wait, takes about 100 MB more while it runs, and stops with the first. Phones and
+  tablets keep one engine, and so does a computer that reports less than 8 GB of memory; Settings →
+  Second engine turns it off.
 
 ## 0.2.0 — 2026-10-13
 

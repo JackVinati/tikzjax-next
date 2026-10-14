@@ -254,6 +254,31 @@ describe('concurrency', () => {
 		expect(a.status).toBe('fulfilled');
 		expect(h.queue.inflightCount()).toBe(0);
 	});
+
+	/**
+	 * The second engine turned on or off: the queue runs as many jobs at once as the host has
+	 * workers. A job already running is never stopped for it.
+	 */
+	it('follows a new slot count: more starts at once, fewer lets the running finish first', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		for (const k of ['a', 'b', 'c', 'd']) h.submit(k, 1);
+		await tick();
+		expect(h.runs.started).toEqual(['a']);
+
+		h.queue.setConcurrency(2);
+		await tick();
+		expect(h.runs.started).toEqual(['a', 'b']);
+
+		h.queue.setConcurrency(1);
+		h.runs.finish('a');
+		await tick();
+		// One slot, still held by `b`: nothing new starts until it is done.
+		expect(h.runs.started).toEqual(['a', 'b']);
+		h.runs.finish('b');
+		await tick();
+		expect(h.runs.started).toEqual(['a', 'b', 'c']);
+		expect(h.runs.maxLive).toBe(2);
+	});
 });
 
 describe('dedup by key', () => {
@@ -484,6 +509,76 @@ describe('release and refcounting', () => {
 		expect(running.value).toBe('value');
 		expect(rejoined.value).toBe('value');
 		expect(h.runs.countOf('running')).toBe(1);
+	});
+
+	/**
+	 * Switching notes on a cold engine, a wrong tap in the file list, a hover preview: the queue
+	 * starts a diagram's job at once while a slot is free, and the job then waits in the host for the
+	 * engine to come up. Its block is gone a moment later. Nothing has been paid for yet, and left to
+	 * run it would compile for nobody while the next note's first diagram waited behind it.
+	 */
+	it('drops a started job that has not reached the engine, and frees its slot', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		const gone = h.submit('gone', 1);
+		const next = h.submit('next', 1);
+		await tick();
+		expect(h.runs.started).toEqual(['gone']);
+
+		h.queue.release('gone');
+		await tick();
+		expect(isQueueError(gone.error, 'cancelled')).toBe(true);
+		// Aborted with the reason, so the runner can tell it from a stall.
+		const signal = h.runs.signals.get('gone');
+		expect(signal?.aborted).toBe(true);
+		expect(isQueueError(signal?.reason, 'cancelled')).toBe(true);
+		expect(h.runs.started).toEqual(['gone', 'next']);
+		expect(next.status).toBe('pending');
+		expect(h.timers.outstanding).toBe(1);
+	});
+
+	it('leaves a job the engine has to finish and cache', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		const kept = h.submit('kept', 1);
+		await tick();
+		h.runs.running.get('kept')?.();
+
+		h.queue.release('kept');
+		await tick();
+		expect(h.runs.signals.get('kept')?.aborted).toBe(false);
+		h.runs.finish('kept', 'value');
+		await tick();
+		expect(kept.value).toBe('value');
+	});
+
+	it('keeps a job some other caller still wants, though the engine does not have it yet', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		const first = track(h.queue.submit('k', { id: 'k' }, 1, 1000, { owner: 'a' }));
+		track(h.queue.submit('k', { id: 'k' }, 1, 1000, { owner: 'b' }));
+		await tick();
+
+		h.queue.release('k', 'b');
+		await tick();
+		expect(h.runs.signals.get('k')?.aborted).toBe(false);
+		h.runs.running.get('k')?.();
+		h.runs.finish('k', 'value');
+		await tick();
+		expect(first.value).toBe('value');
+	});
+
+	it('gives a caller who asks for the key again right away a job of its own', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		h.submit('k', 1);
+		await tick();
+
+		h.queue.release('k');
+		const again = h.submit('k', 1);
+		await tick();
+		expect(again.status).toBe('pending');
+		expect(h.runs.countOf('k')).toBe(2);
+		h.runs.running.get('k')?.();
+		h.runs.finish('k', 'value');
+		await tick();
+		expect(again.value).toBe('value');
 	});
 
 	it('ignores a release for an unknown or already-settled key', async () => {
@@ -1144,6 +1239,81 @@ describe('under randomised throw / timeout / release interleavings', () => {
 			}
 
 			// Let everything that can still settle do so. Hung jobs settle by timing out.
+			for (let i = 0; i < 60 && (queue.size() > 0 || queue.inflightCount() > 0); i++) {
+				timers.advance(100);
+				await tick(6);
+			}
+
+			const context = `seed ${seed} (concurrency ${concurrency}, depthCap ${depthCap})`;
+			expect(runCount, context).toBeGreaterThan(0);
+			expect(queue.inflightCount(), context).toBe(0);
+			expect(queue.size(), context).toBe(0);
+			expect(
+				tracked.filter((t) => t.status === 'pending').length,
+				`${context}: promises left hanging`,
+			).toBe(0);
+		}
+	});
+
+	it('does the same with a startup, released before and after the engine has the job', async () => {
+		for (let seed = 1; seed <= 25; seed++) {
+			const rnd = mulberry32(seed);
+			const pick = <X>(xs: readonly X[]): X => {
+				const x = xs[Math.floor(rnd() * xs.length)];
+				if (x === undefined) throw new Error('empty pick');
+				return x;
+			};
+
+			const timers = new FakeTimers();
+			const concurrency = 1 + Math.floor(rnd() * 3);
+			const depthCap = 1 + Math.floor(rnd() * 4);
+			let runCount = 0;
+
+			const queue = new RenderQueue<RandomJob, string>({
+				concurrency,
+				depthCap,
+				timers,
+				startupMs: 60,
+				// The engine takes the job after a while, or never; then it settles as before.
+				run: (job, _signal, running) =>
+					new Promise<string>((resolve, reject) => {
+						runCount += 1;
+						if (job.mode === 'hang') return;
+						timers.setTimeout(() => {
+							running();
+							timers.setTimeout(() => {
+								if (job.mode === 'ok') resolve(job.id);
+								else reject(new Error(`boom: ${job.id}`));
+							}, job.duration);
+						}, job.duration);
+					}),
+			});
+
+			const keys = ['k0', 'k1', 'k2', 'k3'];
+			const tracked: Tracked<string>[] = [];
+
+			for (let step = 0; step < 80; step++) {
+				const roll = rnd();
+				if (roll < 0.5) {
+					const key = pick(keys);
+					const job: RandomJob = {
+						id: key,
+						mode: pick(['ok', 'ok', 'throw', 'hang'] as const),
+						duration: Math.floor(rnd() * 90),
+					};
+					tracked.push(track(queue.submit(key, job, pick([0, 1, 2, 3] as const), 50)));
+				} else if (roll < 0.8) {
+					queue.release(pick(keys));
+				} else {
+					timers.advance(Math.floor(rnd() * 40));
+				}
+				await tick(4);
+
+				expect(queue.inflightCount()).toBeLessThanOrEqual(concurrency);
+				expect(queue.inflightCount()).toBeGreaterThanOrEqual(0);
+				expect(queue.size()).toBeLessThanOrEqual(depthCap);
+			}
+
 			for (let i = 0; i < 60 && (queue.size() > 0 || queue.inflightCount() > 0); i++) {
 				timers.advance(100);
 				await tick(6);

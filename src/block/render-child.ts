@@ -95,6 +95,8 @@ export interface BlockOutcome {
 	durationMs?: number | undefined;
 	/** Where the time went, for a diagram compiled this time: the diagnostics view shows it. */
 	timings?: CompileTimings | undefined;
+	/** Why it failed: the card's kind, never its text (the diagnostics' Copy leaves that out). */
+	reason?: FailureReason | undefined;
 	/** What the error card says. */
 	message?: string | undefined;
 	log?: string[] | undefined;
@@ -109,7 +111,21 @@ export interface BlockDeps {
 	observe: (el: HTMLElement, onChange: (visible: boolean, escaped?: boolean) => void) => void;
 	unobserve: (el: HTMLElement) => void;
 	ensureFonts: (doc: Document) => void;
+	/** How long a block being typed in waits for the typing to pause. */
 	debounceMs: number;
+	/**
+	 * Whether the block's note is being typed in right now (block/edits.ts), asked when the cache
+	 * misses. Only then does the block debounce. Omitted: never.
+	 */
+	editing?: (() => boolean) | undefined;
+	/**
+	 * Start the engine, if none is running or starting, without waiting for it. Called when the
+	 * cache misses, so that the engine's start runs while the block waits for the viewport gate and
+	 * its turn in the queue rather than after them (internal/DECISIONS.md D23), with the block's own
+	 * document, whose visibility says whether anyone can see it. Omitted: the engine starts when the
+	 * queue hands it the first job.
+	 */
+	startEngine?: ((doc: Document) => void) | undefined;
 	now: () => number;
 	report?: ((outcome: BlockOutcome) => void) | undefined;
 }
@@ -139,6 +155,16 @@ export class TikzBlock extends MarkdownRenderChild {
 	private cardMessage = '';
 	/** Has come to rest at least once, so an unload afterwards is not a cancellation. */
 	private rested = false;
+
+	/**
+	 * When the block was seen, asked for its compile, and came out of the SVG pipeline, for the
+	 * steps the diagnostics view shows around the engine's own (CompileTimings).
+	 */
+	private seenAt: number | null = null;
+	private submittedAt: number | null = null;
+	/** When the cache missed, which is "seen" for a block the viewport gate gives up on. */
+	private missedAt: number | null = null;
+	private pipelineEndAt: number | null = null;
 
 	constructor(containerEl: HTMLElement, spec: TexJobSpec, deps: BlockDeps) {
 		super(containerEl);
@@ -255,13 +281,18 @@ export class TikzBlock extends MarkdownRenderChild {
 			case 'observe':
 				this.deps.observe(this.body, (visible, escaped) => {
 					// The gate gave up waiting for a record: the lowest band, no debounce. Taken for
-					// plain visibility, it went in with the diagrams the reader was looking at.
+					// plain visibility, it went in with the diagrams the reader was looking at. Seen
+					// at its cache miss, so that its `waited` holds the time the gate waited.
 					if (escaped) {
+						this.seenAt = this.missedAt ?? this.deps.now();
 						this.dispatch({ type: 'noRecordsAfter2s' });
 						return;
 					}
 					this.visible = visible;
-					if (visible) this.dispatch({ type: 'intersect' });
+					if (visible) {
+						this.seen();
+						this.dispatch({ type: 'intersect' });
+					}
 				});
 				return;
 
@@ -282,9 +313,12 @@ export class TikzBlock extends MarkdownRenderChild {
 				return;
 
 			case 'submit':
-				// A new attempt: whatever failed last time is not what this one will say.
+				// A new attempt: whatever failed last time is not what this one will say. One put
+				// back in line after the engine was stopped under it is the same attempt, and keeps
+				// the time it first asked.
 				this.failure = null;
 				this.origin = null;
+				if (effect.resumed !== true) this.submittedAt = this.deps.now();
 				void this.submit(effect.priority, effect.resumed === true);
 				return;
 
@@ -325,7 +359,7 @@ export class TikzBlock extends MarkdownRenderChild {
 			case 'mountManualButton':
 				this.placeholder = null;
 				this.body.empty();
-				renderManualTrigger(this.body, () => this.dispatch({ type: 'retry' }), STRINGS.renderDiagram);
+				renderManualTrigger(this.body, () => this.retry(), STRINGS.renderDiagram);
 				return;
 
 			case 'settle':
@@ -379,10 +413,20 @@ export class TikzBlock extends MarkdownRenderChild {
 			return;
 		}
 
+		const lazy = this.spec.options.presentation.lazy ?? 'on';
+		this.missedAt = this.deps.now();
+		// A block that skips the viewport gate is as seen as it will ever be.
+		if (this.spec.isExport || lazy === 'off') this.seenAt = this.missedAt;
+		// Not cached, so it will be compiled once it has been seen: start the engine now, so that its
+		// start runs while the block waits for that. A diagram that waits for a button press does not
+		// start it. One engine at most is started this way, and the host stops it when it has been
+		// idle for its budget, which is what happens to one started for a diagram never scrolled to.
+		if (lazy !== 'manual') this.deps.startEngine?.(this.body.doc);
 		this.dispatch({
 			type: 'miss',
 			isExport: this.spec.isExport,
-			lazy: this.spec.options.presentation.lazy ?? 'on',
+			lazy,
+			editing: this.deps.editing?.() ?? false,
 		});
 	}
 
@@ -433,8 +477,16 @@ export class TikzBlock extends MarkdownRenderChild {
 			};
 			this.origin = {
 				durationMs: result.durationMs,
-				// The pipeline's time is added when it has run (transform).
-				timings: { ...result.timings, queueMs: (started ?? asked) - asked, postMs: 0 },
+				// The pipeline's time is added when it has run (transform), the mount's when the
+				// diagram has been drawn (drawn).
+				timings: {
+					...result.timings,
+					...(this.seenAt !== null && this.submittedAt !== null
+						? { waitedMs: this.submittedAt - this.seenAt }
+						: {}),
+					queueMs: (started ?? asked) - asked,
+					postMs: 0,
+				},
 			};
 			this.dispatch({ type: 'ok' });
 		} catch (error) {
@@ -558,7 +610,8 @@ export class TikzBlock extends MarkdownRenderChild {
 			};
 
 			const compiled = this.origin;
-			if (compiled && 'timings' in compiled) compiled.timings.postMs = this.deps.now() - began;
+			this.pipelineEndAt = this.deps.now();
+			if (compiled && 'timings' in compiled) compiled.timings.postMs = this.pipelineEndAt - began;
 			this.dispatch({ type: result.degraded ? 'degraded' : 'ok' });
 		} catch (error) {
 			// Nothing came out that passed sanitize and ids. The raw engine output is dropped here
@@ -602,17 +655,44 @@ export class TikzBlock extends MarkdownRenderChild {
 	/** `persist` is the machine's call: false for a degraded mount, which must never be cached. */
 	private async measure(persist: boolean): Promise<void> {
 		const svg = this.body.querySelector('svg');
-		if (!svg || !this.artifact || this.artifact.viewBox !== null) return;
+		if (!svg || !this.artifact || this.artifact.viewBox !== null) {
+			this.drawn();
+			return;
+		}
 
 		const bounds = await measureInk(svg, this.body.doc);
-		if (!bounds || this.state.phase === 'DISPOSED' || !this.artifact) return;
+		if (this.state.phase === 'DISPOSED') return;
+		if (bounds && this.artifact) {
+			this.artifact = withMeasuredBounds(this.artifact, bounds);
+			// Exactly what every later mount of this artifact will do, so the first one matches them
+			// — and the scale, which had no width to work from until now, is applied from the real
+			// one.
+			applyBounds(svg, this.artifact.viewBox);
+			applyScale(this.body, svg, this.spec.options.presentation, this.artifact);
+			if (persist && !this.spec.options.nocache) this.deps.cache.put(this.spec.key, this.artifact);
+		}
+		this.drawn();
+	}
 
-		this.artifact = withMeasuredBounds(this.artifact, bounds);
-		// Exactly what every later mount of this artifact will do, so the first one matches them —
-		// and the scale, which had no width to work from until now, is applied from the real one.
-		applyBounds(svg, this.artifact.viewBox);
-		applyScale(this.body, svg, this.spec.options.presentation, this.artifact);
-		if (persist && !this.spec.options.nocache) this.deps.cache.put(this.spec.key, this.artifact);
+	/**
+	 * The diagram is drawn in the note as it will stay. For one compiled this time, the mount and
+	 * the whole wait are known now, and it is reported again with them: it was reported when it
+	 * came to rest, before the measurement, because "Render all diagrams in this note" counts it
+	 * then.
+	 */
+	private drawn(): void {
+		const origin = this.origin;
+		if (!origin || !('timings' in origin) || origin.timings.mountMs !== undefined) return;
+		const now = this.deps.now();
+		this.origin = {
+			durationMs: origin.durationMs,
+			timings: {
+				...origin.timings,
+				...(this.pipelineEndAt === null ? {} : { mountMs: now - this.pipelineEndAt }),
+				...(this.seenAt === null ? {} : { totalMs: now - this.seenAt }),
+			},
+		};
+		this.reportRest();
 	}
 
 	private mountError(reason: FailureReason): void {
@@ -646,7 +726,7 @@ export class TikzBlock extends MarkdownRenderChild {
 			source: this.spec.source,
 			preamble: { text: this.spec.options.baked.preamble, lines: this.spec.preambleLines },
 			log: failure.log,
-			onRetry: () => this.dispatch({ type: 'retry' }),
+			onRetry: () => this.retry(),
 		});
 	}
 
@@ -667,7 +747,12 @@ export class TikzBlock extends MarkdownRenderChild {
 						};
 		} else if (phase === 'FAILED') {
 			const log = this.failure?.log ?? [];
-			outcome = { state: 'error', message: this.cardMessage, ...(log.length ? { log } : {}) };
+			outcome = {
+				state: 'error',
+				reason: this.state.reason,
+				message: this.cardMessage,
+				...(log.length ? { log } : {}),
+			};
 		} else if (phase === 'IDLE_MANUAL') {
 			outcome = { state: 'manual' };
 		} else if (phase === 'DISPOSED' && !this.rested) {
@@ -680,6 +765,17 @@ export class TikzBlock extends MarkdownRenderChild {
 	}
 
 	// -------------------------------------------------------------------------------------------
+
+	/** The block is in front of the reader, or as close to it as it will get. */
+	private seen(): void {
+		this.seenAt = this.deps.now();
+	}
+
+	/** The card's Retry or the "Render diagram" button: a new attempt, seen at the press. */
+	private retry(): void {
+		this.seen();
+		this.dispatch({ type: 'retry' });
+	}
 
 	private priority(): Priority {
 		if (this.spec.isExport) return 0;

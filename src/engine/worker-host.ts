@@ -6,6 +6,7 @@ import type {
 	WorkerRequest,
 	WorkerResponse,
 } from '../../engine-src/protocol';
+import { isQueueError } from '../queue/queue';
 import {
 	InterruptedError,
 	TexError,
@@ -26,6 +27,49 @@ function capabilitiesOf(inventory: EngineInventory | null): EngineCapabilities {
 	};
 }
 
+/**
+ * Why an engine was stopped, for the diagnostics view.
+ *
+ * `idle` its idle teardown · `background` the app went to the background (mobile) · `timeout` a job
+ * outlived its time budget in it · `restart` Restart the TeX engine · `settings` the second engine
+ * was turned off · `error` it crashed, or never finished starting · `unload` the plugin was
+ * unloaded.
+ */
+export type EngineStop = 'idle' | 'background' | 'timeout' | 'restart' | 'settings' | 'error' | 'unload';
+
+/** One engine's life: how long it took to start, and why it stopped. */
+export interface EngineLife {
+	/**
+	 * From created to ready, by the host's clock, rounded. Null until it is ready, and for good if it
+	 * never was.
+	 */
+	startMs: number | null;
+	/** Null while it runs. */
+	stop: EngineStop | null;
+}
+
+/** What the diagnostics view says about the engines: how often one started, and how each went. */
+export interface EngineReport {
+	/** Engines started this session. */
+	starts: number;
+	/** The most recent of them, oldest first: at most ENGINE_LIVES. */
+	lives: readonly EngineLife[];
+	/** Why an engine last stopped; null if none has. */
+	lastStop: EngineStop | null;
+	/** How many engines may run at once now. */
+	poolSize: number;
+}
+
+/** How many engines' lives the report keeps. A phone stops its engine every time it is backgrounded. */
+const ENGINE_LIVES = 20;
+
+/** What an interrupted job is told, for each reason the engine can be stopped under it. */
+const INTERRUPTED: Record<'restart' | 'background' | 'unload', string> = {
+	restart: 'the engine was restarted',
+	background: 'the app was backgrounded',
+	unload: 'the plugin was unloaded',
+};
+
 /** The timer seam, as the queue has it, so the idle teardown is testable without a clock. */
 export interface HostTimers {
 	setTimeout(fn: () => void, ms: number): number;
@@ -36,18 +80,32 @@ export interface WorkerHostOptions {
 	/** Streams TeX output per job, so a slow compile is watchable rather than silent until it ends. */
 	onLog?: ((jobKey: string, line: string) => void) | undefined;
 	/**
-	 * Terminate a worker that has had nothing to do for this long. Omitted: never.
+	 * Terminate the workers once none has had anything to do for this long. Omitted: never.
 	 *
-	 * An idle worker still holds the inflated core dump, ~156 MiB, and on a phone that is the
-	 * difference between surviving in the background and being jetsam-killed (#111, #91). The
-	 * price is a boot on the next uncached diagram, which is why the figure is a budget per
-	 * platform (platform/budgets.ts) rather than a constant here.
+	 * An idle worker still holds the engine — the 22.3 MiB of core dump it starts each run from,
+	 * among the rest (DECISIONS.md D18) — and on a phone that is the difference between surviving
+	 * in the background and being jetsam-killed (#111, #91). The price is a start on the next
+	 * uncached diagram, which is why the figure is a budget per platform (platform/budgets.ts)
+	 * rather than a constant here.
 	 */
 	idleTeardownMs?: number | undefined;
 	/** Required for `idleTeardownMs` to do anything. */
 	timers?: HostTimers | undefined;
 	/** The clock the engine's start is timed with, in milliseconds. Omitted: performance.now(). */
 	now?: (() => number) | undefined;
+	/**
+	 * How many workers may run at once, each one job at a time. Omitted: 1. Each worker is a start
+	 * and memory of its own, so this is decided per device (platform/budgets.ts `engineCount`), and
+	 * can be changed while running (`setPoolSize`).
+	 */
+	poolSize?: number | undefined;
+	/**
+	 * Told how many jobs the host can run at once whenever that changes: the pool's size was set, an
+	 * engine failed to start and the pool is down to one, or the engines stopped and it is whole
+	 * again. The queue runs as many (main.ts), so that no job it starts waits in here, on its startup
+	 * allowance, behind someone else's diagram.
+	 */
+	onSize?: ((engines: number) => void) | undefined;
 }
 
 /** One render, from `render()` until it settles. */
@@ -68,53 +126,79 @@ interface Job {
 	readonly reject: (error: Error) => void;
 }
 
-/** One worker, from spawn to terminate. Messages from an older one are recognised and dropped. */
+/** One worker, from spawn to terminate. Messages from one no longer in the pool are dropped. */
 interface Engine {
 	readonly worker: Worker;
 	blobUrl: string | null;
 	/** It has announced itself, so it can take a job. */
 	up: boolean;
+	/** The job inside it. */
+	current: Job | null;
 	/** When it was created, and when it said it was ready, by the host's clock. */
 	readonly spawnedAt: number;
 	readyAt: number | null;
 	readonly ready: Promise<void>;
 	readonly resolveReady: () => void;
 	readonly rejectReady: (error: Error) => void;
+	/** Its entry in the report. */
+	readonly life: EngineLife;
 }
 
 /**
- * Owns the TeX worker.
+ * Owns the TeX workers.
  *
  * The shipped plugin injects a 7 MB <script> into every document and lets it scan the DOM, which
  * means the plugin holds no handle on anything: no timeout, no cancellation, no error surface, no
  * way to know a render even started. Everything this class does is unreachable from that design —
  * see internal/DESIGN.md §2.1.
  *
- * ONE job is in the worker at a time, and the rest wait here. TeX runs a job to completion inside
- * a single message task, so a second job posted beside it does not run alongside it, it waits in
- * the worker's own queue — where nothing can see it. Two things went wrong while they were posted
+ * ONE job is in a worker at a time, and the rest wait here. TeX runs a job to completion inside a
+ * single message task, so a second job posted beside it does not run alongside it, it waits in the
+ * worker's own queue — where nothing can see it. Two things went wrong while they were posted
  * together: the second job's clock ran all through the first, so a heavy diagram could time out
  * its innocent neighbour, and a timeout's terminate took the neighbour down with it and blamed it.
  * Holding the line here is what makes `onRunning` mean "the engine has it", and what makes the
  * job in a terminated worker the only job that was in it.
+ *
+ * Up to `poolSize` workers run side by side (internal/DECISIONS.md D24): two on a desktop, one on a
+ * phone. A second one starts only while a job waits that no worker running or starting can take, a
+ * timeout or a crash takes down only its own worker, `kill()` stops them all, and they idle down
+ * together. Once a worker has failed to start, the pool is one until they next stop together.
  */
 export class WorkerHost implements TexHost {
 	readonly id = ENGINE_ID;
 
-	private engine: Engine | null = null;
-	/** The job inside the worker. */
-	private current: Job | null = null;
-	/** Jobs handed to `render` that the worker has not been given yet, oldest first. */
+	/** The workers, up or starting: at most `poolSize`, but for one finishing its job after a shrink. */
+	private readonly engines: Engine[] = [];
+	/** Jobs handed to `render` that no worker has been given yet, oldest first. */
 	private readonly waiting: Job[] = [];
 	private disposed = false;
 	private idleTimer: number | null = null;
 	private inventory: EngineInventory | null = ENGINE_INVENTORY;
 	private nextId = 1;
 
+	/** For the diagnostics view: see EngineReport. */
+	private starts = 0;
+	private readonly lives: EngineLife[] = [];
+	private lastStop: EngineStop | null = null;
+
 	private readonly onLog: ((jobKey: string, line: string) => void) | undefined;
 	private readonly idleTeardownMs: number | undefined;
 	private readonly timers: HostTimers | undefined;
 	private readonly now: () => number;
+	private poolSize: number;
+	private readonly onSize: ((engines: number) => void) | undefined;
+
+	/**
+	 * A worker failed to start since the workers last stopped together (idle, or `kill()`), so no
+	 * other starts while one is up or starting: the pool is the one that came up. A start that fails
+	 * is most likely memory the computer does not have, which the memory rule cannot see where the
+	 * WebView reports too much or nothing (platform/budgets.ts). Starting the second again for every
+	 * job that waits would be one failed start after another for as long as the first is busy.
+	 */
+	private startFailed = false;
+	/** The size `onSize` was last told. */
+	private told: number;
 
 	/**
 	 * Known from the moment the plugin loads, from the inventory baked in at build time.
@@ -137,6 +221,9 @@ export class WorkerHost implements TexHost {
 				: undefined;
 		this.timers = options.timers;
 		this.now = options.now ?? (() => performance.now());
+		this.poolSize = sizeOf(options.poolSize ?? 1);
+		this.onSize = options.onSize;
+		this.told = this.poolSize;
 	}
 
 	get capabilities(): EngineCapabilities {
@@ -147,9 +234,31 @@ export class WorkerHost implements TexHost {
 		return this.inventory;
 	}
 
+	/** How often an engine started this session, how long each start took and why each stopped. */
+	report(): EngineReport {
+		return {
+			starts: this.starts,
+			lives: this.lives.map((life) => ({ ...life })),
+			lastStop: this.lastStop,
+			poolSize: this.size,
+		};
+	}
+
+	/**
+	 * Start an engine if none is running or starting, and wait for one to be up. Called as soon as a
+	 * diagram turns out not to be cached, so that the start runs while the block waits for its turn
+	 * (the viewport, the queue) rather than after it (DECISIONS.md D23). Never more than one.
+	 *
+	 * Its idle teardown is armed at once, as for any engine with nothing to do: one started for a
+	 * diagram nobody scrolls to goes, and so does one whose start never finishes, which no job's
+	 * startup allowance would otherwise ever give up on.
+	 */
 	async ready(): Promise<void> {
 		if (this.disposed) throw unloaded();
-		await (this.engine ?? this.spawn()).ready;
+		if (this.engines.some((engine) => engine.up)) return;
+		const engine = this.engines[0] ?? this.spawn();
+		this.pump();
+		await engine.ready;
 	}
 
 	render(job: TexJob, signal: AbortSignal, onRunning?: () => void): Promise<TexResult> {
@@ -182,8 +291,20 @@ export class WorkerHost implements TexHost {
 	}
 
 	/**
-	 * Destroy the worker and interrupt everything outstanding — the job inside it and the ones
-	 * waiting for it alike.
+	 * Run at most `size` workers from now on: the second engine was turned on or off.
+	 *
+	 * A worker above the new size goes at once if it has no job, and when its job is done if it has
+	 * one: a TeX run cannot be stopped, and the job did nothing wrong.
+	 */
+	setPoolSize(size: number): void {
+		this.poolSize = sizeOf(size);
+		this.resized();
+		this.pump();
+	}
+
+	/**
+	 * Destroy every worker and interrupt everything outstanding — the jobs inside them and the ones
+	 * waiting for them alike.
 	 *
 	 * Terminating is mandatory, not defensive. A TeX run is synchronous inside the worker, so one
 	 * that never ends — a \loop with no way out — holds it for good, and nothing but terminate()
@@ -192,63 +313,98 @@ export class WorkerHost implements TexHost {
 	 * stops a run that loops. Terminate-and-respawn is the guarantee.
 	 *
 	 * The waiting jobs are interrupted too rather than handed a fresh worker, because the callers
-	 * here — backgrounding on a phone, above all — kill the worker to be rid of it, and booting
+	 * here — backgrounding on a phone, above all — kill the workers to be rid of them, and booting
 	 * another behind their back would undo exactly that. Whoever wants the work still done
 	 * resubmits it, when it suits them.
 	 */
-	kill(reason = 'the engine was restarted'): void {
-		const error = new InterruptedError(reason);
-		this.teardown(error);
-		const victims = this.waiting.splice(0);
-		if (this.current !== null) victims.unshift(this.current);
-		this.current = null;
+	kill(why: 'restart' | 'background' | 'unload' = 'restart'): void {
+		const error = new InterruptedError(INTERRUPTED[why]);
+		const victims: Job[] = [];
+		for (const engine of this.engines.slice()) {
+			if (engine.current !== null) victims.push(engine.current);
+			engine.current = null;
+			this.teardown(engine, error, why);
+		}
+		victims.push(...this.waiting.splice(0));
+		this.startFailed = false;
+		this.resized();
 		for (const job of victims) this.settle(job, () => job.reject(error));
 	}
 
 	dispose(): void {
 		this.disposed = true;
-		this.kill('the plugin was unloaded');
+		this.kill('unload');
 	}
 
 	// -------------------------------------------------------------------------------------------
 
-	/** Give the worker its next job, if it has none — booting one first if there is none. */
+	/**
+	 * Let a worker above the pool's size go if it has no job; give each idle worker the next waiting
+	 * job; and start another worker while jobs wait that the ones running and starting cannot take,
+	 * up to the pool's size, or to one once a worker has failed to start.
+	 */
 	private pump(): void {
-		if (this.current !== null || this.disposed) return;
+		if (this.disposed) return;
 
-		const next = this.waiting[0];
-		if (next === undefined) {
-			this.armIdleTeardown();
-			return;
+		// The newest first: that is the second engine, the one turned off.
+		for (const engine of this.engines.slice().reverse()) {
+			if (this.engines.length <= this.poolSize) break;
+			if (engine.current !== null) continue;
+			this.teardown(
+				engine,
+				new TexError(
+					'engine-unavailable',
+					[],
+					undefined,
+					undefined,
+					'the second engine was turned off',
+				),
+				'settings',
+			);
 		}
-		this.cancelIdleTeardown();
 
-		let engine = this.engine;
-		if (engine === null) {
+		for (const engine of this.engines) {
+			const next = this.waiting[0];
+			if (next === undefined) break;
+			if (!engine.up || engine.current !== null) continue;
+			this.waiting.shift();
+			this.post(engine, next);
+		}
+
+		const starting = this.engines.filter((engine) => !engine.up).length;
+		// Every waiting job beyond what the starting workers will take wants a worker of its own.
+		let wanted = this.waiting.length - starting;
+		while (wanted > 0 && this.engines.length < this.size) {
 			try {
-				engine = this.spawn();
+				this.spawn();
 			} catch (error) {
-				this.failWaiting(error as Error);
-				return;
+				if (this.engines.length === 0) this.failWaiting(error as Error);
+				break;
 			}
+			wanted--;
 		}
-		// Still booting: its `ready` message calls back in here.
-		if (!engine.up) return;
 
-		this.waiting.shift();
-		this.current = next;
+		if (this.waiting.length === 0 && this.engines.every((engine) => engine.current === null)) {
+			this.armIdleTeardown();
+		} else {
+			this.cancelIdleTeardown();
+		}
+	}
+
+	private post(engine: Engine, job: Job): void {
+		engine.current = job;
 		// The part of the engine's start this job was there for. Waiting behind another job once
 		// the engine was up is not the engine starting.
-		if (engine.readyAt !== null && next.arrived < engine.readyAt)
-			next.startMs = engine.readyAt - Math.max(next.arrived, engine.spawnedAt);
+		if (engine.readyAt !== null && job.arrived < engine.readyAt)
+			job.startMs = engine.readyAt - Math.max(job.arrived, engine.spawnedAt);
 		engine.worker.postMessage({
 			type: 'render',
-			id: next.id,
-			source: next.source,
-			options: next.options,
+			id: job.id,
+			source: job.source,
+			options: job.options,
 		} satisfies WorkerRequest);
 		try {
-			next.onRunning?.();
+			job.onRunning?.();
 		} catch {
 			// The caller's clock is its own business; the job is in the worker either way.
 		}
@@ -275,23 +431,30 @@ export class WorkerHost implements TexHost {
 		// no one awaiting `ready()` must not surface as an unhandled rejection.
 		ready.catch(() => undefined);
 
+		const life: EngineLife = { startMs: null, stop: null };
+		this.starts++;
+		this.lives.push(life);
+		if (this.lives.length > ENGINE_LIVES) this.lives.shift();
+
 		const engine: Engine = {
 			worker,
 			blobUrl,
 			up: false,
+			current: null,
 			spawnedAt: this.now(),
 			readyAt: null,
 			ready,
 			resolveReady,
 			rejectReady,
+			life,
 		};
 		worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
-			if (this.engine === engine) this.receive(engine, event.data);
+			if (this.engines.includes(engine)) this.receive(engine, event.data);
 		};
 		worker.onerror = (event) => {
-			if (this.engine === engine) this.crashed(engine, event.message);
+			if (this.engines.includes(engine)) this.crashed(engine, event.message);
 		};
-		this.engine = engine;
+		this.engines.push(engine);
 		return engine;
 	}
 
@@ -299,6 +462,7 @@ export class WorkerHost implements TexHost {
 		if (message.type === 'ready') {
 			engine.up = true;
 			engine.readyAt = this.now();
+			engine.life.startMs = Math.round(engine.readyAt - engine.spawnedAt);
 			this.inventory = message.inventory;
 			this.caps = capabilitiesOf(message.inventory);
 			// The blob URL has done its job the moment the worker is running. Upstream never revokes
@@ -313,7 +477,7 @@ export class WorkerHost implements TexHost {
 		}
 
 		// A reply for a job we abandoned; ids make that unambiguous rather than a guess.
-		const job = this.current;
+		const job = engine.current;
 		if (job === null || message.id !== job.id) return;
 
 		if (message.type === 'log') {
@@ -322,7 +486,7 @@ export class WorkerHost implements TexHost {
 			return;
 		}
 
-		this.current = null;
+		engine.current = null;
 		const line = blockLine(message.line, message.bodyLine);
 		if (message.type === 'ok') {
 			const result: TexResult = {
@@ -343,35 +507,52 @@ export class WorkerHost implements TexHost {
 
 	/**
 	 * `onerror`: an exception nothing in the worker caught, so its state is unknown and it is not
-	 * reused. A crash while booting fails everyone waiting for that boot — respawning behind them
-	 * would loop on a boot that cannot succeed. A crash mid-run fails that job, and the jobs behind
-	 * it get a fresh worker.
+	 * reused. A crash mid-run fails that job, and the jobs behind it get a worker.
+	 *
+	 * A crash while starting makes the pool one until the workers next stop together
+	 * (`startFailed`). The jobs waiting then wait for a worker that is up or still starting, if there
+	 * is one; with none, they fail, because starting another behind them would loop on a start that
+	 * cannot succeed.
 	 */
 	private crashed(engine: Engine, message: string): void {
 		const error = new TexError('engine-unavailable', [], undefined, undefined, message);
-		const booting = !engine.up;
-		this.teardown(error);
+		const starting = !engine.up;
+		const victims: Job[] = [];
+		if (engine.current !== null) victims.push(engine.current);
+		engine.current = null;
+		this.teardown(engine, error, 'error');
 
-		const victims = booting ? this.waiting.splice(0) : [];
-		if (this.current !== null) victims.unshift(this.current);
-		this.current = null;
+		if (starting) {
+			this.startFailed = true;
+			this.resized();
+			if (this.engines.length === 0) victims.push(...this.waiting.splice(0));
+		}
 		for (const job of victims) this.settle(job, () => job.reject(error));
 		this.pump();
 	}
 
 	/**
-	 * The caller stopped waiting: its timeout, or its startup allowance, ran out.
+	 * The caller stopped waiting: its timeout or its startup allowance ran out, or nobody wants the
+	 * diagram any more.
 	 *
-	 * A job abandoned mid-run takes the worker with it. It cannot be stopped any other way, and
-	 * nothing queued behind it could run until it ended — which, for a run that loops, is never. A
-	 * job abandoned before the worker had it takes nothing with it, unless it
-	 * was the last one waiting on a boot: a boot that outlived a caller's whole startup allowance
-	 * is presumed wedged, and with nobody left waiting there is no reason to let it go on.
+	 * A job abandoned mid-run takes its worker with it, and only its own. It cannot be stopped any
+	 * other way, and nothing queued behind it could run there until it ended — which, for a run that
+	 * loops, is never. A job abandoned before a worker had it takes nothing with it, unless it was
+	 * the last one waiting while every worker was still starting: a start that outlived a caller's
+	 * whole startup allowance is presumed wedged, and with nobody left waiting there is no reason to
+	 * let it go on.
+	 *
+	 * Not when the queue cancelled the job (internal/DECISIONS.md D25): its blocks went away, a note
+	 * switched away from, which says nothing about the start, and the engine started early for it is
+	 * kept for the next note's diagrams, or idles down if none comes. A WebView without
+	 * `AbortSignal.reason`, an older iOS WebKit's, cannot tell the two apart, and stops the start as
+	 * before.
 	 */
 	private abandon(job: Job): void {
-		if (this.current === job) {
-			this.current = null;
-			this.teardown(new TexError('timeout', job.log));
+		const running = this.engines.find((engine) => engine.current === job);
+		if (running !== undefined) {
+			running.current = null;
+			this.teardown(running, new TexError('timeout', job.log), 'timeout');
 			this.settle(job, () => job.reject(new TexError('timeout', job.log)));
 			this.pump();
 			return;
@@ -384,12 +565,21 @@ export class WorkerHost implements TexHost {
 			job.reject(new TexError('aborted', [], undefined, undefined, 'abandoned before it started')),
 		);
 
-		const engine = this.engine;
-		if (engine !== null && !engine.up && this.current === null && this.waiting.length === 0) {
-			this.teardown(
-				new TexError('engine-unavailable', [], undefined, undefined, 'the engine did not start'),
-			);
+		if (
+			!isQueueError(job.signal.reason, 'cancelled') &&
+			this.waiting.length === 0 &&
+			this.engines.every((engine) => !engine.up && engine.current === null)
+		) {
+			for (const engine of this.engines.slice()) {
+				this.teardown(
+					engine,
+					new TexError('engine-unavailable', [], undefined, undefined, 'the engine did not start'),
+					'error',
+				);
+			}
 		}
+		// With nothing left waiting, a worker kept is an idle one.
+		this.pump();
 	}
 
 	private failWaiting(error: Error): void {
@@ -402,12 +592,14 @@ export class WorkerHost implements TexHost {
 		fn();
 	}
 
-	/** Stop the current worker, if there is one. Jobs are the caller's to settle. */
-	private teardown(error: Error): void {
-		this.cancelIdleTeardown();
-		const engine = this.engine;
-		if (engine === null) return;
-		this.engine = null;
+	/** Stop one worker. Its job, if it had one, is the caller's to settle. */
+	private teardown(engine: Engine, error: Error, why: EngineStop): void {
+		const at = this.engines.indexOf(engine);
+		if (at < 0) return;
+		this.engines.splice(at, 1);
+		if (this.engines.length === 0) this.cancelIdleTeardown();
+		engine.life.stop = why;
+		this.lastStop = why;
 		engine.worker.terminate();
 		if (engine.blobUrl) {
 			URL.revokeObjectURL(engine.blobUrl);
@@ -417,13 +609,25 @@ export class WorkerHost implements TexHost {
 		engine.rejectReady(error);
 	}
 
+	/**
+	 * Once nothing is running or waiting, stop every worker after the idle budget, together, also one
+	 * still starting.
+	 */
 	private armIdleTeardown(): void {
 		if (this.idleTeardownMs === undefined || this.timers === undefined) return;
-		if (this.engine === null || !this.engine.up || this.idleTimer !== null) return;
+		if (this.engines.length === 0 || this.idleTimer !== null) return;
 		this.idleTimer = this.timers.setTimeout(() => {
 			this.idleTimer = null;
-			if (this.current !== null || this.waiting.length > 0) return;
-			this.teardown(new TexError('engine-unavailable', [], undefined, undefined, 'stopped while idle'));
+			if (this.waiting.length > 0 || this.engines.some((engine) => engine.current !== null)) return;
+			for (const engine of this.engines.slice()) {
+				this.teardown(
+					engine,
+					new TexError('engine-unavailable', [], undefined, undefined, 'stopped while idle'),
+					'idle',
+				);
+			}
+			this.startFailed = false;
+			this.resized();
 		}, this.idleTeardownMs);
 	}
 
@@ -432,6 +636,28 @@ export class WorkerHost implements TexHost {
 		this.timers?.clearTimeout(this.idleTimer);
 		this.idleTimer = null;
 	}
+
+	/** How many workers run at once now: the pool's size, or one once a worker failed to start. */
+	private get size(): number {
+		return this.startFailed ? 1 : this.poolSize;
+	}
+
+	/** Tell `onSize` the size, if it changed. */
+	private resized(): void {
+		const size = this.size;
+		if (size === this.told) return;
+		this.told = size;
+		try {
+			this.onSize?.(size);
+		} catch {
+			// The caller's business; the pool is this size either way.
+		}
+	}
+}
+
+/** A pool's size: a whole number of workers, at least one. */
+function sizeOf(size: number): number {
+	return Math.max(1, Math.floor(size));
 }
 
 /**

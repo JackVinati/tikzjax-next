@@ -37,6 +37,25 @@ export const SCHEMA_VERSION = 1;
 export const PIPELINE_REVISION = 2;
 
 /**
+ * Moved when what the engine draws can change: the DVI TeX writes, the transcript the plugin reads
+ * its errors from, or the SVG the converter makes of the DVI. See internal/DECISIONS.md D20.
+ *
+ * The key used to hold ENGINE_ID, the hash of the worker itself, so every change to the worker
+ * recompiled every cached diagram once, also one that made TeX faster and drew every diagram the
+ * same to the byte. This holds the engine's OUTPUT instead. Its first value is the ENGINE_ID 0.2.0
+ * shipped with, so the keys 0.2.0 stored under are the keys derived now, and updating to a release
+ * that changes only speed recompiles nothing.
+ *
+ * test/output-revision.test.ts holds it to the golden corpus: a fixture whose recorded output
+ * changes fails it until this moves and test/fixtures/golden/REVISION.json is recorded again. The
+ * corpus is 37 diagrams, so a change the CHANGELOG announces as changing what diagrams draw moves
+ * it too, by hand, whether or not a fixture shows it — a newly bundled package, say, changes every
+ * diagram that was drawn without it. Any new string will do; the sha256 of the worker that first
+ * draws the new way is the convention.
+ */
+export const OUTPUT_REVISION = '5e861510239768c57ca2965eb2329bd2bafc1370df4821cd8d3b7088ce60efde';
+
+/**
  * Fields are length-prefixed rather than joined with a separator.
  *
  * A separator has to be a byte no input can contain, and no such byte exists here: `baked.preamble`
@@ -53,7 +72,7 @@ export function deriveKey(i: KeyInputs): string {
 	const payload =
 		field(`s${SCHEMA_VERSION}`) +
 		field(`p${PIPELINE_REVISION}`) +
-		field(i.engineId) +
+		field(i.outputRevision) +
 		field(i.normalizedSource) +
 		field(stableStringify(i.baked)) +
 		field(i.artifactRevision) +

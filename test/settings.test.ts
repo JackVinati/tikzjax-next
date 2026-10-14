@@ -21,6 +21,7 @@ const CHANGED: TikzSettings = {
 	svgo: 'off',
 	fast: true,
 	timeoutSeconds: 45,
+	secondEngine: false,
 	sourceHandling: 'legacy',
 	preamblePath: 'tex/preamble.tex',
 	autoPreambleName: '',

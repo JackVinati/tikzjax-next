@@ -4,11 +4,13 @@ import { COLD_FONT_CSS } from 'virtual:fonts';
 import { TexError, type Budgets, type TexResult } from './types';
 import type { EngineInventory } from '../engine-src/protocol';
 import { WorkerHost } from './engine/worker-host';
-import { budgetsFor } from './platform/budgets';
+import { budgetsFor, engineCount } from './platform/budgets';
 import { ensureFonts } from './platform/context';
+import { device, webViewFeatures } from './platform/device';
 import { DiagramCache } from './cache';
 import { RenderQueue } from './queue/queue';
 import { ViewportGate } from './block/viewport';
+import { editedNote, RecentEdits } from './block/edits';
 import {
 	BlockTally,
 	createProcessor,
@@ -22,6 +24,7 @@ import { PreambleService } from './preamble/vault';
 import { registerCommands } from './ui/commands';
 import { DebugView, DEBUG_VIEW_TYPE, type RenderRecord } from './ui/debug-view';
 import { sha256Hex } from './cache/sha256';
+import { OUTPUT_REVISION } from './cache/key';
 import { Component, MarkdownRenderer, TFile, type WorkspaceLeaf } from 'obsidian';
 import { TikzSettingTab } from './settings/tab';
 import { STRINGS } from './ui/strings';
@@ -69,13 +72,9 @@ export default class TikzjaxNextPlugin extends Plugin {
 			return;
 		}
 
-		// No setting changes the concurrency any more: there is one worker, and it runs one job at a
-		// time, so a second slot would only queue a job inside the worker with its clock running. See
-		// DESKTOP.concurrency in platform/budgets.ts.
-		//
-		// Nor is the time limit folded in here any more. The processor reads it per block, so a
-		// change applies to the next diagram rather than after a restart, and a limit set back to 0
-		// falls back to this budget rather than to the value it had at load.
+		// The time limit is not folded in here any more. The processor reads it per block, so a change
+		// applies to the next diagram rather than after a restart, and a limit set back to 0 falls back
+		// to this budget rather than to the value it had at load.
 		this.budgets = budgetsFor(Platform.isMobile);
 
 		const timers = {
@@ -83,7 +82,18 @@ export default class TikzjaxNextPlugin extends Plugin {
 			clearTimeout: (id: number) => window.clearTimeout(id),
 		};
 
-		this.host = new WorkerHost({ idleTeardownMs: this.budgets.idleTeardownMs, timers });
+		// As many workers as jobs the queue runs at once, each running one job at a time: two on a
+		// computer, one on a phone, one where the second engine is off or memory is short
+		// (platform/budgets.ts `engineCount`), and one after a worker failed to start, which the
+		// host tells the queue. A job the queue starts beyond the workers would wait in the host on
+		// its startup allowance, behind someone else's diagram.
+		const engines = this.engineCount();
+		this.host = new WorkerHost({
+			idleTeardownMs: this.budgets.idleTeardownMs,
+			timers,
+			poolSize: engines,
+			onSize: (size) => this.queue?.setConcurrency(size),
+		});
 		this.preamble = new PreambleService(this.app, sha256Hex);
 		this.cache = new DiagramCache({
 			// `appId` is real but undocumented, so it is not on the public App type. It is what
@@ -97,7 +107,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 		});
 
 		this.queue = new RenderQueue<TexJobSpec, TexResult>({
-			concurrency: this.budgets.concurrency,
+			concurrency: engines,
 			depthCap: this.budgets.queueDepthCap,
 			run: (job, signal, running) => this.runJob(job, signal, running),
 			timers,
@@ -112,6 +122,14 @@ export default class TikzjaxNextPlugin extends Plugin {
 			setTimeout: (fn, ms) => window.setTimeout(fn, ms),
 			clearTimeout: (id) => window.clearTimeout(id),
 		});
+
+		// Which notes are being typed in, in any pane, so that only their blocks debounce and every
+		// other diagram goes to the queue as soon as it is seen (block/edits.ts). A change no editor
+		// made comes in through `modify`, below.
+		const edits = new RecentEdits(this.budgets.editWindowMs, () => Date.now());
+		this.registerEvent(
+			this.app.workspace.on('editor-change', (_editor, info) => edits.changed(editedNote(info))),
+		);
 
 		this.registerMarkdownCodeBlockProcessor(
 			'tikz',
@@ -143,6 +161,16 @@ export default class TikzjaxNextPlugin extends Plugin {
 				now: () => Date.now(),
 				timers,
 				preamble: this.preamble,
+				editing: (notePath) => edits.editing(notePath),
+				// At the first diagram that is not cached, never at load: a session that only shows
+				// cached diagrams never pays for an engine. Never in the background either, where the
+				// mobile teardown has just stopped one and paused the queue so that none starts. The
+				// block's own document, not the main window's: on a desktop the main window may be
+				// minimized while a pop-out window shows the note.
+				startEngine: (doc) => {
+					if (doc.visibilityState === 'hidden') return;
+					this.host?.ready().catch(() => undefined);
+				},
 				onBlock: (spec, el) => {
 					const record: RenderRecord = {
 						key: spec.key,
@@ -161,6 +189,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 					return (outcome) => {
 						record.state = outcome.state;
 						record.tier = outcome.tier;
+						record.reason = outcome.reason;
 						record.durationMs = outcome.durationMs;
 						record.timings = outcome.timings;
 						record.message = outcome.message;
@@ -180,6 +209,14 @@ export default class TikzjaxNextPlugin extends Plugin {
 					cacheStats: () => this.cache?.stats() ?? Promise.resolve({ entries: 0, bytes: 0 }),
 					memoryStats: () => this.cache?.memoryStats() ?? { entries: 0, bytes: 0 },
 					queueDepth: () => this.queue?.size() ?? 0,
+					engine: () =>
+						this.host?.report() ?? { starts: 0, lives: [], lastStop: null, poolSize: 1 },
+					about: () => ({
+						...device(),
+						plugin: this.manifest.version,
+						engineId: this.host?.id ?? '',
+						outputRevision: OUTPUT_REVISION,
+					}),
 				}),
 		);
 
@@ -207,6 +244,10 @@ export default class TikzjaxNextPlugin extends Plugin {
 		this.registerEvent(
 			this.app.vault.on('modify', (file) => {
 				if (!(file instanceof TFile)) return;
+				// A note rewritten by a sync or collaboration plugin, or by another program, is
+				// redrawn in a Reading view without any editor saying so; its blocks debounce like
+				// those of a note being typed in, so that changes coming in quickly compile once.
+				edits.changed(file.path);
 				const affected = this.preamble?.invalidate(file.path) ?? [];
 				for (const key of affected) void this.cache?.forget(key);
 				if (affected.length) this.rerenderOpenViews();
@@ -321,6 +362,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 	 */
 	async saveSettings(): Promise<void> {
 		this.queue?.clearPoison();
+		this.applyEngineCount();
 		this.showSettings();
 		await this.saveData(this.settings);
 	}
@@ -337,8 +379,32 @@ export default class TikzjaxNextPlugin extends Plugin {
 		void this.loadData().then((raw) => {
 			this.settings = migrateSettings(raw);
 			this.queue?.clearPoison();
+			this.applyEngineCount();
 			this.showSettings();
 		});
+	}
+
+	/**
+	 * Whether this device runs a second engine when the setting lets it: not a phone or a tablet, nor
+	 * a computer that reports too little memory or too few cores (platform/budgets.ts `engineCount`).
+	 * The settings tab says so where it does not.
+	 */
+	get secondEngineAvailable(): boolean {
+		return engineCount(this.budgets, true, webViewFeatures()) > 1;
+	}
+
+	/** How many engines run at once on this device, under the settings now in force. */
+	private engineCount(): number {
+		return engineCount(this.budgets, this.settings.secondEngine, webViewFeatures());
+	}
+
+	/**
+	 * The second engine was turned on or off: the host runs that many workers from now on, and tells
+	 * the queue how many jobs to run at once (`onSize`), which is one while a worker that failed to
+	 * start keeps the pool at one. A worker no longer wanted goes when it has finished its job.
+	 */
+	private applyEngineCount(): void {
+		this.host?.setPoolSize(this.engineCount());
 	}
 
 	/**
@@ -395,7 +461,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 			id: 'restart-engine',
 			name: 'Restart the TeX engine',
 			callback: () => {
-				this.host?.kill('restarted from the command palette');
+				this.host?.kill('restart');
 				this.queue?.clearPoison();
 				new Notice('TeX engine restarted.');
 			},
@@ -422,7 +488,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 				return;
 			}
 			this.queue?.pause();
-			this.host?.kill('the app was backgrounded');
+			this.host?.kill('background');
 			this.cache?.dropMemory();
 		});
 	}

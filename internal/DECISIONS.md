@@ -1091,7 +1091,339 @@ stays.
 
 ---
 
-## D20 — What the engine cannot typeset is drawn over a box TeX sets for it
+## D20 — The cache key holds what the engine draws, not which build of it drew it
+
+**Amends the cache-key part of D10 ("`ENGINE_ID` … still a cache-key input"), of D18 and D19
+("every cached diagram compiles once more after the update"), and DESIGN.md §6.1, whose payload has
+`engineId` where this puts `OUTPUT_REVISION`. Date of record: 2026-10-14.**
+
+Until 0.2.0 the third field of the key was ENGINE_ID, the sha256 of the worker as it ships. Every
+change to the worker therefore recompiled every diagram every user had cached, once, the next time
+it was shown, also when the change drew every diagram the same to the byte. 0.2.0 did that for an
+engine that only got faster and a few changes of output, and the 0.2.x plan has three more worker
+changes in it, each held to the golden corpus byte for byte: the rebuilt engine, the faster start
+and the preamble snapshot. Each would have been one more recompile of everything, on the phone
+above all, where a compile is slowest.
+
+The field now holds `OUTPUT_REVISION` (`src/cache/key.ts`), a string that moves when what the
+engine draws can change: the DVI TeX writes, the transcript the plugin reads its errors from, or the
+SVG the converter makes. Its first value is exactly the ENGINE_ID 0.2.0 shipped,
+`5e861510239768c57ca2965eb2329bd2bafc1370df4821cd8d3b7088ce60efde`, in the same place in the
+payload, so every key 0.2.0 derived is derived again and updating to 0.2.1 recompiles nothing.
+`test/key.test.ts` pins a key 0.2.0 derived, computed outside the implementation, and
+`test/processor.test.ts` that a block keeps its key whichever build of the engine is running.
+
+What keeps the revision honest:
+
+- **The golden corpus.** `test/fixtures/golden/REVISION.json` records, under the revision, one
+  sha256 per fixture over its recorded DVI sha256, transcript and SVG.
+  `test/output-revision.test.ts` fails when a recorded fixture's output is no longer that, telling
+  the developer to move `OUTPUT_REVISION` and record again; `node scripts/output-revision.mjs
+  --record` writes the record and refuses to write a changed output under the old revision.
+  `npm run verify:golden -- --update`, which is how an intended change of output is recorded,
+  records `REVISION.json` with it, under the same refusal. A fixture new to the corpus is recorded
+  without a bump: nothing was cached from its output before.
+- **The worker.** `REVISION.json` also records the ENGINE_ID the corpus was last checked against,
+  and `test/engine-id.test.ts` builds the worker that ships and fails when it is another one. That
+  is the moment the decision is made, by a person, because the corpus is 37 diagrams and a change
+  can alter what a diagram outside it draws. In 0.2.1 it is also the proof that the worker is
+  0.2.0's, byte for byte.
+- **By hand.** Whenever the CHANGELOG says that diagrams draw differently, the revision moves, also
+  when no fixture shows it: a package bundled that was missing, a fixed TeX file, a converter change
+  for a glyph no fixture uses. CONTRIBUTING.md says so. The sha256 of the first worker that draws
+  the new way is the convention for the new value; any new string works.
+
+**What is cached when a render fails.** Read from `src/block/machine.ts` and
+`src/block/render-child.ts`: an artifact is written to the cache only on the way from the SVG
+pipeline to the note (`persist`, TRANSFORMING + ok), also for a block unloaded while it compiled.
+An error card is never cached, nor is a mount whose pipeline skipped a stage (MOUNTED_DEGRADED). A
+timeout poisons the key in the queue's set, which is in memory, lasts the session at most, and is
+cleared by Retry, Restart the TeX engine and any settings change. So an engine that fixes a diagram
+that failed shows the fix at once, with or without a bump. What is cached is every diagram TeX drew,
+including one it drew after recovering from an error, with TeX's message on it: a diagram that
+loads a package the engine lacks is drawn without it (D19) and that drawing is cached. A release
+that bundles the package changes what that diagram draws, which is exactly the case the corpus does
+not see and the bump by hand is for.
+
+ENGINE_ID itself is unchanged in meaning: it is the build, stored with each artifact, shown in the
+diagnostics, announced by the worker (`verify:worker`), and the engine `src/source/native-unicode.ts`
+was scanned on. D3's extended engine, if it is ever built, draws differently from the core one and
+needs a revision of its own in the key, as ENGINE_ID gave it for free.
+
+---
+
+## D21 — The diagnostics view times the whole wait, and copies as text without the diagrams
+
+**Extends D18's diagnostics, which time a compile from the queue to the end of the SVG pipeline.
+Date of record: 2026-10-14.**
+
+Every figure 0.2.0 claims was measured in V8 on a desktop, and the device the plugin is slowest on
+has no devtools. What the view showed left out the two waits around a compile: the time a diagram
+spent between coming into view and being handed to the queue (the viewport gate and the debounce,
+500 ms on a phone by configuration), and the time from the SVG pipeline to the diagram drawn in the
+note (fonts, inserting it, the measurement that reframes it). It also said nothing of how often the
+engine started, which on a phone is after every 30 s idle and every time the app goes to the
+background.
+
+- **Per diagram** (`CompileTimings`): `waited` from seen to asked, `drawing` from the end of the
+  pipeline to drawn, and `seen to drawn`. "Seen" is the viewport gate letting the block through, or
+  the cache missing for a block that skips the gate (an export, `lazy=off`, one the gate gave up
+  on), or the press of Retry or "Render diagram". A block is reported when it comes to rest, as
+  before, because "Render all diagrams in this note" counts it then, and again once it is drawn.
+- **Per engine** (`WorkerHost.report`): the starts this session, each start's time from created to
+  ready, and why each engine stopped: idle, background, timeout, restart, error or unload.
+- **Copy** puts the view on the clipboard as plain text (`src/ui/report.ts`), less what it shows of
+  the diagrams. It copies as Obsidian does, read in its 1.14.4 bundle: with the asynchronous
+  clipboard only where the Permissions API is there too, which an older iOS WebKit lacks, and
+  otherwise with the text selected in a textarea and the document's copy command; both start inside
+  the click, as WebKit wants. Where neither copies, or the clipboard has not answered after 1.5 s,
+  the text is shown, to copy by hand, and selected where the WebView lets a page select it, which iOS
+  may not outside the click. None of it has run on a phone yet; `TODO.md` §9 has the check. It
+  carries the plugin version, Obsidian's `apiVersion`, desktop, phone or tablet and
+  the OS family from `Platform`, ENGINE_ID and OUTPUT_REVISION, the engine starts, the cache and
+  queue figures, and the recent renders with their steps. It never carries a diagram's source, an
+  error card's text (which quotes the source and names preamble files by path), the transcript or a
+  note: a render is named by its place in the list and the first eight characters of its cache
+  key. `test/report.test.ts` holds it to that.
+
+The user agent was meant to be in it, for the iOS version and the WebKit build. The store's rules
+forbid reading `navigator.userAgent` (`obsidianmd/platform`) and forbid disabling that rule, so it
+is left out: `lint:store` reports the read as an error, and the store's review would too. What the
+user agent would have said about the WebView is asked of it instead, by feature check:
+`DecompressionStream` and `Uint8Array.fromBase64`, which decide what 0.2.2's faster start can use,
+and the cores and memory it reports. The iOS version is written down by whoever measures.
+
+---
+
+## D22 — Only a block of a note being typed in waits for the debounce
+
+**Amends DESIGN.md §3.3's `GATING + intersect → DEBOUNCING` row and §5.4's "Debounce while
+editing", which every uncached block paid. Date of record: 2026-10-14.**
+
+Every block that missed the cache waited `debounceMs` after the viewport gate before it was queued:
+300 ms on the desktop and 500 ms on a phone, by configuration (`src/platform/budgets.ts`), also when
+a note was opened and nobody was typing at all. On a small diagram that is most of the wait; it was
+the same in 0.1.5 and 0.2.0, and until D21 the diagnostics did not show it. It exists for one case,
+typing (upstream #24): wherever a diagram is drawn while its text is edited, each keystroke remakes
+the block, and a block that debounces is unloaded by the next keystroke before anything was queued,
+so a burst of typing compiles once, at the pause.
+
+So the debounce is kept for exactly that block and dropped for every other. A block is taken for one
+being typed in when the text of its note changed within `editWindowMs` (1 s on both platforms) of its
+cache miss, by any editor in any pane, as Obsidian's `editor-change` reports it, or by a change to
+its file, as `vault.on('modify')` reports it (`src/block/edits.ts`); an `editor-change` that names no
+note counts for every note. Such a block goes `GATING → DEBOUNCING` as before; any other goes
+`GATING → SCHEDULING` the moment the gate lets it through, in band 1, and a `lazy=off` block to
+SCHEDULING at once, in band 2. An export never gated or debounced, and still does not.
+
+The decision is made at the cache miss, not when the block is processed, because of the order of
+things in Obsidian, read in the 1.14.4 bundle: `editor-change` is triggered from the editor's update
+listener, after Live Preview has remade the widget for that keystroke, so at processing time the
+keystroke that caused the block may not have been reported yet; the miss comes after an IndexedDB
+read, by when it has. The window covers the rest of the way from a keystroke to the miss it causes:
+Live Preview remakes its widget in the keystroke's own update, a second pane on the same note and a
+Reading view beside the editor are told 10 ms after it (`requestOnInternalDataChange`) and a Reading
+view renders at once or, while still parsing, 200 ms later (`queueRender`), and an embed of the note
+reloads on the same notice. A longer window costs only the debounce, to a block that first appears
+in a note that was typed in within it, which is what every block paid before.
+
+How each place a diagram is drawn comes out:
+
+- **Live Preview, one pane.** While the cursor is inside the fence, Live Preview shows the source
+  and draws no widget (DESIGN.md §7.8, read in the bundle); the widget is drawn when the cursor
+  leaves, and debounces if the last keystroke was less than a second before, as every block did.
+- **A second pane on the note, a Reading view beside the editor, an embed of the note.** Remade at
+  each keystroke, each time within the window, so each debounces and is unloaded by the next
+  keystroke: one compile per pause.
+- **Opening a note, scrolling, switching view, a hover preview of a note nobody types in, "Render all
+  diagrams in this note".** No edit, so no wait.
+- **A change that is not typing**: a sync or collaboration plugin, another program saving the file.
+  No editor reports it, but the file's `modify` does, so a note redrawn in a Reading view for each
+  change that comes in debounces, and changes arriving a moment apart compile once, as every change
+  did before. Obsidian saving the note being typed in counts as one more edit of it, which changes
+  nothing.
+- **PDF export.** Unchanged: never gated, never debounced.
+
+"The block at this place in the note had other text a moment ago" was the first idea, and was not
+robust: with the same note in two panes, the second pane's block for a keystroke finds the first
+pane's block with the same text at that place and would compile every keystroke; `getSectionInfo`
+is null in exports, embeds and hover previews and is the whole callout for a block inside one; and a
+line inserted above moves every place below it. The note-wide rule errs the other way, towards the
+old behaviour.
+
+A block now compiles where 0.2.0's would not have only if it reaches its cache miss more than the
+window after the last change to its note and another change unloads it within the debounce: a
+keystroke after a pause of more than a second, in a view that took more than a second to remake the
+block. Nothing read in 1.14.4 takes that long. The plan's fallback, a debounce of 300 ms for every
+block on the phone as well, stays the answer if typing in Live Preview turns out to compile
+fragments on a device: every miss saying `editing: true` (`render-child.ts`), and the phone's
+`debounceMs` at 300.
+
+Tests: the transitions and both property tests in `test/machine.test.ts` (one settle, whatever the
+`editing` of a miss; no debounce for a block nobody is typing in, over 2,000 seeded sequences, and
+always one for a block that is), `test/edits.test.ts`, and the child and processor tests. Typing in
+a diagram on an Obsidian 1.7.2 install and a current one, by hand, is in `TODO.md` §9.
+
+---
+
+## D23 — The engine starts at the first diagram that is not cached
+
+**Amends DESIGN.md §4.3, under which the engine started when the queue handed the host its first
+job. Date of record: 2026-10-14.**
+
+Until 0.2.1 the engine was created when the first job reached it: after the diagram had been seen,
+after its debounce, after its turn in the queue. Its start, 192–234 ms in WebKit on the desktop
+with 0.2.0's worker (the 0.2.x measurements), was then paid in full by that diagram, and on a phone
+the engine stops after 30 s idle and whenever the app goes to the background, so the first diagram
+after each of those pays it again.
+
+Now a block whose cache lookup misses asks the host to start an engine (`TexHost.ready`, through the
+processor's `startEngine`), unless it is `lazy=manual` and waits for its button. The start then runs
+while the block waits for the viewport gate and the queue, and the job's "engine start" step counts
+only the part of it the job still had to wait for. At most one engine is started this way; it is
+the host's own, so the idle teardown stops it like any other, which is what becomes of an engine
+started for a diagram nobody scrolled to. The teardown is armed as soon as it starts, also while it
+is still starting: before the early start every engine was started for a job, whose startup
+allowance gave up on a start that never finished, and one started early has no job to do that.
+
+- **Never at plugin load.** A session that only shows cached diagrams never starts an engine, as
+  before. Starting one at load would cost every session its memory, about 81 MB once started for
+  0.2.0's worker, measured in Node 22 by the 0.2.x boot study, and the start's CPU.
+- **Never in the background.** On a phone the app going to the background stops the engine and
+  pauses the queue so that nothing starts another (main.ts `registerTeardown`); the early start is
+  not the queue, so it checks the visibility itself, of the block's own document: on a desktop the
+  main window can be minimized while a pop-out window shows the note.
+- **What it costs.** Creating the worker takes the main thread 9–11 ms in WebKit and 19–21 ms in
+  Chromium on the desktop, with 0.2.0's worker (the 0.2.x boot study), which the first job used to
+  pay at the same moment of its life anyway.
+
+What it gains was not measured in Obsidian: the "engine start" step of the first diagram in the
+diagnostics view (D21) shows it, on each device.
+
+---
+
+## D24 — Two engines on a computer, one on a phone
+
+**Amends the 0.1.5 decision that made the desktop's concurrency 1 like the phone's (TODO.md §3,
+`DESKTOP.concurrency`), and DESIGN.md §4.3's one worker. Date of record: 2026-10-14.**
+
+0.1.5 brought the desktop down to one job at a time because two jobs in ONE worker do not run side by
+side: the second waited in the worker's own queue with its clock running. A second worker does run
+side by side, at the cost of a second engine, and was left for later. It was measured for 0.2.x:
+0.2.0 with a pool of two workers, its worker unchanged, against 0.2.0, in a harness that runs the
+worker exactly as main.js carries it and hands it a note of 37 uncached diagrams, every fixture once,
+all at once, from the worker's creation to its last reply, median of 5 fresh browsers (the 0.2.x
+measurements, set B; Windows 11, i9-13900K, Playwright 1.63, busy with other work at 32–43% CPU):
+
+| | one worker | two workers |
+| --- | ---: | ---: |
+| WebKit 26.6 | 6,897 ms | 3,705 ms (−46%) |
+| Chromium 153 | 4,823 ms | 2,649 ms (−45%) |
+
+The first reply came no sooner (334 and 315 ms in WebKit): two engines help a note with many new
+diagrams waiting, not the first diagram. The second worker cost about 100 MB more at the peak, 141
+against 237 MB above the process's start with 0.2.0's worker in Node 22 (the 0.2.x boot study). In
+Obsidian the backlog is what the viewport gate lets through, so a note scrolled one diagram at a
+time gains less than this.
+
+What the host does (`src/engine/worker-host.ts`, from the `v-pool` prototype):
+
+- **A second worker starts only while a job waits that no worker running or starting can take.**
+  The engine started early for a cache miss (D23) is one worker at most, and a job arriving while it
+  starts waits for it rather than starting another.
+- **A timeout or a crash takes down only its own worker**; the other keeps its job.
+- **A worker that fails to start makes the pool one** until the workers next stop together, idle or
+  by `kill()`, and the host tells the queue, which runs one job at a time meanwhile (`onSize`). A
+  start that fails is most likely memory the computer does not have, which the memory rule below
+  cannot see where the WebView reports 8 GiB or more, or nothing. Started again behind a busy first
+  worker, the second would fail again for every job that waited; and when both were starting, a
+  crash of one failed every waiting job while the other was about to come up. The waiting jobs now
+  go to a worker that is up or still starting, and fail only when there is none.
+- **`kill()` stops them all** — Restart the TeX engine, the app going to the background, unload — and
+  interrupts every job, as it did the one worker.
+- **They idle down together**, once neither has a job, after the platform's idle budget; one with
+  nothing to do while the other works is kept.
+- **The queue runs as many jobs at once as there are workers.** A job the queue started beyond the
+  workers would wait in the host on its startup allowance, behind someone else's diagram.
+
+How many (`engineCount` in `src/platform/budgets.ts`):
+
+- **A phone or a tablet: one**, whatever the settings say. Each compile there is a new 156.25 MiB
+  WebAssembly memory (D18), inside the one WebView the whole app runs in (`MOBILE.concurrency` in
+  `platform/budgets.ts`), and nobody has measured a second engine on a device. That waits for a
+  measurement on one.
+- **A computer: two**, with three exceptions that make it one. The setting **Second engine**
+  (`secondEngine`, on by default, shown on desktop only) is off. The computer reports less than 8 GiB
+  of memory (`navigator.deviceMemory`). Or it reports no memory figure — Chromium gives it only to a
+  secure context — and fewer than 4 logical cores (`navigator.hardwareConcurrency`): two engines
+  compiling at once want two cores of their own beside the one Obsidian draws on. A computer that
+  reports neither keeps two, since the second only starts while diagrams queue up and the setting
+  turns it off. The copied diagnostics (D21) carry both figures, so whether desktop Obsidian reports
+  its memory is something a bug report will show; it most likely does, since Obsidian 1.14.4's own
+  `app.js` reads `crypto.subtle`, which a page has only in a secure context (read in the bundle).
+  The figure is the browser's approximation, a power of two, so a computer near the line falls on
+  whichever side the browser rounds it to. Where this rule misses a computer short of memory, a
+  second worker that fails to start makes the pool one (above). The setting says "a computer that
+  reports less than 8 GB", and on a computer these rules leave at one, says that this one does.
+- **Changing the setting applies at once**, also when it arrives through Sync: the pool follows, and
+  tells the queue, an idle second worker goes at once, and a busy one when it has finished its job.
+  The diagnostics say "stopped when the second engine was turned off".
+
+The worker is 0.2.0's, byte for byte: `test/engine-id.test.ts` builds the worker that ships and
+holds it to the ENGINE_ID recorded in `test/fixtures/golden/REVISION.json` (D20), so the pool
+changes nothing a diagram draws and nothing in anyone's cache. The preamble snapshot planned for
+0.2.3 keeps its saved preambles per worker, and with two workers only 32 of 52 possible resumes
+happened in the prototype's note of 74 diagrams (the 0.2.x measurements, set F2); it needs each
+diagram sent to the worker that holds its preamble, which is for that release.
+
+Tests: `test/worker-host.test.ts` (the prototype's pool tests, and idling down together, one worker
+with a pool of one, a crash, the pool shrinking and growing, a second worker that fails to start
+while the first is busy or starting), the queue's new slot count, `test/budgets.test.ts`, and the
+settings tab.
+
+---
+
+## D25 — A job whose blocks went away before the engine had it is dropped
+
+**Amends DESIGN.md §5.1's "Release: … a started job is left to complete and cache", and D23's
+early start. Date of record: 2026-10-14.**
+
+Until 0.2.1 a block in view waited for the debounce before it was queued, and one unloaded within
+it — a note switched away from, a wrong tap in the file list, a hover preview that closed — had
+submitted nothing. D22 took that wait away from every block nobody is typing in, so such a block is
+queued the moment it is seen, and while a slot is free the queue starts its job at once. On a cold
+engine the job then waits in the host for the engine to come up (D23), and the block is gone a
+moment later. The queue left a started job to finish, so it held its slot and compiled for nobody,
+and on a phone, with one slot, the next note's first diagram waited for it. The host, for its part,
+stopped a worker still starting when the last job waiting for it was abandoned, so the early start
+went with it.
+
+- **The queue drops a started job the engine does not have yet** when its last block releases it:
+  the runner has not said `running`, so nothing has been paid for. Its signal is aborted with
+  `QueueError('cancelled')` and its slot is freed. A job the engine has is left to finish and cache,
+  as before; a release could only stop it by terminating the worker, which throws the work away.
+- **The host keeps a start going for a cancelled job.** A job abandoned before a worker took it
+  stops a worker still starting only when it was not cancelled: when its startup allowance ran out
+  (`stalled`), the start is presumed wedged. A cancel says nothing about the start, and the engine
+  started early is there for the next note's diagrams, or idles down if none comes (D23). A WebView
+  without `AbortSignal.reason`, an older iOS WebKit's, sees no reason and stops the start, and the
+  next note's first diagram starts the engine again.
+- **The block settles.** It was unloaded in COMPILING, which waits for its job's end; the drop
+  arrives as the queue's `cancelled` rejection, and COMPILING, unloaded, takes it to DISPOSED.
+
+What it still costs: a job the engine took before its block went away compiles to the end, and is
+cached for the next time the diagram is shown. That is at most one compile per engine per switch,
+on an engine already up, where 0.2.0's debounce compiled nothing for a view shorter than itself.
+Switching notes quickly on a cold engine, on the phone, is in `TODO.md` §9.
+
+Tests: `test/queue.test.ts` (dropped before the engine has it; kept once it has it, or while another
+caller wants it; a caller asking again at once gets a job of its own; the randomised interleavings
+with a startup), `test/worker-host.test.ts` (the start kept for a cancel, stopped for a stall),
+`test/machine.test.ts` and `test/render-child.test.ts`.
+
+---
+
+## D26 — What the engine cannot typeset is drawn over a box TeX sets for it
 
 **Amends D8 and the backlog, which leave Greek, Cyrillic and CJK to a Unicode engine, and builds on
 D16's `\ifincsname`. It came as pull request #2.**

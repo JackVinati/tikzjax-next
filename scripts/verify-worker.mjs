@@ -61,7 +61,8 @@ if (!ready) {
 	process.exit(1);
 }
 // The id is written into the bundle after it is hashed. A worker announcing anything else — the
-// placeholder, or an id from another build — would key every diagram it renders wrongly.
+// placeholder, or an id from another build — would put the wrong build on every diagram it renders
+// and in the diagnostics.
 if (ready.engineId !== engineId || ready.inventory.engineId !== engineId) {
 	console.error(`Worker announced ENGINE_ID ${ready.engineId}, the build computed ${engineId}.`);
 	process.exit(1);

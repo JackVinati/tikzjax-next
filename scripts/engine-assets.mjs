@@ -267,10 +267,12 @@ async function bundleWorker(root, minify, plugins) {
 /**
  * The TeX worker as it ships, and its ENGINE_ID.
  *
- * ENGINE_ID is a cache-key input: when it changes, every cached diagram is rendered again, so it
- * must change whenever anything the worker runs changes, and only then. It is the sha256 of the
- * minified worker itself — the exact string a production main.js embeds — with the id replaced by
- * ENGINE_ID_PLACEHOLDER.
+ * ENGINE_ID names the build, so it must change whenever anything the worker runs changes, and only
+ * then. Until 0.2.1 it was the cache-key input, and every change to it rendered every cached diagram
+ * again; the key holds OUTPUT_REVISION now (src/cache/key.ts), and test/engine-id.test.ts fails on
+ * a new ENGINE_ID until that revision has been reconsidered (internal/DECISIONS.md D20). It is the
+ * sha256 of the minified worker itself — the exact string a production main.js embeds — with the id
+ * replaced by ENGINE_ID_PLACEHOLDER.
  *
  * It used to be a hash of a list of inputs: the two engine archives, the NAMES of the bundled TeX
  * files and engine-src/*.ts. A list has gaps, and this one had three. A package update that kept a

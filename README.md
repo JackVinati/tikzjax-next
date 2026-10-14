@@ -241,11 +241,11 @@ They are not written in the code fence line (` ```tikz width=420 `). Obsidian ca
 tail during PDF export, in embeds or in hover previews, so the same block would hash to two
 different cache keys and the PDF would get a differently compiled diagram.
 
-The plugin's settings cover colours, lazy rendering, fast mode, the time limit, how the source is
-cleaned up, the pre-flight checks, the preamble files, the TeX log and the cache. A change applies
-to the open notes straight away, also when it arrives from another device through Sync. Where an
-option shares its name with a setting (`colors`, `lazy`, `timeout`, `fast`) the option wins for its
-block.
+The plugin's settings cover colours, lazy rendering, fast mode, a second engine on a computer, the
+time limit, how the source is cleaned up, the pre-flight checks, the preamble files, the TeX log and
+the cache. A change applies to the open notes straight away, also when it arrives from another
+device through Sync. Where an option shares its name with a setting (`colors`, `lazy`, `timeout`,
+`fast`) the option wins for its block.
 
 ## Shared preambles
 
@@ -311,7 +311,7 @@ Preview. When TeX stops on a line of a preamble file, the error card names the f
 | Un-finalize the diagrams in this note | The exact inverse. The source was never thrown away. |
 | Render all diagrams in this note | Ignores lazy rendering and compiles everything now, with a Stop button, and says how many rendered. |
 | Open the diagram at the cursor in a zoom view | A scrollable, zoomable view of one diagram. |
-| Open TikZ diagnostics | The TeX log, the cache key, and where each recent compile's time went. Start here when a diagram does something inexplicable. |
+| Open TikZ diagnostics | The TeX log, the cache key, where each recent compile's time went from coming into view to drawn, and how often the engine started. Its Copy button copies it all as text for a bug report, without your diagrams' code or note names. Start here when a diagram does something inexplicable. |
 | Clear the diagram cache | Forgets every diagram this plugin has rendered; each compiles again when it is next shown. |
 | Restart the TeX engine | Stops the engine, which starts again with the next diagram, and lets diagrams that failed in this session try again. |
 
@@ -461,8 +461,8 @@ change with what people ask for.
   build. A note often has several diagrams with the same preamble. The idea is to load it once, keep
   a snapshot of TeX's state, and start the later diagrams from the snapshot. It stays an idea until
   a prototype shows that it changes nothing a diagram renders to. With 0.2.0's lighter memory, a
-  second engine running at the same time on desktop could also start to make sense; on a phone it
-  will probably stay at one.
+  second engine now runs on a computer while new diagrams queue up (0.2.1); on a phone it stays at
+  one until a phone shows it has the room.
 - **0.3.0: TeX Live 2026.** Newer pgf/TikZ, pgfplots, circuitikz, chemfig and siunitx, which means
   new circuitikz components, chemfig's `\hreac` and three years of fixes. `main.js` should shrink
   from about 12.2 MB to about 8.3 MB, by an estimate from a test build. TeX itself will not get
@@ -553,8 +553,9 @@ instead of stopping at an interactive prompt. If a diagram exceeds its time budg
 terminated and restarted, and only that diagram fails. In the original, one bad diagram blocked
 every later one until Obsidian was restarted.
 
-**Diagrams render when they scroll into view**, one at a time, so a note with thirty of them does
-not lock up the editor.
+**Diagrams render when they scroll into view**, off the editor's thread: one at a time on a phone,
+and two at a time on a computer while several are waiting, each in an engine of its own. A note with
+thirty of them does not lock up the editor.
 
 **PDF export waits for the diagrams.** The processor returns a promise, which is what Obsidian
 actually awaits before taking the print snapshot, for at most a minute in all, after which a diagram

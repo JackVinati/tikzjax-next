@@ -1,13 +1,16 @@
 import { buildSync, type Plugin } from 'esbuild';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { buildWorker, encodeCoreDump, ENGINE_ID_PLACEHOLDER } from '../scripts/engine-assets.mjs';
+import { readRecord } from '../scripts/output-revision.mjs';
 
 /*
- * ENGINE_ID is a cache-key input: whatever it fails to cover, a user keeps seeing as the old code
- * drew it. It used to hash a list — the engine archives, the NAMES of the bundled TeX files and
- * engine-src/*.ts — which missed a TeX file whose contents changed under the same name, and every
- * npm package the worker bundles. It is now the hash of the bundled worker, and these hold it to
- * covering what the list did not.
+ * ENGINE_ID names the worker that ships: whatever it fails to cover can change without anything
+ * saying so. Until 0.2.1 it was the cache-key input, and since then it is what tells a developer
+ * the worker changed, so that OUTPUT_REVISION, which the key holds now, is reconsidered (the last
+ * test below; internal/DECISIONS.md D20). It used to hash a list — the engine archives, the NAMES
+ * of the bundled TeX files and engine-src/*.ts — which missed a TeX file whose contents changed
+ * under the same name, and every npm package the worker bundles. It is now the hash of the bundled
+ * worker, and these hold it to covering what the list did not.
  *
  * Built through the build's own function, with plugins standing in for the parts being varied. The
  * 8 MB of engine assets are replaced by a stub where they are not the subject, so each build takes
@@ -194,5 +197,22 @@ describe('ENGINE_ID', { timeout: 60_000 }, () => {
 		});
 		expect(commented.engineId).toBe(base.engineId);
 		expect(changed.engineId).not.toBe(base.engineId);
+	});
+
+	/**
+	 * The cache key no longer follows the worker, so a new worker reaches users' caches only through
+	 * OUTPUT_REVISION. This fails on any change to the worker that ships until it is recorded in
+	 * test/fixtures/golden/REVISION.json, which is the moment to decide: the golden corpus says
+	 * whether a fixture draws differently, and the CHANGELOG whether anything outside it does. Either
+	 * way OUTPUT_REVISION moves. In 0.2.1 this is the proof that the worker is 0.2.0's, byte for
+	 * byte, so nothing its users cached is drawn by another engine.
+	 */
+	it('is the worker the golden outputs were last recorded against', async () => {
+		const shipped = await buildWorker(ROOT);
+		expect(
+			shipped.engineId,
+			'The worker changed. If any diagram can draw differently, move OUTPUT_REVISION in ' +
+				'src/cache/key.ts; then record the new worker with node scripts/output-revision.mjs --record.',
+		).toBe(readRecord(ROOT)?.engine);
 	});
 });

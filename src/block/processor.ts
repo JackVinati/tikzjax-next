@@ -4,7 +4,7 @@ import { normalizeSource } from '../source/normalize';
 import { legacyTidyTikzSource } from '../source/legacy-tidy';
 import { parseDirectives } from '../source/directives';
 import { preflight } from '../source/preflight';
-import { deriveKey } from '../cache/key';
+import { deriveKey, OUTPUT_REVISION } from '../cache/key';
 import { isExportContext } from '../platform/context';
 import { artifactRevision, type TikzSettings } from '../settings/schema';
 import { TikzBlock, type BlockDeps, type BlockOutcome, type TexJobSpec } from './render-child';
@@ -48,6 +48,13 @@ export interface ProcessorDeps {
 	/** For the deadline of a PDF export's total budget. */
 	timers: QueueTimers;
 	preamble: PreambleService;
+	/**
+	 * Whether the note at this path is being typed in (block/edits.ts): a block of it that is not
+	 * cached waits for the typing to pause. Omitted: no note ever is.
+	 */
+	editing?: ((notePath: string) => boolean) | undefined;
+	/** Start the engine ahead of the first job (BlockDeps.startEngine). Omitted: it starts with the job. */
+	startEngine?: ((doc: Document) => void) | undefined;
 	/**
 	 * Notified of every block, so the debug view can list what happened without the child knowing
 	 * about it. What it returns, if anything, is told how the block comes to rest.
@@ -214,6 +221,8 @@ function attach(
 			unobserve: deps.unobserve,
 			ensureFonts: deps.ensureFonts,
 			debounceMs: deps.budgets.debounceMs,
+			editing: () => deps.editing?.(ctx.sourcePath) ?? false,
+			startEngine: deps.startEngine,
 			now: deps.now,
 			report,
 		});
@@ -391,7 +400,7 @@ function buildSpec(
 	const key = deriveKey({
 		normalizedSource: normalized,
 		baked: options.baked,
-		engineId: deps.host.id,
+		outputRevision: OUTPUT_REVISION,
 		artifactRevision: artifactRevision(settings),
 		pipeline: {
 			raw: options.raw,

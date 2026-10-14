@@ -77,10 +77,18 @@ reason is not a surprise.
 - **Reproducible output.** Nothing in the build may depend on the time, on randomness or on a path
   on your machine. The community store rebuilds releases and compares bytes.
 - **The cache key is a promise.** Anything that changes the bytes a diagram renders to has to change
-  its cache key, or users keep seeing the old render. `internal/DESIGN.md` §6 says what goes in it.
-  A change to a stage in `src/svg/` that can write a different template bumps `PIPELINE_REVISION`
-  in `src/cache/key.ts`, once per release; `test/pipeline-revision.test.ts` fails on any edit there
-  until you have decided, and records the stage modules' fingerprint.
+  its cache key, or users keep seeing the old render. `internal/DESIGN.md` §6 says what goes in it,
+  and `internal/DECISIONS.md` D20 what changed in 0.2.1. A change to a stage in `src/svg/` that can
+  write a different template bumps `PIPELINE_REVISION` in `src/cache/key.ts`, once per release;
+  `test/pipeline-revision.test.ts` fails on any edit there until you have decided, and records the
+  stage modules' fingerprint.
+- **The engine's output has a revision of its own.** The key holds `OUTPUT_REVISION`
+  (`src/cache/key.ts`), not the engine's build, so a faster engine that draws the same recompiles
+  nothing. Move it whenever what TeX or the converter writes can change: when a fixture's golden
+  output changes (`test/output-revision.test.ts` fails until you do), and by hand whenever the
+  CHANGELOG says diagrams draw differently, also when no fixture shows it — a package bundled that
+  was missing, a fixed TeX file, a converter fix for a glyph no fixture uses. Then
+  `node scripts/output-revision.mjs --record`. A new fixture is recorded without a bump.
 - **Two TypeScripts.** TypeScript 7 typechecks; TypeScript 5.9.3 runs the store lint and the
   `typecheck:legacy` cross-check, because the store's review reads the code through TypeScript 5.
   `internal/DECISIONS.md` D5 says why. Both packages ship a `tsc`, so scripts name theirs by path.
@@ -90,8 +98,11 @@ reason is not a surprise.
 The worker in `engine-src/` is ordinary TypeScript, bundled by the normal build: changing it needs no
 Docker. ENGINE_ID is the sha256 of the minified worker, so a change that reaches it — code, a TeX
 file, a dependency the worker bundles, an esbuild that minifies differently, but not a comment —
-moves the id, which recompiles every user's cached diagrams once (say so in the commit message). The
-list of characters the engine typesets is recorded against that id, so run `npm run scan:native` and
+moves the id. That no longer recompiles anything by itself: `test/engine-id.test.ts` fails until the
+new worker is recorded with `node scripts/output-revision.mjs --record`, and before you record it,
+decide whether any diagram can draw differently. If one can, move `OUTPUT_REVISION` too, which
+recompiles every user's cached diagrams once (say so in the commit message and the CHANGELOG). The
+list of characters the engine typesets is recorded against the id, so run `npm run scan:native` and
 commit `src/source/native-unicode.ts` with the change.
 
 Rebuilding the engine itself — after a change under `engine-build/` — needs Docker and about

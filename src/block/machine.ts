@@ -1,7 +1,8 @@
 import type { LazyMode, TexErrorKind } from '../types';
 
 /**
- * The per-block lifecycle, as a pure reducer. See internal/DESIGN.md §3.3 for the transition table.
+ * The per-block lifecycle, as a pure reducer. See internal/DESIGN.md §3.3 for the transition table,
+ * and internal/DECISIONS.md D22 for when a block debounces.
  *
  * Nothing here touches the DOM, awaits anything, or reads a clock. Effects are *descriptions*;
  * `block/render-child.ts` executes them. That split is the whole point: the lifecycle of a diagram
@@ -65,7 +66,8 @@ type Draft =
 	| { phase: 'INIT' }
 	| { phase: 'KEYING' }
 	| { phase: 'LOOKUP' }
-	| { phase: 'GATING' }
+	/** `debounce`: its note is being typed in, so once seen it waits for the typing to pause. */
+	| { phase: 'GATING'; debounce: boolean }
 	| { phase: 'DEBOUNCING' }
 	| { phase: 'SCHEDULING'; priority: Priority }
 	| { phase: 'COMPILING'; priority: Priority }
@@ -104,6 +106,13 @@ export type Event =
 			poisoned?: boolean | undefined;
 			lazy?: LazyMode | undefined;
 			depthCapped?: boolean | undefined;
+			/**
+			 * The text of the block's note changed a moment ago, so this block is most likely the
+			 * one being typed in, remade at a keystroke (block/edits.ts). Only such a block waits
+			 * for the debounce; a block shown for the first time, or shown again as it was, goes
+			 * to the queue as soon as it is seen.
+			 */
+			editing?: boolean | undefined;
 	  }
 	| { type: 'intersect' }
 	| { type: 'noRecordsAfter2s' }
@@ -249,11 +258,12 @@ function unload(state: State): [State, Effect[]] {
 	if (state.phase === 'COMPILING') {
 		if (state.unloaded) return noop(state);
 		// Stays COMPILING, and deliberately does NOT settle: the running job always ends in ok,
-		// err, timeout or interrupted — the timeout is the backstop — and the settle happens at
-		// DISPOSED then.
-		// `release` is still safe here: the queue drops an *unstarted* job at refs 0 and leaves a
-		// started one to finish and cache. Timers are NOT cleared, because the timeout timer is
-		// what terminates a wedged worker whether or not this block still cares.
+		// err, timeout, interrupted or, dropped by the queue, rejected — the timeout is the
+		// backstop — and the settle happens at DISPOSED then.
+		// `release` is still safe here: at refs 0 the queue drops a job the engine does not have
+		// yet, waiting for it to start (DECISIONS.md D25), and leaves one in the engine to finish
+		// and cache. Timers are NOT cleared, because the timeout timer is what terminates a wedged
+		// worker whether or not this block still cares.
 		return [{ ...state, unloaded: true }, [{ kind: 'release' }]];
 	}
 
@@ -340,10 +350,19 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 		case 'GATING':
 			switch (event.type) {
 				case 'intersect':
-					return go(state, { phase: 'DEBOUNCING' }, [
+					if (state.debounce) {
+						return go(state, { phase: 'DEBOUNCING' }, [
+							{ kind: 'unobserve' },
+							{ kind: 'clearTimers' },
+							{ kind: 'startDebounce' },
+						]);
+					}
+					// In view and not being typed in: nothing to wait for. Band 1, which is what the
+					// child gives a block in view (`priority()`); an export never gates.
+					return go(state, { phase: 'SCHEDULING', priority: 1 }, [
 						{ kind: 'unobserve' },
 						{ kind: 'clearTimers' },
-						{ kind: 'startDebounce' },
+						{ kind: 'submit', priority: 1 },
 					]);
 				case 'noRecordsAfter2s':
 					// A block detached from the document never receives an IntersectionObserver
@@ -439,6 +458,12 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 					// any other block on the same key. This one just stops waiting for it.
 					if (state.unloaded) return go(state, { phase: 'DISPOSED' }, []);
 					return expire(state, [{ kind: 'release' }]);
+				case 'rejected':
+					// The queue dropped the job because every block that wanted it let go before the
+					// engine had it (DECISIONS.md D25), which only an unloaded block can have done.
+					// Any other rejection here is a late one, and `ok` / `err` / `timeout` own it.
+					if (state.unloaded) return go(state, { phase: 'DISPOSED' }, []);
+					return noop(state);
 				default:
 					return noop(state);
 			}
@@ -566,9 +591,12 @@ function miss(state: State, event: Extract<Event, { type: 'miss' }>): [State, Ef
 		]);
 	}
 	if (event.lazy === 'off') {
-		// `lazy=off` opts out of the viewport gate only. It still debounces, because the debounce
-		// is what makes typing in Live Preview free (#24) and has nothing to do with laziness.
-		return go(state, { phase: 'DEBOUNCING' }, [{ kind: 'startDebounce' }]);
+		// `lazy=off` opts out of the viewport gate only. A block being typed in still debounces,
+		// because the debounce is what makes typing free (#24) and has nothing to do with
+		// laziness. Any other goes in at band 2: it was never seen, so it is not known to be in
+		// view, which is what the child would say (`priority()`).
+		if (event.editing === true) return go(state, { phase: 'DEBOUNCING' }, [{ kind: 'startDebounce' }]);
+		return go(state, { phase: 'SCHEDULING', priority: 2 }, [{ kind: 'submit', priority: 2 }]);
 	}
-	return go(state, { phase: 'GATING' }, [{ kind: 'observe' }]);
+	return go(state, { phase: 'GATING', debounce: event.editing === true }, [{ kind: 'observe' }]);
 }

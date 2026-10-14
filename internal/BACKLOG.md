@@ -77,7 +77,7 @@ benefit, because the worker only runs the second pass when the first left someth
 **8. #19 / #36 / #53 render in labels, without a rebuilt engine.** The row says the CJK half is
 impossible on an 8-bit engine. It is, for TeX to typeset; but TeX can set a box where each
 character goes, and the worker writes the character over it in the platform's sans-serif font
-(`engine-src/unicode.ts`, internal/DECISIONS.md D20). Greek, Cyrillic, IPA, Arabic, Hebrew and
+(`engine-src/unicode.ts`, internal/DECISIONS.md D26). Greek, Cyrillic, IPA, Arabic, Hebrew and
 emoji go the same way, and since 0.2.0's `\ifincsname` names in any script work too. What a
 rebuild would still add is those scripts in Computer Modern's design, and text that wraps.
 

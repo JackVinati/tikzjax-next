@@ -514,7 +514,8 @@ The **total export budget is not optional**. `Promise.all(ctx.promises)` has no 
 key = sha256Hex(
   field(`s${SCHEMA_VERSION}`) +   // bumped only when the STORED ARTIFACT FORMAT changes
   field(`p${PIPELINE_REVISION}`) + // bumped when a src/svg stage can write a different template
-  field(engineId) +               // sha256 of the minified worker bundle, id replaced by a placeholder
+  field(outputRevision) +         // OUTPUT_REVISION, what the engine draws (DECISIONS.md D20);
+                                  // until 0.2.0 engineId, the sha256 of the minified worker
   field(normalizedSource) +
   field(stableStringify(baked)) + // preamble, packages, libraries, border, two-pass
   field(artifactRevision) +
@@ -535,6 +536,10 @@ runs for every mode and whose sanitizer is an allowlist; `test/pipeline-revision
 fingerprints the stage modules and fails until the revision is reconsidered. **`engineId`** is now
 the sha256 of the worker as it ships (`scripts/engine-assets.mjs`): it used to hash a list of the
 worker's inputs, which left out the npm packages bundled into it and the contents of the TeX files.
+
+In 0.2.1 that field became **`OUTPUT_REVISION`**, a revision of what the engine draws, held to the
+golden corpus by `test/fixtures/golden/REVISION.json`, with 0.2.0's ENGINE_ID as its first value, so
+that an engine that only gets faster recompiles nothing (DECISIONS.md D20).
 
 `artifactRevision()` is **deliberately narrow and enumerated**:
 
@@ -715,7 +720,7 @@ Once L3 is retired, `showConsole` becomes a real per-job flag driven by the debu
 - no `\begin{document}` (#49's real cause);
 - `\usepackage{X}` where `X ∉ INVENTORY.files` (#17, #34, #40, #56, #88, #92, #99);
 - `\pgfplotsset{compat=…}` above 1.16 (#110);
-- ~~characters above Latin-1 that the engine cannot typeset (#19, #36, #53)~~ — retired in 0.2.1. The engine typesets what `npm run scan:native` measures native, the TS1 shim draws its symbols, and the worker draws every other character in a label over a box TeX sets for it, while names in any script work since 0.2.0 (DECISIONS D20). Every character draws, so the rule went by choice: a warning under a diagram that draws is what 0.1.5 removed for the characters the engine typesets. The one hint still true, that a Greek letter or maths symbol typed inside `$…$` is drawn upright in sans-serif where `$\alpha$` draws Computer Modern, is in the README's limitations instead;
+- ~~characters above Latin-1 that the engine cannot typeset (#19, #36, #53)~~ — retired in 0.2.1. The engine typesets what `npm run scan:native` measures native, the TS1 shim draws its symbols, and the worker draws every other character in a label over a box TeX sets for it, while names in any script work since 0.2.0 (DECISIONS D26). Every character draws, so the rule went by choice: a warning under a diagram that draws is what 0.1.5 removed for the characters the engine typesets. The one hint still true, that a Greek letter or maths symbol typed inside `$…$` is drawn upright in sans-serif where `$\alpha$` draws Computer Modern, is in the README's limitations instead;
 - `\pgfmathsetmacro` redefining a TeX/TikZ built-in such as `\epsilon` (#96 — a case that produces *no* TeX diagnostic at all, so a lint is the only possible mechanism).
 
 **Debug surface.** A Debug view (`ItemView`): last 100 renders with source preview, state, duration, engine, cache tier, log, retry; cache stats; engine capabilities; queue depth. A status-bar indicator **gated on `Platform.isDesktop`** (`addStatusBarItem` is documented as unavailable on mobile). And a documented Safari Web Inspector workflow in CONTRIBUTING (device Settings → Safari → Advanced → Web Inspector, then Develop over USB) — every mobile issue in the tracker is currently untriageable for want of that one paragraph. #82's reporter literally wrote *"I'm not sure if there's an easy way to get debug output from the plugin."*

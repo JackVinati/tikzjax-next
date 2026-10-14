@@ -307,7 +307,7 @@ function compareVersions(a: string, b: string): number {
 // Rule 5, characters the engine cannot typeset (upstream #19, #36, #53), is gone. The engine
 // typesets what scan:native measured native, engine-src/ts1-shim.ts draws its symbols, and
 // engine-src/unicode.ts draws every other character in a label over a box TeX sets for it; and
-// since 0.2.0's \ifincsname a name in any script works (internal/DECISIONS.md D20). So every
+// since 0.2.0's \ifincsname a name in any script works (internal/DECISIONS.md D26). So every
 // character draws, and the rule went by choice: a warning under a diagram that draws is what 0.1.5
 // took away for the characters the engine typesets. One hint would still be true, and the README
 // gives it instead of a warning strip: a Greek letter or a maths symbol typed inside $…$ is drawn

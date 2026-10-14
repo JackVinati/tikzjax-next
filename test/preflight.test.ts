@@ -302,7 +302,7 @@ describe('preflight', () => {
 	describe('characters beyond ASCII (#19 #36 #53)', () => {
 		// The engine typesets what scan:native measured native, the TS1 shim draws its symbols, the
 		// Unicode bridge draws every other character in a label, and since 0.2.0 a name in any script
-		// works: in a picture, cases like these draw through the worker with no TeX error (D20).
+		// works: in a picture, cases like these draw through the worker with no TeX error (D26).
 		it.each([
 			String.raw`\node {开始 Привет Ωμέγα مرحبا 😀 ¥5 ‰};`,
 			String.raw`\node {Dvořák it’s 2010–2020, Müller, Łódź, 45° 3×4 £5 €5};`,
