@@ -1191,7 +1191,8 @@ describe('saved preambles kept across the engines’ stops', () => {
 	});
 
 	class FakeRuns implements StoredRuns {
-		keeping = true;
+		readable = true;
+		writable = true;
 		readonly stored = new Map<string, StoredRun>();
 		readonly reads: string[] = [];
 		readonly kept: SavedRunMessage[] = [];
@@ -1392,16 +1393,35 @@ describe('saved preambles kept across the engines’ stops', () => {
 		expect(runs.kept).toEqual([]);
 	});
 
-	it('ask for no runs where storage is not keeping them', async () => {
+	it('read nothing, and ask for no runs, where storage cannot be read', async () => {
 		const runs = new FakeRuns();
-		runs.keeping = false;
+		runs.readable = false;
+		runs.writable = false;
 		runs.stored.set(route, storedRun());
 		const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+		void host.ready().catch(() => undefined);
 		send(host, 'a');
 		worker(0).boot();
 		await tick();
+		expect(runs.loads).toBe(0);
 		expect(runs.reads).toEqual([]);
 		expect(renders(worker(0))[0]?.persist).toBe(false);
+	});
+
+	it('still read and send a stored run once storage has run out of room, and ask for no more', async () => {
+		const runs = new FakeRuns();
+		runs.writable = false;
+		runs.stored.set(route, storedRun(100));
+		const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+		void host.ready().catch(() => undefined);
+		send(host, 'a');
+		worker(0).boot();
+		await tick();
+		expect(runs.loads).toBe(1);
+		expect(runs.reads).toEqual([route]);
+		const posted = renders(worker(0))[0]!;
+		expect(posted.stored?.data.byteLength).toBe(100);
+		expect(posted.persist).toBe(false);
 	});
 
 	it('read what is stored while the engine starts', () => {

@@ -138,18 +138,47 @@ describe('RunStore — bytes that do not read back', () => {
 });
 
 describe('RunStore — storage that refuses', () => {
-	it('stops writing for the session after a write refused for room, and counts it', async () => {
-		fake.failNextWrite(DB, 'runs', new DOMException('full', 'QuotaExceededError'));
-		await store.keep(saved('r1', 1000));
-		expect(store.stats()).toMatchObject({ runs: 0, errors: 1 });
-		expect(store.keeping).toBe(false);
+	const quota = () => new DOMException('full', 'QuotaExceededError');
+
+	it('makes room from the least recently used when a write is refused for room, and tries once more', async () => {
+		await store.keep(saved('a', 1000));
+		await store.keep(saved('b', 1000));
+		fake.failNextWrite(DB, 'runs', quota());
+		await store.keep(saved('c', 1000));
+		expect(keys('runs')).toEqual(['engine-a/b', 'engine-a/c']);
+		expect(keys('index')).toEqual(['engine-a/b', 'engine-a/c']);
+		expect(store.stats()).toMatchObject({ runs: 2, bytes: 2000, errors: 0 });
+		expect(store.writable).toBe(true);
+	});
+
+	it('stops writing for the session when no room can be made, counts it, and goes on reading', async () => {
+		await store.keep(saved('a', 1000));
+		fake.failNextWrite(DB, 'runs', quota());
+		// Larger than all there is to evict.
+		await store.keep(saved('big', 2000));
+		expect(store.stats()).toMatchObject({ runs: 1, errors: 1 });
+		expect(store.writable).toBe(false);
+		expect(store.readable).toBe(true);
 		await store.keep(saved('r2', 1000));
-		expect(keys('runs')).toEqual([]);
+		expect(keys('runs')).toEqual(['engine-a/a']);
+		// What is stored is still read and sent.
+		expect((await store.read('a'))?.data.byteLength).toBe(1000);
 		// Clearing gives it another chance.
 		await store.clear();
-		expect(store.keeping).toBe(true);
+		expect(store.writable).toBe(true);
 		await store.keep(saved('r3', 1000));
 		expect(keys('runs')).toEqual(['engine-a/r3']);
+	});
+
+	it('stops writing when the write is refused for room again after room was made', async () => {
+		await store.keep(saved('a', 1000));
+		await store.keep(saved('b', 1000));
+		fake.failNextWrite(DB, 'runs', quota());
+		fake.failNextWrite(DB, 'runs', quota());
+		await store.keep(saved('c', 1000));
+		expect(store.writable).toBe(false);
+		expect(store.stats().errors).toBe(1);
+		expect(keys('runs')).not.toContain('engine-a/c');
 	});
 
 	it('loses one run to any other refused write, and goes on', async () => {
@@ -166,7 +195,8 @@ describe('RunStore — storage that refuses', () => {
 		await store.keep(saved('r1', 1000));
 		expect(await store.read('r1')).toBeUndefined();
 		await store.clear();
-		expect(store.keeping).toBe(false);
+		expect(store.readable).toBe(false);
+		expect(store.writable).toBe(false);
 		expect(store.stats()).toMatchObject({ available: false, runs: 0, bytes: 0, errors: 1 });
 	});
 });
@@ -189,6 +219,17 @@ describe('RunStore — the budget', () => {
 		await store.keep(saved('b', 1000));
 		await store.keep(saved('a', 1000));
 		expect(keys('runs')).toEqual(['engine-a/a', 'engine-a/b']);
+	});
+
+	it('stays within the budget when runs are kept at once, as two engines can', async () => {
+		budget = 2500;
+		await Promise.all([
+			store.keep(saved('a', 1000)),
+			store.keep(saved('b', 1000)),
+			store.keep(saved('c', 1000)),
+		]);
+		expect(keys('runs')).toEqual(['engine-a/b', 'engine-a/c']);
+		expect(store.stats()).toMatchObject({ runs: 2, bytes: 2000 });
 	});
 
 	it('keeps no run larger than the whole budget, and evicts nothing for it', async () => {

@@ -25,9 +25,11 @@ import { isConnectionLost } from './idb';
  *   and the text, again.
  * - **Within a budget** of stored bytes (platform/budgets.ts storedRunBytes), least recently used out.
  * - **Never in the way.** IndexedDB missing or refusing to open (a private window, site data
- *   blocked, a WebView that keeps none) turns this off for the session; a write the browser refuses for want of room
- *   stops writing for the session; each counts as a storage error for the diagnostics view, and the
- *   diagram is drawn either way. A run whose bytes do not read back is deleted (`forget`).
+ *   blocked, a WebView that keeps none) turns this off for the session. A write the browser refuses
+ *   for want of room makes room from the least recently used runs and is tried once more, as the
+ *   diagram cache makes room (./idb); refused again, nothing more is written this session, and the
+ *   runs stored go on being read. Each run lost counts as a storage error for the diagnostics view,
+ *   and the diagram is drawn either way. A run whose bytes do not read back is deleted (`forget`).
  *
  * Two stores: `runs`, `{key, data}`, the bytes, read only to send one; and `index`, a small record per
  * run, read whole once a session, so that whether a run is stored is known without touching its
@@ -103,12 +105,20 @@ export class RunStore {
 	private opening: Promise<IDBPDatabase | null> | null = null;
 	/** IndexedDB could not be opened; that will not get better this session. */
 	private disabled = false;
-	/** A write was refused for want of room; nothing more is written this session. */
+	/**
+	 * A write was refused for want of room even after room was made for it: nothing more is written
+	 * this session. What is stored is still read.
+	 */
 	private full = false;
 	private closed = false;
 	/** By route: every run of this engine that is stored, once `load` has read them. */
 	private index: Map<string, StoredRunInfo> | null = null;
 	private loading: Promise<void> | null = null;
+	/**
+	 * The keeps, one after another: each plans its evictions from the index as the one before left
+	 * it, so that two at once, from two engines, cannot both fit the budget and together pass it.
+	 */
+	private writing: Promise<void> = Promise.resolve();
 	private errors = 0;
 	/**
 	 * Moved by every `clear`, so that a run being kept, or an index being read, when the switch was
@@ -125,9 +135,14 @@ export class RunStore {
 		this.options = options;
 	}
 
-	/** Whether runs can be kept now: IndexedDB opened, or has not been tried, and has room. */
-	get keeping(): boolean {
-		return !this.disabled && !this.full && !this.closed;
+	/** Whether stored runs can be read now: IndexedDB opened, or has not been tried. */
+	get readable(): boolean {
+		return !this.disabled && !this.closed;
+	}
+
+	/** Whether runs can be kept now: they can be read, and storage has not run out of room. */
+	get writable(): boolean {
+		return this.readable && !this.full;
 	}
 
 	stats(): StoredRunStats {
@@ -213,12 +228,18 @@ export class RunStore {
 	/**
 	 * Keep a run a worker saved, if it is worth putting back (`worth`) and fits the budget, making
 	 * room from the least recently used. A run larger than the whole budget is not kept, and evicts
-	 * nothing.
+	 * nothing. One keep at a time (`writing`).
 	 */
-	async keep(message: SavedRunMessage): Promise<void> {
+	keep(message: SavedRunMessage): Promise<void> {
 		const generation = this.generation;
+		const next = this.writing.then(() => this.write(message, generation));
+		this.writing = next.catch(ignore);
+		return next;
+	}
+
+	private async write(message: SavedRunMessage, generation: number): Promise<void> {
 		await this.load();
-		if (!this.keeping || this.index === null || this.generation !== generation) return;
+		if (!this.writable || this.index === null || this.generation !== generation) return;
 		const { run } = message;
 		const now = this.options.now();
 		const info: StoredRunInfo = {
@@ -247,33 +268,82 @@ export class RunStore {
 			evicted.push(other);
 			total -= other.bytes;
 		}
-		let written: boolean | undefined;
 		try {
-			written = await this.run(async (db) => {
-				// Cleared since: transactions run in the order they are made, so one made from here on
-				// would land after the clear's.
-				if (this.generation !== generation) return false;
-				const tx = db.transaction(STORES, 'readwrite');
-				await settle(tx, async () => {
-					await Promise.all([
-						...evicted.flatMap((other) => [
-							tx.objectStore('runs').delete(other.key),
-							tx.objectStore('index').delete(other.key),
-						]),
-						tx.objectStore('runs').put({ key: info.key, data: run.data } satisfies RunRecord),
-						tx.objectStore('index').put(info),
-					]);
-				});
-				return true;
-			});
+			await this.put(info, run.data, evicted, generation);
 		} catch (error) {
-			this.errors++;
-			if (isQuotaError(error)) this.full = true;
-			return;
+			if (!isQuotaError(error)) {
+				this.errors++;
+				return;
+			}
+			// Refused for room, which the browser counts for the whole origin, the diagram cache's
+			// included, and which can be less than the budget: as much again as the run is made from
+			// the least recently used left, in a transaction of its own that frees it, and the run is
+			// tried once more. Refused again, nothing more is written this session.
+			const more: StoredRunInfo[] = [];
+			let freed = 0;
+			for (const other of others) {
+				if (freed >= info.bytes) break;
+				if (evicted.includes(other)) continue;
+				more.push(other);
+				freed += other.bytes;
+			}
+			try {
+				if (freed < info.bytes) throw error;
+				await this.remove([...evicted, ...more], generation);
+				await this.put(info, run.data, [], generation);
+			} catch (again) {
+				this.errors++;
+				if (isQuotaError(again)) this.full = true;
+			}
 		}
-		if (written !== true || this.generation !== generation) return;
+	}
+
+	/** Store `info`'s run and delete `evicted`, in one transaction, and say so in the index. */
+	private async put(
+		info: StoredRunInfo,
+		data: ArrayBuffer,
+		evicted: readonly StoredRunInfo[],
+		generation: number,
+	): Promise<void> {
+		const written = await this.run(async (db) => {
+			// Cleared since: transactions run in the order they are made, so one made from here on
+			// would land after the clear's.
+			if (this.generation !== generation) return false;
+			const tx = db.transaction(STORES, 'readwrite');
+			await settle(tx, async () => {
+				await Promise.all([
+					...evicted.flatMap((other) => [
+						tx.objectStore('runs').delete(other.key),
+						tx.objectStore('index').delete(other.key),
+					]),
+					tx.objectStore('runs').put({ key: info.key, data } satisfies RunRecord),
+					tx.objectStore('index').put(info),
+				]);
+			});
+			return true;
+		});
+		if (written !== true || this.generation !== generation || this.index === null) return;
 		for (const other of evicted) this.index.delete(other.route);
 		this.index.set(info.route, info);
+	}
+
+	/** Delete `evicted`, in a transaction of their own, and say so in the index. */
+	private async remove(evicted: readonly StoredRunInfo[], generation: number): Promise<void> {
+		const removed = await this.run(async (db) => {
+			if (this.generation !== generation) return false;
+			const tx = db.transaction(STORES, 'readwrite');
+			await settle(tx, async () => {
+				await Promise.all(
+					evicted.flatMap((other) => [
+						tx.objectStore('runs').delete(other.key),
+						tx.objectStore('index').delete(other.key),
+					]),
+				);
+			});
+			return true;
+		});
+		if (removed !== true || this.generation !== generation) return;
+		for (const other of evicted) this.index?.delete(other.route);
 	}
 
 	/** Delete the run stored under `route`: its bytes did not read back as a run (engine-src/stored-run.ts). */

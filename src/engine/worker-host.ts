@@ -149,8 +149,10 @@ export interface WorkerHostOptions {
 
 /** What the host needs of the place saved runs are kept across the engines' stops (cache/runs.ts). */
 export interface StoredRuns {
-	/** Whether runs are kept now: storage opened, or has not been tried, and is not full. */
-	readonly keeping: boolean;
+	/** Whether stored runs can be read now: storage opened, or has not been tried. */
+	readonly readable: boolean;
+	/** Whether runs can be kept now: they can be read, and storage has not run out of room. */
+	readonly writable: boolean;
 	/** Read what is stored, once; every later call waits for the same. */
 	load(): Promise<void>;
 	/** The run kept under `route`, if one is and it is worth sending; its own copy of the bytes. */
@@ -332,7 +334,8 @@ export class WorkerHost implements TexHost {
 		if (this.disposed) throw unloaded();
 		// What is stored of saved runs, read while the engine starts, so that the first job's lookup
 		// waits for neither.
-		if (this.snapshotBudget() > 0 && this.runs?.keeping === true) this.runs.load().catch(() => undefined);
+		if (this.snapshotBudget() > 0 && this.runs?.readable === true)
+			this.runs.load().catch(() => undefined);
 		if (this.engines.some((engine) => engine.up)) return;
 		const engine = this.engines[0] ?? this.spawn();
 		this.pump();
@@ -504,7 +507,7 @@ export class WorkerHost implements TexHost {
 			options: job.options,
 			snapshots,
 			...(stored === undefined ? {} : { stored }),
-			persist: snapshots > 0 && this.runs?.keeping === true,
+			persist: snapshots > 0 && this.runs?.writable === true,
 		};
 		if (stored === undefined) engine.worker.postMessage(request);
 		else engine.worker.postMessage(request, [stored.data]);
@@ -794,7 +797,7 @@ export class WorkerHost implements TexHost {
 	private fetchStored(job: Job): void {
 		const runs = this.runs;
 		const route = job.route;
-		if (runs === undefined || !runs.keeping || route === undefined) return;
+		if (runs === undefined || !runs.readable || route === undefined) return;
 		if (this.engines.some((engine) => engine.held.has(route))) return;
 		job.fetching = true;
 		const started = this.now();
