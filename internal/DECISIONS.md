@@ -1144,7 +1144,24 @@ content. A box that drew no glyph, set in `\nullfont` or outside the picture whe
 HTML, is dropped, as TeX drops a character it has no font for, where the pull request lost the whole
 diagram. An SVG whose groups no longer pair up, which a raw special can cause, is an error with TeX's
 log, of the kind whose card shows its message; it was sent as an empty output, whose card says the
-block is probably empty.
+block is probably empty. A `<g/>` is not counted, since it opens and closes nothing.
+
+TeX breaks a line only at glue or a penalty, and there is none between two boxes, so as the pull
+request had it a line of Chinese in a `text width` node never broke; the plugin's SVG does not clip,
+and the line ran past the node's border and over what stood beside it. A Han character, a kana, a
+bopomofo letter and a fullwidth letter or digit are declared with a glue of no width in front of
+them, in horizontal mode only; an opening bracket with a `\nobreak` after it as well, because a glue
+after a penalty is no place to break; and closing punctuation, small kana, the iteration marks and
+the prolonged sound mark with neither. So no line begins with closing punctuation or a small kana,
+and none ends with an opening bracket. Korean is written with spaces and breaks there, like every
+other script. The glue adds no width and writes nothing to the DVI. The box also starts a paragraph
+where a letter would (`\leavevmode`): at the start of a `\parbox`, a minipage or a `p` column TeX is
+in vertical mode, where each box had gone on a line of its own, and a word in Cyrillic in a
+`\parbox` came out one letter under another. Through the worker, before and after, on the 184 cases
+the review and the rebase of the pull request had collected, the only SVGs that changed, besides
+the one with a `<g/>`, were those with Chinese in a `text width` node, now wrapped; a node
+without `text width`, maths, Korean and text outside the picture came out byte for byte the same.
+`unicode-wrap` in the golden corpus holds the breaks, and verify-worker the text of each line.
 
 What it costs, measured in Node 22.19 on the Windows desktop of D14 through the worker, the shortest
 TeX time of three runs, against the same nodes holding as many `M`s: 1,000 different CJK characters
@@ -1159,8 +1176,8 @@ worker does, so verify-worker compares the shipped worker with them byte for byt
 in `test/fixtures/worker` check the runs that come back, on one pass and two, and the error. Chrome's
 XML parser accepts every SVG the bridge wrote in those cases, and the plugin's pipeline keeps every
 restored text with nothing to report. What the bridge cannot do is in the README: the text is not
-Computer Modern and does not wrap, bold and italic are lost, a separate combining accent is drawn
-beside its letter, and text outside the picture is not drawn. ENGINE_ID moves, so every cached
+Computer Modern and takes an em a character, bold and italic are lost, a separate combining accent
+is drawn beside its letter, and text outside the picture is not drawn. ENGINE_ID moves, so every cached
 diagram compiles once more.
 
 ---

@@ -24,11 +24,37 @@ describe('8-bit TeX Unicode bridge', () => {
 			expect(result.codepoints).toEqual([0x03a9, 0x59cb, 0x5f00]);
 			expect(result.preamble).toContain('data-tikzjax-unicode');
 			expect(result.preamble).toContain(
-				'\\DeclareUnicodeCharacter{5F00}{\\tikzjaxUnicodeBridge{24320}}',
+				'\\DeclareUnicodeCharacter{5F00}{\\tikzjaxUnicodeBreak{24320}}',
 			);
 			expect(result.preamble).toContain('\\DeclareUnicodeCharacter{03A9}{\\tikzjaxUnicodeBridge{937}}');
 			expect(result.preamble.match(/\\DeclareUnicodeCharacter/g)).toHaveLength(3);
 			expect(result.preamble).not.toContain('\n');
+		});
+
+		// TeX breaks a line only at glue or a penalty, and a line of Chinese in a `text width` node
+		// ran on past the border: Han and kana may begin a line, an opening bracket may begin one and
+		// not end one, and closing punctuation and small kana never begin one.
+		it('lets a line break before a Han character or a kana, and never before closing punctuation', () => {
+			const macro = (ch: string) =>
+				/\\DeclareUnicodeCharacter\{[0-9A-F]+\}\{\\(\w+)\{/.exec(bridgeUnicode(ch).preamble)?.[1];
+			for (const ch of ['中', '開', 'か', 'カ', 'ㄅ', 'Ａ', '１', '𠀀', '⺀'])
+				expect(macro(ch), ch).toBe('tikzjaxUnicodeBreak');
+			for (const ch of ['（', '「', '『', '【', '〈', '《'])
+				expect(macro(ch), ch).toBe('tikzjaxUnicodeOpening');
+			for (const ch of ['，', '。', '、', '）', '」', '！', '？', '・', 'ー', 'ょ', 'ッ', '々', '　'])
+				expect(macro(ch), ch).toBe('tikzjaxUnicodeBridge');
+			// Scripts written with spaces break where a space is typed, as they did.
+			for (const ch of ['Ω', 'Ж', 'ש', 'ب', 'ก', '한', '😀'])
+				expect(macro(ch), ch).toBe('tikzjaxUnicodeBridge');
+
+			const { preamble } = bridgeUnicode('中');
+			expect(preamble).toContain('\\def\\tikzjaxUnicodeBridge#1{\\leavevmode\\special');
+			expect(preamble).toContain(
+				'\\def\\tikzjaxUnicodeBreak#1{\\ifhmode\\hskip0pt\\relax\\fi\\tikzjaxUnicodeBridge{#1}}',
+			);
+			expect(preamble).toContain(
+				'\\def\\tikzjaxUnicodeOpening#1{\\tikzjaxUnicodeBreak{#1}\\ifhmode\\nobreak\\fi}',
+			);
 		});
 
 		it('counts an astral codepoint as one character', () => {

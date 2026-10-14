@@ -10,9 +10,11 @@ top of its notes on GitHub, and will not publish a version that has none.
   plugin writes the character over it in your system's sans-serif font; nodes and arrows are
   placed around it as around any other text. Until now TeX left each one out with "Unicode
   character … not set up for use with LaTeX". `¥` `¢` `‰` `½` `№` typed in a label, which made the
-  whole diagram fail, are drawn the same way. Names in these scripts, of nodes, coordinates,
-  styles, colours and `\label`s, work as they did in 0.2.0. The README lists what the text drawn
-  this way cannot do. From pull request #2.
+  whole diagram fail, are drawn the same way. In a `text width` node or a `\parbox` the text
+  wraps: Chinese and Japanese between characters, though never before closing punctuation, and
+  other scripts where a space is typed. Names in these scripts, of nodes, coordinates, styles,
+  colours and `\label`s, work as they did in 0.2.0. The README lists what the text drawn this way
+  cannot do. From pull request #2.
 - After updating, every cached diagram is compiled once more, the next time it is shown: the
   engine's id is part of the cache key, and the change above moved it. A diagram with none of
   these characters in its text comes out the same, byte for byte.

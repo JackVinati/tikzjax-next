@@ -39,15 +39,67 @@ export interface UnicodeBridge {
  * What a declared character typesets: a one-em box between two raw-SVG markers that carry its
  * codepoint and the current font's quad. \protected, as the character's own macro is, so that
  * nothing expanding text ahead of time can take it apart.
+ *
+ * \leavevmode starts a paragraph where a letter would. Without it, text at the start of a \parbox,
+ * a minipage or a `p` column was set in vertical mode, where each box went on a line of its own: a
+ * word in Cyrillic came out one letter under the other.
+ *
+ * \tikzjaxUnicodeBreak and \tikzjaxUnicodeOpening are the same box with a place to break a line in
+ * front of it, below.
  */
-const BRIDGE = String.raw`\protected\def\tikzjaxUnicodeBridge#1{\special{dvisvgm:raw <g data-tikzjax-unicode="#1" data-quad="\the\fontdimen6\font">}\hbox to1em{M\hss}\special{dvisvgm:raw </g>}}`;
+const BRIDGE =
+	String.raw`\protected\def\tikzjaxUnicodeBridge#1{\leavevmode\special{dvisvgm:raw <g data-tikzjax-unicode="#1" data-quad="\the\fontdimen6\font">}\hbox to1em{M\hss}\special{dvisvgm:raw </g>}}` +
+	String.raw`\protected\def\tikzjaxUnicodeBreak#1{\ifhmode\hskip0pt\relax\fi\tikzjaxUnicodeBridge{#1}}` +
+	String.raw`\protected\def\tikzjaxUnicodeOpening#1{\tikzjaxUnicodeBreak{#1}\ifhmode\nobreak\fi}`;
+
+/**
+ * Where a line may break in text written without spaces between its words.
+ *
+ * TeX breaks a line only at glue or a penalty, and there is none between two boxes, so a line of
+ * Chinese or Japanese in a `text width` node never broke: it ran on past the node's border and out
+ * of the picture. Each character listed here may begin a line, so in horizontal mode it is preceded
+ * by a glue of no width. That adds nothing to a line's width, and nothing to the DVI, so a node
+ * without `text width`, where the text is one \hbox, is drawn as before; in maths, where a glue is
+ * no place to break, it is not added. An opening bracket may begin a line but not end one, so it is
+ * followed by \nobreak: a glue after a penalty is not a place to break either. Closing punctuation,
+ * small kana, the iteration marks and the prolonged sound mark are not listed, so no line begins
+ * with one. Korean, which is written with spaces, and every other script break where a space is
+ * typed, as they did.
+ */
+const BREAK_BEFORE: readonly (readonly [number, number])[] = [
+	[0x2e80, 0x2fdf], // CJK and Kangxi radicals
+	[0x3041, 0x3096], // hiragana
+	[0x30a1, 0x30fa], // katakana
+	[0x3105, 0x312f], // bopomofo
+	[0x3400, 0x4dbf], // CJK unified ideographs, extension A
+	[0x4e00, 0x9fff], // CJK unified ideographs
+	[0xf900, 0xfaff], // CJK compatibility ideographs
+	[0xff10, 0xff19], // fullwidth digits
+	[0xff21, 0xff3a], // fullwidth capitals
+	[0xff41, 0xff5a], // fullwidth small letters
+	[0x20000, 0x3fffd], // CJK unified ideographs, extensions B onward
+];
+const NON_STARTERS = new Set(
+	[...'ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ'].map((ch) => ch.codePointAt(0)),
+);
+const OPENING = new Set([...'〈《「『【〔〖〘〚〝（［｛｟｢'].map((ch) => ch.codePointAt(0)));
+
+const bridgeMacro = (cp: number): string => {
+	if (OPENING.has(cp)) return 'tikzjaxUnicodeOpening';
+	if (NON_STARTERS.has(cp)) return 'tikzjaxUnicodeBridge';
+	return BREAK_BEFORE.some(([first, last]) => cp >= first && cp <= last)
+		? 'tikzjaxUnicodeBreak'
+		: 'tikzjaxUnicodeBridge';
+};
 
 const DECLARATIONS_PER_LINE = 100;
 
 const declare = (cp: number): string =>
 	String.raw`\DeclareUnicodeCharacter{` +
 	cp.toString(16).toUpperCase().padStart(4, '0') +
-	String.raw`}{\tikzjaxUnicodeBridge{` +
+	'}{\\' +
+	bridgeMacro(cp) +
+	'{' +
 	String(cp) +
 	'}}';
 

@@ -352,6 +352,40 @@ for (const twoPass of [false, true]) {
 		console.error(`FAIL  Unicode labels: ${error.message}`);
 	}
 }
+// The text that comes back on each line where Chinese and Japanese wrap, in the golden fixture
+// that holds the breaks: no line begins with closing punctuation or a small kana, none ends with an
+// opening bracket, a node without `text width` keeps its one line, and a \parbox that begins with
+// Cyrillic is set as a paragraph, not a letter to a line.
+const wrapped = await send({
+	type: 'render',
+	id: ++id,
+	source: readFileSync(join(FIXTURES, 'unicode-wrap.tex'), 'utf8'),
+	options: { captureLog: true },
+});
+try {
+	assert.equal(wrapped.type, 'ok', wrapped.message);
+	const doc = new window.DOMParser().parseFromString(wrapped.svg, 'image/svg+xml');
+	assert.deepEqual(
+		[...doc.querySelectorAll('text[font-family="sans-serif"]')].map((text) => text.textContent),
+		[
+			'一二三四，',
+			'五六七八。',
+			'（九十）一',
+			'二三四',
+			'ちょっと',
+			'まってく',
+			'ださい',
+			'Это',
+			'длинный',
+			'текст',
+			'开始（不换行）',
+		],
+	);
+	console.log('OK    Unicode text wraps in a text width node and a \\parbox');
+} catch (error) {
+	failures++;
+	console.error(`FAIL  Unicode text wrapping: ${error.message}`);
+}
 const broken = await send({
 	type: 'render',
 	id: ++id,
