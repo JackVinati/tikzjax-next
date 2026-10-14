@@ -1274,7 +1274,9 @@ processor's `startEngine`), unless it is `lazy=manual` and waits for its button.
 while the block waits for the viewport gate and the queue, and the job's "engine start" step counts
 only the part of it the job still had to wait for. At most one engine is started this way; it is
 the host's own, so the idle teardown stops it like any other, which is what becomes of an engine
-started for a diagram nobody scrolled to.
+started for a diagram nobody scrolled to. The teardown is armed as soon as it starts, also while it
+is still starting: before the early start every engine was started for a job, whose startup
+allowance gave up on a start that never finished, and one started early has no job to do that.
 
 - **Never at plugin load.** A session that only shows cached diagrams never starts an engine, as
   before. Starting one at load would cost every session its memory, about 81 MB once started for

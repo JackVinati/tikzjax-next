@@ -247,11 +247,17 @@ export class WorkerHost implements TexHost {
 	 * Start an engine if none is running or starting, and wait for one to be up. Called as soon as a
 	 * diagram turns out not to be cached, so that the start runs while the block waits for its turn
 	 * (the viewport, the queue) rather than after it (DECISIONS.md D23). Never more than one.
+	 *
+	 * Its idle teardown is armed at once, as for any engine with nothing to do: one started for a
+	 * diagram nobody scrolls to goes, and so does one whose start never finishes, which no job's
+	 * startup allowance would otherwise ever give up on.
 	 */
 	async ready(): Promise<void> {
 		if (this.disposed) throw unloaded();
 		if (this.engines.some((engine) => engine.up)) return;
-		await (this.engines[0] ?? this.spawn()).ready;
+		const engine = this.engines[0] ?? this.spawn();
+		this.pump();
+		await engine.ready;
 	}
 
 	render(job: TexJob, signal: AbortSignal, onRunning?: () => void): Promise<TexResult> {
@@ -563,6 +569,8 @@ export class WorkerHost implements TexHost {
 				);
 			}
 		}
+		// With nothing left waiting, a worker kept is an idle one.
+		this.pump();
 	}
 
 	private failWaiting(error: Error): void {
@@ -592,10 +600,13 @@ export class WorkerHost implements TexHost {
 		engine.rejectReady(error);
 	}
 
-	/** Once nothing is running or waiting, stop every worker after the idle budget, together. */
+	/**
+	 * Once nothing is running or waiting, stop every worker after the idle budget, together, also one
+	 * still starting.
+	 */
 	private armIdleTeardown(): void {
 		if (this.idleTeardownMs === undefined || this.timers === undefined) return;
-		if (!this.engines.some((engine) => engine.up) || this.idleTimer !== null) return;
+		if (this.engines.length === 0 || this.idleTimer !== null) return;
 		this.idleTimer = this.timers.setTimeout(() => {
 			this.idleTimer = null;
 			if (this.waiting.length > 0 || this.engines.some((engine) => engine.current !== null)) return;

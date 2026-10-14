@@ -345,6 +345,31 @@ describe('idle teardown', () => {
 		expect(host.report().lastStop).toBe('idle');
 	});
 
+	it('stops an engine started ahead of a job whose start never finishes', () => {
+		// No job waits on it, so no startup allowance runs out to give up on it.
+		const timers = new FakeTimers();
+		const host = new WorkerHost({ idleTeardownMs: 1000, timers });
+		host.ready().catch(() => undefined);
+
+		timers.advance(999);
+		expect(worker(0).terminated).toBe(false);
+		timers.advance(1);
+		expect(worker(0).terminated).toBe(true);
+		expect(host.report().lives).toEqual([{ startMs: null, stop: 'idle' }]);
+	});
+
+	it('is called off by a job arriving for the engine still starting', () => {
+		const timers = new FakeTimers();
+		const host = new WorkerHost({ idleTeardownMs: 1000, timers });
+		host.ready().catch(() => undefined);
+		timers.advance(500);
+		const a = render(host, 'a');
+		timers.advance(5000);
+		expect(worker(0).terminated).toBe(false);
+		worker(0).boot();
+		expect(a.running.at).toBe(true);
+	});
+
 	it('is called off by work arriving before it fires', async () => {
 		const timers = new FakeTimers();
 		const host = new WorkerHost({ idleTeardownMs: 1000, timers });
