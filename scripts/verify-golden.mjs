@@ -21,7 +21,9 @@
  *
  * An intended change to what a fixture renders is recorded with --update, in the commit that makes
  * it, which then says why. A new fixture has no golden output until it is recorded, and is reported
- * until it is.
+ * until it is. --update then records the corpus in REVISION.json as well (scripts/output-revision.mjs),
+ * unless an output changed under the OUTPUT_REVISION it was recorded with: the cache key holds that
+ * revision, so it has to move first (internal/DECISIONS.md D20).
  */
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -32,6 +34,8 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { importEngineForNode } from './dvi2html-patch.mjs';
 import { engineFilesPresent, readEngineFile } from './engine-files.mjs';
+import { buildWorker } from './engine-assets.mjs';
+import { bumpAdvice, record } from './output-revision.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const OUT = join(root, 'engine-build', 'out');
@@ -240,6 +244,8 @@ if (UPDATE) {
 	const lines = [...sums.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([n, h]) => `${h}  ${n}.dvi`);
 	writeFileSync(DVI_SUMS, `${lines.join('\n')}\n`);
 	console.log('\nRecorded. Say in the commit why the output changed.');
+	const revision = record(root, (await buildWorker(root)).engineId);
+	if (!revision.written) console.log(`\nREVISION.json is not recorded. ${bumpAdvice(revision.refused)}`);
 	process.exit(0);
 }
 

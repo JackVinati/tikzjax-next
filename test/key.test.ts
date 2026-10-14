@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { deriveKey, PIPELINE_REVISION } from '../src/cache/key';
+import { deriveKey, OUTPUT_REVISION, PIPELINE_REVISION } from '../src/cache/key';
 import { legacyKey, md5Hex } from '../src/cache/legacy-key';
 import { sha256Hex } from '../src/cache/sha256';
 import type { BakedOptions, BlockOptions, KeyInputs, Presentation } from '../src/types';
@@ -185,7 +185,7 @@ const BAKED: BakedOptions = {
 const INPUTS: KeyInputs = {
 	normalizedSource: '\\begin{tikzpicture}\\draw (0,0) -- (1,1);\\end{tikzpicture}',
 	baked: BAKED,
-	engineId: 'core-0f1e2d3c',
+	outputRevision: 'core-0f1e2d3c',
 	artifactRevision: '{"svgo":"preset","fast":false,"sourceHandling":"corrected"}',
 	pipeline: { raw: false, fast: false, svgo: 'preset' },
 };
@@ -232,11 +232,26 @@ describe('deriveKey', () => {
 		expect(deriveKey(INPUTS)).not.toBe('41df0c0cae9cd60eb86fc55307200129');
 	});
 
+	/**
+	 * What 0.2.0 derived for these inputs from its engine's id, computed the same independent way as
+	 * the pin above. OUTPUT_REVISION took ENGINE_ID's place in the payload with ENGINE_ID's value, so
+	 * every diagram 0.2.0 cached is found under the key it was stored with, and updating recompiles
+	 * nothing (internal/DECISIONS.md D20).
+	 *
+	 * Meant to fail when OUTPUT_REVISION moves: recompiling is then the point, and this goes.
+	 */
+	it('derives the key 0.2.0 stored under, so updating from it recompiles nothing', () => {
+		expect(OUTPUT_REVISION).toBe('5e861510239768c57ca2965eb2329bd2bafc1370df4821cd8d3b7088ce60efde');
+		expect(deriveKey({ ...INPUTS, outputRevision: OUTPUT_REVISION })).toBe(
+			'4eccbdf2d155bc36a84ea147b9a09a6d',
+		);
+	});
+
 	it('changes when any single input changes', () => {
 		const variants: Record<string, KeyInputs> = {
 			base: INPUTS,
 			normalizedSource: { ...INPUTS, normalizedSource: `${INPUTS.normalizedSource} ` },
-			engineId: { ...INPUTS, engineId: 'core-0f1e2d3d' },
+			outputRevision: { ...INPUTS, outputRevision: 'core-0f1e2d3d' },
 			artifactRevision: { ...INPUTS, artifactRevision: '{"svgo":"off"}' },
 			// Per-block pipeline flags. Without these in the key, a block toggled to fast mode
 			// collides with its own full-quality artifact and serves whichever was stored first.
@@ -312,7 +327,7 @@ describe('deriveKey', () => {
 		const project = (b: BlockOptions): KeyInputs => ({
 			normalizedSource: INPUTS.normalizedSource,
 			baked: b.baked,
-			engineId: INPUTS.engineId,
+			outputRevision: INPUTS.outputRevision,
 			artifactRevision: INPUTS.artifactRevision,
 			// `raw` and `fast` DO belong in the key — they change the stored bytes — but they are
 			// not presentation, which is what this test is about. Held constant so the assertion
@@ -358,18 +373,18 @@ describe('deriveKey', () => {
 	it('cannot be made to collide by moving content across a field boundary', () => {
 		for (const sep of [' ', '\n', '\r', '\t', '\0', '|', ':', '::', '']) {
 			expect(
-				deriveKey({ ...INPUTS, engineId: `a${sep}b`, normalizedSource: 'c' }),
+				deriveKey({ ...INPUTS, outputRevision: `a${sep}b`, normalizedSource: 'c' }),
 				`separator ${JSON.stringify(sep)}`,
-			).not.toBe(deriveKey({ ...INPUTS, engineId: 'a', normalizedSource: `b${sep}c` }));
+			).not.toBe(deriveKey({ ...INPUTS, outputRevision: 'a', normalizedSource: `b${sep}c` }));
 		}
 
 		// The length prefix is itself an encoding, so a field that looks like one must not be able
 		// to forge a different split of the payload.
-		expect(deriveKey({ ...INPUTS, engineId: '1:a', normalizedSource: 'b' })).not.toBe(
-			deriveKey({ ...INPUTS, engineId: '', normalizedSource: '1:ab' }),
+		expect(deriveKey({ ...INPUTS, outputRevision: '1:a', normalizedSource: 'b' })).not.toBe(
+			deriveKey({ ...INPUTS, outputRevision: '', normalizedSource: '1:ab' }),
 		);
-		expect(deriveKey({ ...INPUTS, engineId: '', normalizedSource: '3:xyz' })).not.toBe(
-			deriveKey({ ...INPUTS, engineId: '3:xyz', normalizedSource: '' }),
+		expect(deriveKey({ ...INPUTS, outputRevision: '', normalizedSource: '3:xyz' })).not.toBe(
+			deriveKey({ ...INPUTS, outputRevision: '3:xyz', normalizedSource: '' }),
 		);
 	});
 

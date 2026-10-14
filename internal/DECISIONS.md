@@ -1091,6 +1091,67 @@ stays.
 
 ---
 
+## D20 — The cache key holds what the engine draws, not which build of it drew it
+
+**Amends the cache-key part of D10 ("`ENGINE_ID` … still a cache-key input"), of D18 and D19
+("every cached diagram compiles once more after the update"), and DESIGN.md §6.1, whose payload has
+`engineId` where this puts `OUTPUT_REVISION`. Date of record: 2026-10-14.**
+
+Until 0.2.0 the third field of the key was ENGINE_ID, the sha256 of the worker as it ships. Every
+change to the worker therefore recompiled every diagram every user had cached, once, the next time
+it was shown, also when the change drew every diagram the same to the byte. 0.2.0 did that for an
+engine that only got faster and a few changes of output, and the 0.2.x plan has three more worker
+changes in it, each held to the golden corpus byte for byte: the rebuilt engine, the faster start
+and the preamble snapshot. Each would have been one more recompile of everything, on the phone
+above all, where a compile is slowest.
+
+The field now holds `OUTPUT_REVISION` (`src/cache/key.ts`), a string that moves when what the
+engine draws can change: the DVI TeX writes, the transcript the plugin reads its errors from, or the
+SVG the converter makes. Its first value is exactly the ENGINE_ID 0.2.0 shipped,
+`5e861510239768c57ca2965eb2329bd2bafc1370df4821cd8d3b7088ce60efde`, in the same place in the
+payload, so every key 0.2.0 derived is derived again and updating to 0.2.1 recompiles nothing.
+`test/key.test.ts` pins a key 0.2.0 derived, computed outside the implementation, and
+`test/processor.test.ts` that a block keeps its key whichever build of the engine is running.
+
+What keeps the revision honest:
+
+- **The golden corpus.** `test/fixtures/golden/REVISION.json` records, under the revision, one
+  sha256 per fixture over its recorded DVI sha256, transcript and SVG.
+  `test/output-revision.test.ts` fails when a recorded fixture's output is no longer that, telling
+  the developer to move `OUTPUT_REVISION` and record again; `node scripts/output-revision.mjs
+  --record` writes the record and refuses to write a changed output under the old revision.
+  `npm run verify:golden -- --update`, which is how an intended change of output is recorded,
+  records `REVISION.json` with it, under the same refusal. A fixture new to the corpus is recorded
+  without a bump: nothing was cached from its output before.
+- **The worker.** `REVISION.json` also records the ENGINE_ID the corpus was last checked against,
+  and `test/engine-id.test.ts` builds the worker that ships and fails when it is another one. That
+  is the moment the decision is made, by a person, because the corpus is 37 diagrams and a change
+  can alter what a diagram outside it draws. In 0.2.1 it is also the proof that the worker is
+  0.2.0's, byte for byte.
+- **By hand.** Whenever the CHANGELOG says that diagrams draw differently, the revision moves, also
+  when no fixture shows it: a package bundled that was missing, a fixed TeX file, a converter change
+  for a glyph no fixture uses. CONTRIBUTING.md says so. The sha256 of the first worker that draws
+  the new way is the convention for the new value; any new string works.
+
+**What is cached when a render fails.** Read from `src/block/machine.ts` and
+`src/block/render-child.ts`: an artifact is written to the cache only on the way from the SVG
+pipeline to the note (`persist`, TRANSFORMING + ok), also for a block unloaded while it compiled.
+An error card is never cached, nor is a mount whose pipeline skipped a stage (MOUNTED_DEGRADED). A
+timeout poisons the key in the queue's set, which is in memory, lasts the session at most, and is
+cleared by Retry, Restart the TeX engine and any settings change. So an engine that fixes a diagram
+that failed shows the fix at once, with or without a bump. What is cached is every diagram TeX drew,
+including one it drew after recovering from an error, with TeX's message on it: a diagram that
+loads a package the engine lacks is drawn without it (D19) and that drawing is cached. A release
+that bundles the package changes what that diagram draws, which is exactly the case the corpus does
+not see and the bump by hand is for.
+
+ENGINE_ID itself is unchanged in meaning: it is the build, stored with each artifact, shown in the
+diagnostics, announced by the worker (`verify:worker`), and the engine `src/source/native-unicode.ts`
+was scanned on. D3's extended engine, if it is ever built, draws differently from the core one and
+needs a revision of its own in the key, as ENGINE_ID gave it for free.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

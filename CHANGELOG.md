@@ -3,6 +3,13 @@
 What changed in each release, newest first. The release workflow puts a version's section at the
 top of its notes on GitHub, and will not publish a version that has none.
 
+## 0.2.1 — unreleased
+
+- Updating recompiles nothing: every diagram cached by 0.2.0 is shown from the cache, as before.
+  From this release on, the cache is tied to what the engine draws rather than to the exact build of
+  it, so a release that only makes the engine faster no longer compiles every cached diagram once
+  more. A release that changes what diagrams look like still does, and says so here.
+
 ## 0.2.0 — 2026-10-13
 
 - After updating, every cached diagram is compiled once more, the next time it is shown: the

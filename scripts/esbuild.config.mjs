@@ -37,9 +37,9 @@ const external = ['obsidian', 'electron', ...codemirror, ...lezer, ...builtinMod
  * because it runs as a Worker created from a Blob — Obsidian's community installer only ever
  * fetches main.js, manifest.json and styles.css, so a sibling worker file would not reach users.
  *
- * ENGINE_ID is the sha256 of the worker itself (scripts/engine-assets.mjs, buildWorker). It is a
- * cache-key input: change anything the worker runs and every cached diagram is correctly
- * invalidated, no more and no less.
+ * ENGINE_ID is the sha256 of the worker itself (scripts/engine-assets.mjs, buildWorker). It names
+ * the build: change anything the worker runs and it moves. Since 0.2.1 the cache key holds
+ * OUTPUT_REVISION instead (src/cache/key.ts), which moves only when what the engine draws does.
  */
 async function buildWorker() {
 	const entry = join(root, 'engine-src', 'worker.ts');

@@ -514,7 +514,8 @@ The **total export budget is not optional**. `Promise.all(ctx.promises)` has no 
 key = sha256Hex(
   field(`s${SCHEMA_VERSION}`) +   // bumped only when the STORED ARTIFACT FORMAT changes
   field(`p${PIPELINE_REVISION}`) + // bumped when a src/svg stage can write a different template
-  field(engineId) +               // sha256 of the minified worker bundle, id replaced by a placeholder
+  field(outputRevision) +         // OUTPUT_REVISION, what the engine draws (DECISIONS.md D20);
+                                  // until 0.2.0 engineId, the sha256 of the minified worker
   field(normalizedSource) +
   field(stableStringify(baked)) + // preamble, packages, libraries, border, two-pass
   field(artifactRevision) +
@@ -535,6 +536,10 @@ runs for every mode and whose sanitizer is an allowlist; `test/pipeline-revision
 fingerprints the stage modules and fails until the revision is reconsidered. **`engineId`** is now
 the sha256 of the worker as it ships (`scripts/engine-assets.mjs`): it used to hash a list of the
 worker's inputs, which left out the npm packages bundled into it and the contents of the TeX files.
+
+In 0.2.1 that field became **`OUTPUT_REVISION`**, a revision of what the engine draws, held to the
+golden corpus by `test/fixtures/golden/REVISION.json`, with 0.2.0's ENGINE_ID as its first value, so
+that an engine that only gets faster recompiles nothing (DECISIONS.md D20).
 
 `artifactRevision()` is **deliberately narrow and enumerated**:
 

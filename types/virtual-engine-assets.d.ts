@@ -24,7 +24,8 @@ declare module 'virtual:engine-assets' {
 	export const TEX_FILES: Record<string, string>;
 	/**
 	 * sha256 of the minified worker bundle that embeds it, the id itself left out
-	 * (scripts/engine-assets.mjs `buildWorker`). A cache-key input.
+	 * (scripts/engine-assets.mjs `buildWorker`). Names the build; the cache key holds
+	 * OUTPUT_REVISION (src/cache/key.ts) instead.
 	 */
 	export const ENGINE_ID: string;
 	export const INVENTORY: import('../engine-src/protocol').EngineInventory;

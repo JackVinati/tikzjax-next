@@ -4,7 +4,7 @@ import { normalizeSource } from '../source/normalize';
 import { legacyTidyTikzSource } from '../source/legacy-tidy';
 import { parseDirectives } from '../source/directives';
 import { preflight } from '../source/preflight';
-import { deriveKey } from '../cache/key';
+import { deriveKey, OUTPUT_REVISION } from '../cache/key';
 import { isExportContext } from '../platform/context';
 import { artifactRevision, type TikzSettings } from '../settings/schema';
 import { TikzBlock, type BlockDeps, type BlockOutcome, type TexJobSpec } from './render-child';
@@ -391,7 +391,7 @@ function buildSpec(
 	const key = deriveKey({
 		normalizedSource: normalized,
 		baked: options.baked,
-		engineId: deps.host.id,
+		outputRevision: OUTPUT_REVISION,
 		artifactRevision: artifactRevision(settings),
 		pipeline: {
 			raw: options.raw,

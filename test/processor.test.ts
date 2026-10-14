@@ -142,6 +142,21 @@ describe('the settings a block is built with', () => {
 	});
 });
 
+describe("a block's cache key", () => {
+	/**
+	 * The key holds what the engine draws, OUTPUT_REVISION, not which build of the worker drew it:
+	 * an engine that only got faster finds every diagram where the one before it left it
+	 * (internal/DECISIONS.md D20).
+	 */
+	it('is the same whichever build of the engine is running', async () => {
+		const one = processorDeps();
+		const other = processorDeps({ host: { ...one.deps.host, id: 'another-build' } });
+		const a = await processBlock(one.deps, one.seen, SOURCE, { load: false });
+		const b = await processBlock(other.deps, other.seen, SOURCE, { load: false });
+		expect(b.spec.key).toBe(a.spec.key);
+	});
+});
+
 describe('a block in a list item', () => {
 	/**
 	 * Live Preview hands the processor the block's lines as they stand in the note, the list's

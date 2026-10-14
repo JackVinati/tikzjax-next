@@ -105,7 +105,11 @@ export interface Artifact {
 export interface KeyInputs {
 	normalizedSource: string;
 	baked: BakedOptions;
-	engineId: string;
+	/**
+	 * OUTPUT_REVISION (cache/key.ts): what the engine draws, not which build of it drew it. In the
+	 * place ENGINE_ID had in the payload until 0.2.0, and equal to 0.2.0's, so 0.2.0's keys hold.
+	 */
+	outputRevision: string;
 	/** Enumerated in settings/schema.ts. Excludes theme, scale, alignment, timeouts. */
 	artifactRevision: string;
 	/**
@@ -211,8 +215,9 @@ export interface EngineCapabilities {
 }
 
 /**
- * The seam that makes swapping engines a swap rather than a rewrite. `id` flows into the cache
- * key, so two engines can coexist and switching invalidates exactly the affected diagrams.
+ * The seam that makes swapping engines a swap rather than a rewrite. `id` is the build, ENGINE_ID:
+ * it is stored with each artifact and shown in the diagnostics view, and since 0.2.1 it is not in
+ * the cache key, which holds what the engine draws instead (OUTPUT_REVISION, cache/key.ts).
  */
 export interface TexHost {
 	readonly id: string;
