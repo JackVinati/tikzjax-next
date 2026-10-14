@@ -1332,7 +1332,7 @@ time gains less than this.
 
 Measured again on 2026-10-14 with the engine 0.2.1 ships (D27 to D31) and with 0.2.1-beta.1's, in
 the same harness on the same desktop, five fresh browsers each, medians, every SVG byte-identical to
-the golden corpus:
+the golden corpus, with another job keeping one of the desktop's 32 threads busy throughout:
 
 | 37 diagrams at once | one worker | two workers | peak working set, one → two |
 | --- | ---: | ---: | ---: |
@@ -2045,9 +2045,11 @@ reads the memory once the diagrams have settled, not only at the peak.
 2026-10-14, on the desktop of D27 and with the harness as D29 ran it, of 0.2.1-beta.1's published
 `main.js` against 0.2.1's (worker `0ccfc5f69326…`), each round a fresh browser or process per build,
 the builds' order rotated, a cold `basic` and then the 37 fixtures of 0.2.0's corpus twice each.
-All 3,570 replies were byte-identical to the golden corpus. TeX is the sum of each fixture's minimum
-over the rounds, and the first `basic` its minimum; the rest are medians (range) of the rounds,
-memory in MiB:
+Another job, a WebKit benchmark without its JIT, kept one of the desktop's 32 threads busy
+throughout, and both builds ran beside it; the sums came out within 1.5% of what D27's and D31's
+campaigns measured for the same engines. All 3,570 replies were byte-identical to the golden
+corpus. TeX is the sum of each fixture's minimum over the rounds, and the first `basic` its
+minimum; the rest are medians (range) of the rounds, memory in MiB:
 
 | | WebKit 26.6, beta.1 | WebKit 26.6, 0.2.1 | Chromium 153, beta.1 | Chromium 153, 0.2.1 |
 |---|---:|---:|---:|---:|
