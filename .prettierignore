@@ -6,6 +6,9 @@ vendor/
 # The pristine upstream copy, kept verbatim so the fork can be diffed against it. Reformatting it
 # would destroy the only thing it is for.
 engine-src/upstream/
+# Three files of web2js's compiler, replaced whole by ours, in web2js's own style so that a diff
+# against the file each replaces shows only what changed (engine-build/web2js-codegen/README.md).
+engine-build/web2js-codegen/
 
 # Prose and hand-drawn tables. Prettier pads every table cell to the widest row, which turns the
 # limitations table in the README into 250-column lines — worse to read in the source than the

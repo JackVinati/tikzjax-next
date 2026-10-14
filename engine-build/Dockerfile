@@ -143,7 +143,33 @@ RUN set -eu; \
     done; \
     echo "$BAKOMA_SHA256  /opt/src/bakoma.zip" | sha256sum -c -
 
+# binaryen 132's wasm-opt, which optimises the compiled engine (build-engine.sh; internal/DECISIONS.md
+# D27). web2js keeps the binaryen 99 its lockfile pins for compiling TeX; only the optimisation step
+# uses this one. It is npm's tarball, pinned by the integrity npm publishes for it
+# (`npm view binaryen@132.0.0 dist.integrity`) and checked before anything unpacks it, so the
+# registry cannot hand over different bytes under the same version, as bakoma.zip and Node are
+# pinned above. It has no dependencies, so it is unpacked where npm would put it rather than
+# installed: no resolution, no lifecycle scripts.
+ARG BINARYEN_VERSION=132.0.0
+ARG BINARYEN_INTEGRITY=sha512-4Usg7yEvwO3FMso3Oov6qkOOHSod1IEv+boKkh77kTljM+eNBouqCTbqWswGzbG+vDNO/b/v2C4gfEh1WgB9Lg==
+RUN set -eu; \
+    curl -fsSL --retry 3 --retry-delay 2 \
+        "https://registry.npmjs.org/binaryen/-/binaryen-${BINARYEN_VERSION}.tgz" -o /tmp/binaryen.tgz; \
+    got=$(node -e 'const c = require("crypto"), fs = require("fs"); \
+        process.stdout.write("sha512-" + c.createHash("sha512").update(fs.readFileSync(process.argv[1])).digest("base64"))' \
+        /tmp/binaryen.tgz); \
+    [ "$got" = "$BINARYEN_INTEGRITY" ] \
+        || { echo "binaryen ${BINARYEN_VERSION} is ${got}, not the published ${BINARYEN_INTEGRITY}" >&2; exit 1; }; \
+    mkdir -p /opt/binaryen/node_modules/binaryen; \
+    tar -xzf /tmp/binaryen.tgz -C /opt/binaryen/node_modules/binaryen --strip-components=1 --no-same-owner; \
+    rm /tmp/binaryen.tgz; \
+    [ "$(node -p "require('/opt/binaryen/node_modules/binaryen/package.json').version")" = "${BINARYEN_VERSION}" ]; \
+    node /opt/binaryen/node_modules/binaryen/bin/wasm-opt --version
+
 COPY pins.env tex-files.extra.json tex-files.collected.json build-engine.sh collect-tex-files.sh /opt/engine-build/
+# Our replacements for three files of web2js's compiler, which build-engine.sh puts in place of
+# web2js's own after checking those are the ones they were written against (D27).
+COPY web2js-codegen/ /opt/engine-build/web2js-codegen/
 # Our change files to TeX, which build-engine.sh applies after web2js's (internal/DECISIONS.md D16).
 COPY changes/ /opt/engine-build/changes/
 RUN chmod +x /opt/engine-build/build-engine.sh /opt/engine-build/collect-tex-files.sh

@@ -16,6 +16,7 @@ engine-build/out/*
 !engine-build/out/tex-versions.txt
 !engine-build/out/BUILD-MANIFEST.txt
 !engine-build/out/CHECKSUMS
+!engine-build/out/memory-layout.json
 !engine-build/out/dist/
 engine-build/out/dist/*
 !engine-build/out/dist/tex_files/

@@ -5,7 +5,8 @@ tex changes      ifincsname.ch filesize-missing.ch jump-out.ch (engine-build/cha
 tex banner       TeX 3.141592653 (TeX Live 2023/Debian)
 TEXMFDIST        /usr/share/texlive/texmf-dist
 web2js           0114ef5905dc387b70e72c654bcedd3b52b29fad
-wasm-opt         --mvp-features -O4 (binaryen 99.0.0), no asyncify
+web2js codegen   function-declaration.js function-evaluation.js memory.js (engine-build/web2js-codegen, sha256 1629e02b89512f48)
+wasm-opt         --mvp-features -O4 (binaryen 132.0.0), no asyncify
 tikzjax          461ac15f1c63351392115c4262d8179bc9922404
 memory pages     2500 (156 MiB)
 hash_prime       131071 (hash_size 600000)

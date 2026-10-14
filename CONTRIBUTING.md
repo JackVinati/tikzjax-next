@@ -122,11 +122,18 @@ TeX itself is `tex.web` with change files applied by tie: web2js's own, and then
 change to what TeX does goes there, as one more change file, and the build stops if tie cannot apply
 it. The image carries a copy, so rebuild the image after editing one.
 
+web2js compiles TeX to WebAssembly with three of its compiler's files replaced by ours, in
+`engine-build/web2js-codegen`, which keep a procedure's local variables in WebAssembly locals
+instead of in memory (`internal/DECISIONS.md` D27). The build checks each of web2js's files against
+the sha256 of the one ours was written against, and stops if one has moved: moving the web2js pin
+means carrying its change into ours and updating the sum. binaryen 132's `wasm-opt` then optimises
+the engine.
+
 Building the image is the only step that touches the network: it pins the upstream sources by commit
-(`engine-build/pins.env`) and the font archive by SHA-256, then bakes them in, so `engine:build`
-runs entirely offline. The Engine workflow rebuilds the engine and diffs it against what is
-committed, so commit `engine-build/out/` and `src/source/native-unicode.ts` in the same commit as
-the change that produced them.
+(`engine-build/pins.env`), the font archive by SHA-256 and binaryen by the integrity npm publishes
+for it, then bakes them in, so `engine:build` runs entirely offline. The Engine workflow rebuilds
+the engine and diffs it against what is committed, so commit `engine-build/out/` and
+`src/source/native-unicode.ts` in the same commit as the change that produced them.
 
 To debug on an iPhone or iPad, where there are no devtools: on the device, Settings → Apps → Safari
 → Advanced → Web Inspector; connect it to a Mac by cable; then in Safari on the Mac, Develop → the

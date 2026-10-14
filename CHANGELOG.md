@@ -51,6 +51,14 @@ top of its notes on GitHub, and will not publish a version that has none.
   and stops with the first; if it cannot start, the first carries on alone. Phones and tablets keep
   one engine, and so does a computer that reports less than 8 GB of memory; Settings → Second engine
   turns it off.
+- TeX takes about a third less time on every diagram, the first one after Obsidian starts included.
+  Over 37 of the diagrams the plugin is tested with, measured on a Windows desktop, TeX's time went
+  from 4.2 s to 2.8 s in WebKit, the browser engine of the iPhone and iPad, and from 2.8 s to 1.9 s
+  in Chromium, the one Obsidian's desktop app is built on. The engine is now compiled so that TeX
+  keeps the values it works on where the processor reaches them directly, rather than in its memory,
+  and optimised with a newer binaryen; the plugin's `main.js` is 83 KB smaller. Every diagram draws
+  as before, byte for byte, so none is compiled again for this. Nothing has been measured on a phone
+  yet.
 
 ## 0.2.0 — 2026-10-13
 

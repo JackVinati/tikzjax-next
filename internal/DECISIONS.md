@@ -1541,6 +1541,117 @@ output: the bridge's fixtures are recorded in `REVISION.json` under it.
 
 ---
 
+## D27 — TeX's local variables are WebAssembly locals, and binaryen 132 optimises the engine
+
+**Amends D14, which optimises the engine with web2js's binaryen 99 and leaves 132 for later. Date of
+record: 2026-10-14.**
+
+web2js compiles each Pascal procedure of TeX with its local variables and parameters on a shadow
+stack in the WebAssembly memory: every read of a local is a load, every write a store, and every
+argument is stored by the caller and loaded again by the callee. A JavaScript engine cannot keep
+those values in registers, because any store into TeX's arrays might be a store into one of them.
+TeX's time is mostly in procedures that do little else (`get_next`, `main_control`, `macro_call`,
+`get_avail`, `id_lookup` in a V8 profile of `pgfplots-axis` taken during the 0.2.x study), and in
+WebKit about 94% of it is inside the WebAssembly, not in the host's JavaScript.
+
+So three files of web2js's compiler are replaced by ours, in `engine-build/web2js-codegen`, before
+TeX is compiled:
+
+- `function-declaration.js`: a procedure's scalar locals, its result and its parameters become
+  WebAssembly locals and parameters. A variable whose address is taken (a `var` argument, a record,
+  an array, a file) stays in memory: its first use as an address throws inside the compiler, and the
+  procedure is generated again with it in memory. A value is narrowed where it is written exactly as
+  a store and a load of the variable's width narrowed it, `& 255` for a byte, a sign extension for a
+  signed one, so each variable holds what its memory slot would have held. A procedure with nothing
+  left in memory does not touch the shadow stack at all.
+- `function-evaluation.js`: a call to such a procedure passes its arguments as call operands.
+- `memory.js`: each use of a variable's base address is a copy of it. web2js shares one expression
+  node among every use, and an optimisation that rewrites a node in place changed them all; that is
+  how the first attempt at this crashed.
+
+Each was written against web2js's own file at the pinned commit. `build-engine.sh` checks the sha256
+of each of web2js's files before putting ours in its place and stops if one differs, so a web2js
+that moves cannot lose what it changed, nor ours what they change. `BUILD-MANIFEST.txt` records a
+hash of the three, and `test/engine-build.test.ts` holds the files in the repository to it, so they
+cannot be edited without the engine being rebuilt.
+
+The engine is then optimised by binaryen 132's `wasm-opt`, still `--mvp-features -O4` (D14). It
+comes from npm's registry as the package's tarball, which the Dockerfile checks against the
+integrity npm publishes for `binaryen@132.0.0` before unpacking it, as Node and the font archive
+are checked; it has no dependencies, so nothing else is resolved or installed. web2js keeps its own
+binaryen 99 for compiling TeX. `scripts/wasm-mvp.mjs` passes on the new `tex.wasm`.
+
+**Nothing draws differently.** The static memory image, TeX's globals and the compiled code's
+string literals, is laid out as before, so the core dump is the same bytes up to byte 163,642,455 of
+163,840,000: only the top 197,545 B differ, which are leftover frames of the shadow stack, 82,933
+bytes that were not zero in the old dump and 33 in the new. Every fixture's DVI, transcript and SVG
+is byte-identical to the golden corpus, and the shipped worker passes `verify:worker`. One thing
+does change in principle: a local read before anything was written to it gives 0 where it gave a
+stale byte of the shadow stack. No fixture depends on that. `OUTPUT_REVISION` stays where 0.2.0 left
+it, `REVISION.json` records the new worker, `d50048c525aa…`, and updating compiles nothing again
+(D20).
+
+**What it gains.** Measured on 2026-10-14 on the Windows 11 desktop of D14 (i9-13900K, 128 GiB),
+quiet at the start (3% CPU), with the 0.2.x study's harness: each build's worker exactly as its
+`main.js` carries it, in a real Web Worker of Playwright 1.63's WebKit 26.6 (JavaScriptCore) and
+Chromium 153, and on Node 22.19's main thread. Seven rounds, each a fresh browser or process per
+build, the builds' order rotated every round. Each round: a cold `basic`, then the 37 fixtures of
+0.2.0's corpus twice each. TeX is the worker's own `texMs`; the figure is each fixture's minimum
+over the rounds, summed. Every reply of the campaign, 5,355 of them, was byte-identical to the
+golden corpus.
+
+| TeX time, 37 fixtures | 0.2.1-beta.1 | rebuilt engine | each round against beta.1's |
+|---|---:|---:|---|
+| WebKit 26.6 (JavaScriptCore) | 4,179 ms | 2,837 ms (−32.1%) | −31.6% median, −31.3% to −32.1% |
+| Chromium 153 (V8) | 2,756 ms | 1,893 ms (−31.3%) | −30.6% median, −29.9% to −31.9% |
+| Node 22.19 (V8) | 3,000 ms | 2,301 ms (−23.3%) | −23.0% median, −22.5% to −24.6% |
+
+The second render of each fixture in a row gains the same: 4,133 → 2,803 ms in WebKit, 2,722 →
+1,856 in Chromium, 2,955 → 2,258 in Node. In WebKit, `basic` takes 25 → 17 ms, `tikz-cd` 154 → 103,
+`siunitx` 172 → 125, `pgfplots-axis` 451 → 304, `circuitikz` 486 → 316, `feynhand` 566 → 373. The
+engine's start is unchanged (median spawn to ready 145 → 146 ms in WebKit, 161 → 159 in Chromium):
+it is the dump's inflate, not TeX. JavaScriptCore still takes about 1.5 times V8's time on the same
+diagrams; what is gained is less work for both. The study that built the change split the gain in
+Node, over the same fixtures with five to seven runs each: the locals alone −18.1%, with the
+parameters −19.7%, and binaryen 132 on top of that a further 4.2% by the minimum (0.6% by the
+median). Nothing has been measured on a phone.
+
+| | 0.2.1-beta.1 | rebuilt engine |
+|---|---:|---:|
+| `tex.wasm` | 356,500 B | 236,378 B |
+| `tex.wasm.gz` | 77,347 B | 69,594 B |
+| `core.dump.gz` | 5,994,269 B | 5,938,929 B |
+| `main.js`, the same plugin code | 12,257,847 B | 12,174,339 B (−83,508) |
+
+**What it costs.** Values held in WebAssembly locals live, while a call is made, on the JavaScript
+engine's own stack instead of in the WebAssembly memory, so each level of TeX's recursion takes more
+of that stack in V8. The deepest nesting of `\number` that still renders, verify-worker's
+construction, bisected to one level in the shipped worker: in a Chromium worker 2,344 → 1,622, on
+Node 22.19's main thread 3,798 → 3,132 (Node 24.21 4,615 → 3,194, Node 26.11 4,612 → 3,196). In a
+WebKit worker it stays at 21,281 → 21,280: both engines stop within one level of each other there,
+so what bounds it is not the size of the engine's frames, and JavaScriptCore loses nothing; an
+iPhone's limit has not been measured. A diagram nested past
+the limit fails as it did past the old one, with "TeX nested deeper than the engine's stack
+allows.".
+
+**The build.** Two builds of this source from a new image gave the same bytes, and the same as the
+build the study measured. The Engine workflow rebuilds and diffs `engine-build/out` as before.
+`engine-build/out/memory-layout.json` is new, written by the build: where web2js put each of TeX's
+globals in the memory, its offset and size, an array's index range and entry size, with the
+memory's pages, `hash_prime`, and where the globals and the string literals end. TeX's own counters
+of how far it has filled its big arrays (`lo_mem_max`, `hi_mem_min`, `mem_end`, `pool_ptr`,
+`str_ptr`, `fmem_ptr`, `hash_used`, `trie_max`, `save_ptr`, `max_save_stack`) are globals in it, so
+the worker can find the parts of the memory a run can have written and reset only those. The build
+stops unless every one of them and the arrays they count are there, shaped as TeX declares them,
+and `test/engine-build.test.ts` reads each counter out of the committed dump and requires a value
+that fits the array it counts, which an offset wrong by one variable does not give. `CHECKSUMS`
+covers the file.
+
+When web2js moves, the sums stop the build: port its change into our three files, update the sums,
+and hold the result to the golden corpus and to `verify:worker`.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

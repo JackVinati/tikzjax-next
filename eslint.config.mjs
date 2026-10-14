@@ -52,6 +52,9 @@ export default tseslint.config(
 			// The pristine upstream copy, kept verbatim for diffing against the fork. Linting it
 			// produces findings nobody may act on without breaking that.
 			'engine-src/upstream/**',
+			// Our copies of three files of web2js's compiler, which runs in the engine image and not in
+			// the plugin; kept in web2js's style so they diff against the files they replace.
+			'engine-build/web2js-codegen/**',
 		],
 	},
 

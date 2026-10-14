@@ -150,6 +150,32 @@ HAVE=$(git -C web2js rev-parse HEAD)
 [ "$HAVE" = "$WEB2JS_REF" ] \
     || die "image has web2js $HAVE but pins.env says $WEB2JS_REF — rebuild the image (npm run engine:image)"
 
+# web2js's compiler keeps every local variable and parameter of a procedure on a shadow stack in
+# linear memory, so every read of one is a load and every write a store, and every argument is
+# stored by the caller and loaded again by the callee. Three of its files are replaced by ours, in
+# engine-build/web2js-codegen, which hold scalars in WebAssembly locals and parameters instead
+# (internal/DECISIONS.md D27). Each was written against the exact file it replaces, whose sha256 is
+# below, so a web2js that changes one of them stops the build here rather than losing what upstream
+# changed: port the change into ours, then update the sum.
+CODEGEN=(function-declaration.js function-evaluation.js memory.js)
+while read -r sum file; do
+    [ -s "$SRC/web2js-codegen/$file" ] || die "the image has no engine-build/web2js-codegen/$file — rebuild it (npm run engine:image)"
+    echo "$sum  web2js/pascal/$file" | sha256sum -c --quiet - \
+        || die "web2js/pascal/$file is not the file engine-build/web2js-codegen/$file was written against"
+    cp "$SRC/web2js-codegen/$file" "web2js/pascal/$file"
+done <<'SUMS'
+7cde66ec1f9e9a271bfc1e86ee85a4d86c17e1ca51e79155b74335d8345f8782 function-declaration.js
+d03d68a05c9012fc7ec54eaaf100ce242751f81cf6febc7e6278b083011c9bd9 function-evaluation.js
+790f642888c02773f24f43f47082f803825a2a5f0cd0115fd9a05759caf51303 memory.js
+SUMS
+for file in "${CODEGEN[@]}"; do
+    cmp -s "$SRC/web2js-codegen/$file" "web2js/pascal/$file" || die "web2js/pascal/$file was not replaced"
+done
+# The manifest records a hash of the three, so the committed engine names the code generator it was
+# built with (test/engine-build.test.ts holds the files in the repository to it).
+CODEGEN_SHA=$(cd "$SRC/web2js-codegen" && cat "${CODEGEN[@]}" | sha256sum | cut -c1-16)
+ok "web2js code generator: scalar locals and parameters in WebAssembly locals (${CODEGEN[*]})"
+
 # The TeX WEB source and the e-TeX change file are vendored in the repo, not fetched by kpathsea.
 # `npm run build:tie` reads texk/tex.web, so a missing one fails deep inside tangle with an
 # unhelpful message.
@@ -330,6 +356,64 @@ process.exit(1);
 ok "a jump out of TeX calls library.jumpOut; nothing is left for asyncify"
 
 # ---------------------------------------------------------------------------------------------
+# WHERE TEX'S GLOBALS LIE IN MEMORY.
+#
+# web2js lays TeX's global variables out one after another, in the order they are declared, from
+# byte 0 of the WebAssembly memory; the string literals of the compiled code follow them, and the
+# engine's shadow stack grows down from the top. memory-layout.json writes down where it put each
+# global: its offset and size, and for an array its index range and the size of an entry. TeX's own
+# counters of how far it has filled its big arrays are globals too (lo_mem_max and hi_mem_min for
+# mem, pool_ptr and str_ptr for the strings, fmem_ptr for font_info, hash_used, trie_max, save_ptr
+# and max_save_stack), so with this file the worker can find, after a run, the parts of the memory
+# that run can have written, and reset only those. The file is checked once TeX is compiled.
+node - <<'LAYOUT' || die "the memory layout patch did not apply — re-read web2js's program.js"
+const fs = require('fs');
+const path = 'web2js/pascal/program.js';
+const edit = (text, before, after) => {
+    const found = text.split(before).length - 1;
+    if (found !== 1) {
+        console.error(`program.js: expected what is replaced exactly once, found it ${found} times`);
+        process.exit(1);
+    }
+    return text.replace(before, () => after);
+};
+let text = fs.readFileSync(path, 'utf8');
+text = edit(
+    text,
+    `                environment.variables[name] = this.memory.allocateVariable(name, type);
+            }
+        }
+`,
+    `                environment.variables[name] = this.memory.allocateVariable(name, type);
+                const entry = { name, offset: environment.variables[name].offset, bytes: type.bytes() };
+                if (type.componentType) {
+                    const index = environment.resolveType(type.index);
+                    entry.min = index.minimum();
+                    entry.max = index.maximum();
+                    entry.entry = type.componentType.bytes();
+                }
+                (this.layout ??= []).push(entry);
+            }
+        }
+        const globalsEnd = this.memory.memorySize;
+`
+);
+text = edit(
+    text,
+    `        this.memory.setup();
+`,
+    `        this.memory.setup();
+        require('fs').writeFileSync(
+            'memory-layout.json',
+            JSON.stringify({ globalsEnd, dataEnd: this.memory.memorySize, variables: this.layout })
+        );
+`
+);
+fs.writeFileSync(path, text);
+LAYOUT
+ok "web2js writes memory-layout.json"
+
+# ---------------------------------------------------------------------------------------------
 # TEX'S HASH TABLE, spread out.
 #
 # web2js's changes/memory.ch gives TeX room for 600,000 control sequences (hash_size) but leaves
@@ -471,9 +555,15 @@ ok "the TeX compiled carries \\ifincsname, \\filesize's nothing for a missing fi
 # also makes wasm-opt refuse an input that uses one ("all used features should be allowed").
 # scripts/wasm-mvp.mjs checks the result again: the Engine workflow on this build, the tests on what
 # is committed. No -tnh: see D14.
+#
+# wasm-opt is binaryen 132's, which the Dockerfile installs, checked against the integrity npm
+# publishes for it. web2js compiles TeX with the binaryen 99 its own lockfile pins, which this does
+# not touch; 132's -O4 measured 4% less TeX time in V8 than 99's on the same input (D14, D27).
 WASM_OPT=(--mvp-features -O4)
-( cd web2js && ./node_modules/.bin/wasm-opt "${WASM_OPT[@]}" out.wasm -o tex.wasm )
-BINARYEN=$(node -p "require('./web2js/node_modules/binaryen/package.json').version")
+BINARYEN_DIR=/opt/binaryen/node_modules/binaryen
+[ -s "$BINARYEN_DIR/bin/wasm-opt" ] || die "the image has no binaryen in /opt/binaryen — rebuild it (npm run engine:image)"
+( cd web2js && node "$BINARYEN_DIR/bin/wasm-opt" "${WASM_OPT[@]}" out.wasm -o tex.wasm )
+BINARYEN=$(node -p "require('$BINARYEN_DIR/package.json').version")
 
 [ -s web2js/tex.wasm ] || die "tex.wasm was not produced"
 node -e '
@@ -493,6 +583,49 @@ if (!names.includes("library.jumpOut")) {
 }
 ' || die "tex.wasm is not the engine without asyncify that this build makes"
 ok "tex.wasm imports library.jumpOut and has no asyncify left"
+
+# memory-layout.json, as program.js wrote it while TeX was compiled (above), checked and completed
+# with the two numbers it does not know: the memory's pages, and hash_prime, the slots a name can
+# hash to, which with hash_used bounds where in the hash table a name can lie. Every array and
+# counter a reset of what TeX wrote needs must be in it, shaped as TeX declares it, and the globals
+# must lie one after another below the string literals, which lie below the stack.
+HASH_PRIME="$HASH_PRIME" node - <<'LAYOUT' || die "memory-layout.json is not the layout of the TeX just compiled"
+const fs = require('fs');
+const raw = JSON.parse(fs.readFileSync('web2js/memory-layout.json', 'utf8'));
+const pages = require(process.cwd() + '/web2js/commonMemory.js').pages;
+const hashPrime = Number(process.env.HASH_PRIME);
+const fail = (why) => {
+    console.error(`memory-layout.json: ${why}`);
+    process.exit(1);
+};
+const byName = new Map(raw.variables.map((v) => [v.name, v]));
+const ARRAYS = ['mem', 'str_pool', 'str_start', 'font_info', 'trie', 'hash', 'eqtb', 'save_stack'];
+const COUNTERS = ['lo_mem_max', 'hi_mem_min', 'mem_end', 'pool_ptr', 'str_ptr', 'fmem_ptr', 'trie_max',
+    'hash_used', 'save_ptr', 'max_save_stack'];
+for (const name of ARRAYS) {
+    const v = byName.get(name);
+    if (!v || v.min === undefined || v.bytes !== (v.max - v.min + 1) * v.entry) fail(`no array ${name}`);
+}
+for (const name of COUNTERS) if (byName.get(name)?.bytes !== 4) fail(`no counter ${name}`);
+if (byName.get('hash').max - byName.get('hash').min + 1 < hashPrime) fail('the hash table is smaller than hash_prime');
+let at = 0;
+for (const v of raw.variables) {
+    if (v.offset % 4 !== 0 || v.offset < at || v.bytes <= 0) fail(`${v.name} is not after the global before it`);
+    at = v.offset + v.bytes;
+}
+if (!(at <= raw.globalsEnd && raw.globalsEnd <= raw.dataEnd && raw.dataEnd < pages * 65536)) {
+    fail(`globals end at ${at}, ${raw.globalsEnd}; strings at ${raw.dataEnd}; memory at ${pages * 65536}`);
+}
+// One global to a line, so that a rebuild that moves one shows as that line in a diff.
+const line = (v) => `  ${JSON.stringify(v)}`;
+fs.writeFileSync(
+    'web2js/memory-layout.json',
+    `{\n "pages": ${pages},\n "hashPrime": ${hashPrime},\n "globalsEnd": ${raw.globalsEnd},\n` +
+        ` "dataEnd": ${raw.dataEnd},\n "variables": [\n${raw.variables.map(line).join(',\n')}\n ]\n}\n`
+);
+console.log(`    ${raw.variables.length} globals in ${raw.globalsEnd} bytes, string literals to ${raw.dataEnd}`);
+LAYOUT
+ok "memory-layout.json has every array and counter of TeX's that a reset reads"
 [ -s web2js/tex.pool ] || die "tex.pool was not produced"
 ok "tex.wasm   $(stat -c%s web2js/tex.wasm) bytes  sha256 $(sha256sum web2js/tex.wasm | cut -c1-16)"
 ok "tex.pool   $(stat -c%s web2js/tex.pool) bytes  sha256 $(sha256sum web2js/tex.pool | cut -c1-16)"
@@ -612,7 +745,7 @@ ok "tex_files: $GOT resolved of $WANT requested"
 # ---------------------------------------------------------------------------------------------
 log "Collecting artifacts into $OUT"
 
-cp web2js/tex.wasm web2js/core.dump "$OUT/"
+cp web2js/tex.wasm web2js/core.dump web2js/memory-layout.json "$OUT/"
 cp tikzjax/tex.wasm.gz tikzjax/core.dump.gz "$OUT/"
 # `cp -r src dst` NESTS when dst already exists (dst/src), so a second run into a non-empty /out
 # silently leaves the first run's stale dist in place while writing the new one underneath it.
@@ -659,6 +792,7 @@ tex changes      ${OUR_CHANGES[*]} (engine-build/changes, after web2js's)
 tex banner       $(tex --version | head -1)
 TEXMFDIST        $(kpsewhich --var-value TEXMFDIST)
 web2js           ${WEB2JS_REF}
+web2js codegen   ${CODEGEN[*]} (engine-build/web2js-codegen, sha256 ${CODEGEN_SHA})
 wasm-opt         ${WASM_OPT[*]} (binaryen ${BINARYEN}), no asyncify
 tikzjax          ${TIKZJAX_REF}
 memory pages     ${PAGES} ($(( PAGES * 65536 / 1048576 )) MiB)
@@ -667,7 +801,7 @@ tex_files        ${GOT}
 node             $(node --version)
 MANIFEST
 
-( cd "$OUT" && sha256sum tex.wasm core.dump tex.wasm.gz core.dump.gz tex_files.json > CHECKSUMS )
+( cd "$OUT" && sha256sum tex.wasm core.dump tex.wasm.gz core.dump.gz tex_files.json memory-layout.json > CHECKSUMS )
 
 cat "$OUT/BUILD-MANIFEST.txt"
 echo

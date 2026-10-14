@@ -15,7 +15,17 @@ import { buildSync } from 'esbuild';
 export function readText(path: string): string {
 	const [built] = buildSync({
 		entryPoints: [path],
-		loader: { '.ts': 'text', '.css': 'text', '.svg': 'text', '.sh': 'text', '.txt': 'text' },
+		// '' is a file with no extension, such as engine-build/Dockerfile.
+		loader: {
+			'.ts': 'text',
+			'.css': 'text',
+			'.svg': 'text',
+			'.sh': 'text',
+			'.txt': 'text',
+			'.js': 'text',
+			'.json': 'text',
+			'': 'text',
+		},
 		bundle: false,
 		write: false,
 		format: 'iife',
