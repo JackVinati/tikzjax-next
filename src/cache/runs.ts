@@ -462,7 +462,10 @@ export class RunStore {
 	 * a record. In WebKit on the desktop, with 13 runs stored, the first diagram after a fresh start
 	 * waited 128 to 146 ms for the cursor, the engine up in 97 to 109, and 9 ms for getAll (D36).
 	 * Another ENGINE_ID's are then deleted, in a transaction of their own, which only the first start
-	 * after an update needs.
+	 * after an update needs, and which nothing waits for: the index is known once it is read, and the
+	 * first job's lookup used to wait for every byte of the old engine's runs to be deleted too, up to
+	 * the whole budget, when nothing of the new engine's could be stored yet. Keeps made meanwhile
+	 * queue behind the delete in IndexedDB, and touch none of its keys.
 	 */
 	private async readIndex(): Promise<void> {
 		const generation = this.generation;
@@ -484,25 +487,32 @@ export class RunStore {
 					mine.set(info.route, info);
 				else if (typeof info?.key === 'string') foreign.push(info.key);
 			}
-			if (foreign.length > 0)
-				await this.run(async (db) => {
-					const tx = db.transaction(STORES, 'readwrite');
-					await settle(tx, async () => {
-						// Another build's, never read: what it stands for is that engine's memory.
-						await Promise.all(
-							foreign.flatMap((key) => [
-								tx.objectStore('runs').delete(key),
-								tx.objectStore('index').delete(key),
-							]),
-						);
-					});
-				});
 		} catch {
 			this.errors++;
 		}
 		// Whatever was read, or nothing: a store that cannot be read is an empty one. Unless it was
 		// cleared meanwhile, which left it empty.
 		if (this.generation === generation) this.index = mine;
+		if (foreign.length > 0) void this.deleteForeign(foreign);
+	}
+
+	/** Delete another build's runs, never read: what each stands for is that engine's memory. */
+	private async deleteForeign(keys: readonly IDBValidKey[]): Promise<void> {
+		try {
+			await this.run(async (db) => {
+				const tx = db.transaction(STORES, 'readwrite');
+				await settle(tx, async () => {
+					await Promise.all(
+						keys.flatMap((key) => [
+							tx.objectStore('runs').delete(key),
+							tx.objectStore('index').delete(key),
+						]),
+					);
+				});
+			});
+		} catch {
+			this.errors++;
+		}
 	}
 
 	/** Record a use, for eviction: the small index record only. */

@@ -88,8 +88,34 @@ describe('RunStore — engine ids', () => {
 		store = make('engine-b');
 		expect(await store.read('r1')).toBeUndefined();
 		expect(store.stats().runs).toBe(0);
+		await fake.idle();
 		expect(keys('runs')).toEqual([]);
 		expect(keys('index')).toEqual([]);
+	});
+
+	it("knows what is stored without waiting for another engine's runs to be deleted", async () => {
+		store = make('engine-b');
+		await store.keep(saved('mine', 1000));
+		store.close();
+		// A run of another engine's, as an update leaves the last one's.
+		const db = await openDB(DB, 1);
+		await db.put('runs', { key: 'engine-a/r1', data: new ArrayBuffer(8) });
+		await db.put('index', {
+			key: 'engine-a/r1',
+			engineId: 'engine-a',
+			route: 'r1',
+			bytes: 8,
+			lastUsed: 1,
+		});
+		db.close();
+
+		store = make('engine-b');
+		await store.load();
+		expect(store.has('mine')).toBe(true);
+		// The old engine's run is still there: its delete has not been waited for.
+		expect(keys('runs')).toContain('engine-a/r1');
+		await fake.idle();
+		expect(keys('runs')).toEqual(['engine-b/mine']);
 	});
 
 	it('deletes an index record that does not say what it is, unread', async () => {
@@ -104,6 +130,7 @@ describe('RunStore — engine ids', () => {
 		db.close();
 		await store.load();
 		expect(store.stats().runs).toBe(0);
+		await fake.idle();
 		expect(keys('runs')).toEqual([]);
 	});
 });
