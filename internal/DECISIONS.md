@@ -1184,12 +1184,14 @@ background.
   queue figures, and the recent renders with their steps. It never carries a diagram's source, an
   error card's text (which quotes the source and names preamble files by path), the transcript or a
   note: a render is named by its place in the list and the first eight characters of its cache
-  key. `test/report.test.ts` holds it to that.
+  key, which the view shows beside each row too. That prefix of a hash cannot be read back into
+  the diagram, though someone who has the same diagram with the same settings could tell that it
+  is the one. `test/report.test.ts` holds the text to all of that.
 
-The user agent was meant to be in it, for the iOS version and the WebKit build. The store's rules
-forbid reading `navigator.userAgent` (`obsidianmd/platform`) and forbid disabling that rule, so it
-is left out: `lint:store` reports the read as an error, and the store's review would too. What the
-user agent would have said about the WebView is asked of it instead, by feature check:
+`navigator.userAgent` was meant to be in it, for the iOS version and the WebKit build. The store's
+rules forbid reading it (`obsidianmd/platform`) and forbid disabling that rule, so it is left out:
+`lint:store` reports the read as an error, and the store's review would too. What that string would
+have said about the WebView is asked of it instead, by feature check:
 `DecompressionStream` and `Uint8Array.fromBase64`, which decide what 0.2.2's faster start can use,
 and the cores and memory it reports. The iOS version is written down by whoever measures.
 

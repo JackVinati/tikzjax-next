@@ -69,13 +69,20 @@ body:
     id: error
     attributes:
       label: The error card, word for word
-      description: The text under the diagram, if there is one. The command "Open TikZ diagnostics" shows the TeX log for recent renders; paste the part around the first line starting with `!`.
+      description: The text of the error card on the diagram, if there is one. Its "Copy log" button copies TeX's log; paste the part around the first line starting with `!`.
+      render: text
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Optional, and the first thing to attach from a phone. Run the command "Open TikZ diagnostics", press Copy, and paste it here. It has the versions, the device and where each diagram's time went, and none of your diagrams' code or note names.
       render: text
 
   - type: markdown
     attributes:
       value: |
-        **On an iPhone or iPad** there are no devtools, but the console is reachable: on the device, Settings → Apps → Safari → Advanced → Web Inspector; connect it to a Mac by cable; then in Safari on the Mac, Develop → the device → the Obsidian window. Anything in red there is worth pasting below.
+        **On an iPhone or iPad** the diagnostics above come first. There are no devtools, but the console is reachable as well: on the device, Settings → Apps → Safari → Advanced → Web Inspector; connect it to a Mac by cable; then in Safari on the Mac, Develop → the device → the Obsidian window. Anything in red there is worth pasting below.
 
   - type: textarea
     id: console

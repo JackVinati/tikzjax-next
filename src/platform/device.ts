@@ -4,10 +4,10 @@ import { apiVersion, Platform } from 'obsidian';
  * The device, as a bug report from the diagnostics view needs it (ui/report.ts). Every field is
  * what Obsidian or the WebView says of itself; nothing here names the user, the vault or a note.
  *
- * Not the user agent. The community store's rules forbid reading `navigator.userAgent`, and forbid
- * waiving that rule even for a string that is only copied, because it is how plugins guess the
- * operating system. The OS family comes from Platform instead, and what the user agent would have
- * told about the WebView is asked of it directly: the features the engine's start can use where
+ * Not `navigator.userAgent`. The community store's rules forbid reading it, and forbid waiving that
+ * rule even for a string that is only copied, because it is how plugins guess the operating system.
+ * The OS family comes from Platform instead, and what that string would have told about the
+ * WebView is asked of it directly: the features the engine's start can use where
  * they exist, and how many cores and how much memory the device reports.
  */
 export interface Device {
