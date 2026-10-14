@@ -88,7 +88,11 @@ export function timingSteps(timings: CompileTimings): string[] {
 				: STRINGS.timingReset(timings.resetMs),
 		timings.texMs === undefined ? null : STRINGS.timingTex(timings.texMs, timings.passes ?? 1),
 		timings.resumed === true ? STRINGS.timingResumed : null,
-		timings.saveMs === undefined ? null : STRINGS.timingSaved(timings.saveMs),
+		timings.saveMs === undefined
+			? null
+			: timings.saveNotKept === true
+				? STRINGS.timingSaveNotKept(timings.saveMs)
+				: STRINGS.timingSaved(timings.saveMs),
 		timings.saveFailed === true ? STRINGS.timingSaveFailed : null,
 		timings.svgMs === undefined ? null : STRINGS.timingSvg(timings.svgMs),
 		STRINGS.timingPost(timings.postMs),

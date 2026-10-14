@@ -381,7 +381,13 @@ const gist = (reply) =>
 		passes: reply.timings?.passes,
 	});
 const how = (reply) =>
-	reply.timings?.resumed ? 'resumed' : reply.timings?.saveMs !== undefined ? 'saved' : 'from the start';
+	reply.timings?.resumed
+		? 'resumed'
+		: reply.timings?.saveNotKept
+			? 'not kept'
+			: reply.timings?.saveMs !== undefined
+				? 'saved'
+				: 'from the start';
 
 let workerResumed = 0;
 let workerSaved = 0;

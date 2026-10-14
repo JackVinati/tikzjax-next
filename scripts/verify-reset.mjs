@@ -366,8 +366,10 @@ for (let order = 1; order <= ORDERS; order++) {
 		)
 			mine[mine.length - 1].abnormal = true;
 
-		// A first pass that saved its run at \tikzjaxsnapshot, which later ones may resume from.
-		if (reply.timings?.saveMs !== undefined && mine[0]?.saved) saves.push(mine[0].saved);
+		// A first pass that saved its run at \tikzjaxsnapshot, and kept it, which later ones may resume
+		// from.
+		if (reply.timings?.saveMs !== undefined && reply.timings.saveNotKept !== true && mine[0]?.saved)
+			saves.push(mine[0].saved);
 		const resumed = reply.timings?.resumed === true;
 		for (const run of mine) {
 			const previous = runs[runs.indexOf(run) - 1];

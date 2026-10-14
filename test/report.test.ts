@@ -159,6 +159,10 @@ describe('the text the diagnostics view copies', () => {
 			'SVG pipeline 2 ms',
 		]);
 		expect(steps({ saveMs: 4 })).toContain('preamble saved in 4 ms');
+		expect(steps({ saveMs: 4, saveNotKept: true })).toContain(
+			'preamble saved in 4 ms, not kept: no room',
+		);
+		expect(steps({ saveMs: 4, saveNotKept: true })).not.toContain('preamble saved in 4 ms');
 		expect(steps({ saveFailed: true })).toContain('saving the preamble failed');
 		expect(steps({})).not.toContain('resumed from a saved preamble');
 	});

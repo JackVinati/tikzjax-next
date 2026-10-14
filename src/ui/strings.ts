@@ -88,6 +88,8 @@ export const STRINGS = {
 	timingResumed: 'resumed from a saved preamble',
 	/** The diagram's run was saved at the end of its \begin{document}, for later ones. */
 	timingSaved: (ms: number) => `preamble saved in ${ms} ms`,
+	/** The same, when the engine had no room left for it within its budget, and let it go. */
+	timingSaveNotKept: (ms: number) => `preamble saved in ${ms} ms, not kept: no room`,
 	timingSaveFailed: 'saving the preamble failed',
 	timingSvg: (ms: number) => `DVI to SVG ${ms} ms`,
 	timingPost: (ms: number) => `SVG pipeline ${ms} ms`,

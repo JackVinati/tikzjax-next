@@ -306,6 +306,45 @@ describe('the saved runs a worker keeps', () => {
 		expect(cache.bytes).toBe(0);
 	});
 
+	/*
+	 * A phone's 12 MiB, with the fixtures' runs: TikZ's 0.60 MiB, saved and not resumed from, and
+	 * siunitx's 2.62 and pgfplots' 6.42, each resumed from. circuitikz's 8.83 cannot fit beside the
+	 * two, however much may go: it used to take TikZ's run with it all the same, so that every plain
+	 * diagram after it saved again, and to be saved again at every circuitikz diagram, to be let go.
+	 */
+	it('evict nothing for a run that cannot fit, and save none of its preamble while it could not', () => {
+		const MiB = 1024 * 1024;
+		const cache = new SnapshotCache(12 * MiB);
+		cache.tick();
+		expect(cache.set(run('tikz\n', 0.6 * MiB))).toBe(true);
+		for (const [name, size] of [
+			['siunitx', 2.62],
+			['pgfplots', 6.42],
+		] as const) {
+			cache.tick();
+			expect(cache.wants(`${name}\n`)).toBe(true);
+			expect(cache.set(run(`${name}\n`, size * MiB))).toBe(true);
+			cache.tick();
+			expect(cache.find(`${name}\nbody`, true)).toBeDefined();
+		}
+		cache.tick();
+		// Nothing known of circuitikz's size yet: TikZ's, the smallest, would fit where TikZ is.
+		expect(cache.wants('circuitikz\n')).toBe(true);
+		expect(cache.set(run('circuitikz\n', 8.83 * MiB))).toBe(false);
+		expect(cache.find('tikz\nbody', true)).toBeDefined();
+		expect(cache.size).toBe(3);
+		// Its size known now, it is not saved again while it could not be kept; a plain one would be.
+		cache.tick();
+		expect(cache.wants('circuitikz\n')).toBe(false);
+		expect(cache.wants('another\n')).toBe(true);
+		expect(cache.wants()).toBe(true);
+		// Once siunitx's and pgfplots' runs have not been resumed from for 16 renders, they may go.
+		for (let i = 0; i < 17; i++) cache.tick();
+		expect(cache.wants('circuitikz\n')).toBe(true);
+		expect(cache.set(run('circuitikz\n', 8.83 * MiB))).toBe(true);
+		expect(cache.bytes).toBeLessThanOrEqual(12 * MiB);
+	});
+
 	it('hold a smaller budget at once when it shrinks, as on a phone', () => {
 		const cache = new SnapshotCache(32);
 		cache.tick();

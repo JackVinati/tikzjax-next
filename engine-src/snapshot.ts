@@ -238,13 +238,22 @@ export const logBytes = (lines: readonly string[]): number =>
  * resumed from, is never evicted. And plain least-recently-used eviction thrashes when diagrams
  * cycle through more preambles than the budget holds: every render misses, saves, and evicts the
  * run the next one needed, so each pays the save and none resumes. So a run that has been resumed
- * from, and was used within the last `idle` renders, is not evicted to make room either; a new run
- * that does not fit without evicting one is not kept, and `wants` says so before the work of saving
- * it is done.
+ * from, and was used within the last `idle` renders, is not evicted to make room either.
+ *
+ * A new run that would not fit once everything that may go had gone is not kept, and nothing is
+ * evicted for it: evicting first let a run of circuitikz's 8.8 MiB, which could not fit beside two
+ * runs being resumed from in a phone's 12, take TikZ's 0.6 with it, and every plain diagram after
+ * that saved again. `wants` says before the work of saving is done whether a run of the size this
+ * preamble's last save had, or else of the smallest saved yet, would fit: without the JIT that work
+ * is a tenth of a second (internal/DECISIONS.md D32).
  */
 export class SnapshotCache {
 	private readonly entries = new Map<string, { run: SavedRun; hits: number; used: number }>();
 	private readonly pinned = new Set<string>();
+	/** The bytes the last run saved under each name took, kept or not, for `wants` to go by. */
+	private readonly sizes = new Map<string, number>();
+	/** The smallest run saved yet, for `wants` to go by for a name it has no size for. */
+	private smallest = Infinity;
 	private held = 0;
 	private now = 0;
 	private budget: number;
@@ -300,39 +309,59 @@ export class SnapshotCache {
 		return entry.hits === 0 || this.now - entry.used > this.idle;
 	}
 
-	/** Whether a new run could be kept: there is room, or something that may go to make room. */
-	wants(): boolean {
-		if (this.budget <= 0) return false;
-		if (this.held < this.budget) return true;
-		for (const [key, entry] of this.entries) if (this.evictable(key, entry)) return true;
-		return false;
+	/**
+	 * The most a new run could take once everything that may go had gone, but `except`, which the run
+	 * replaces and so goes whatever it is.
+	 */
+	private room(except?: string): number {
+		let free = this.budget - this.held;
+		for (const [key, entry] of this.entries)
+			if (key === except || this.evictable(key, entry)) free += entry.run.bytes;
+		return free;
 	}
 
-	/** Keep `run`, making room from the least recently used that may go. False if it was not kept. */
+	/**
+	 * Whether a new run, to be named `route`, could be kept: there is room, or there would be once
+	 * what may go had gone, for as much as the last run saved under that name took, or, with none,
+	 * for the smallest run saved yet.
+	 */
+	wants(route?: string): boolean {
+		if (this.budget <= 0) return false;
+		const room = this.room();
+		if (room <= 0) return false;
+		const size = (route === undefined ? undefined : this.sizes.get(route)) ?? this.smallest;
+		return size === Infinity || size <= room;
+	}
+
+	/**
+	 * Keep `run`, making room from the least recently used that may go, if it then fits; else keep
+	 * nothing and evict nothing. False if it was not kept.
+	 */
 	set(run: SavedRun): boolean {
+		this.sizes.delete(run.route);
+		this.sizes.set(run.route, run.bytes);
+		// Bounded: a name a session has not saved under for 256 saves is as good as new.
+		if (this.sizes.size > 256) this.sizes.delete(this.sizes.keys().next().value!);
+		this.smallest = Math.min(this.smallest, run.bytes);
+
 		if (run.bytes > this.budget) return false;
 		const key = SnapshotCache.keyOf(run.prefix, run.logging);
+		if (this.pinned.has(key)) return false;
+		if (run.bytes > this.room(key)) return false;
 		const old = this.entries.get(key);
 		if (old !== undefined) {
-			if (this.pinned.has(key)) return false;
 			this.held -= old.run.bytes;
 			this.entries.delete(key);
 		}
-		this.makeRoom(run.bytes);
-		if (this.held + run.bytes > this.budget) return false;
+		for (const [k, entry] of this.entries) {
+			if (this.held + run.bytes <= this.budget) break;
+			if (!this.evictable(k, entry)) continue;
+			this.entries.delete(k);
+			this.held -= entry.run.bytes;
+		}
 		this.entries.set(key, { run, hits: 0, used: this.now });
 		this.held += run.bytes;
 		return true;
-	}
-
-	/** Evict, least recently used first, what may go until `bytes` more fit. */
-	private makeRoom(bytes: number): void {
-		for (const [key, entry] of this.entries) {
-			if (this.held + bytes <= this.budget) break;
-			if (!this.evictable(key, entry)) continue;
-			this.entries.delete(key);
-			this.held -= entry.run.bytes;
-		}
 	}
 
 	/**

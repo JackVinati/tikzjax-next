@@ -295,19 +295,22 @@ const decoder = new TextDecoder();
  *
  * Any failure keeps nothing and lets TeX go on as if no save had been asked for: a save that cannot
  * allocate its copy on a phone short of memory must not cost the diagram (the caller's try).
+ *
+ * Says whether the run was kept, or saved and not kept, as no room could be made for it within the
+ * budget (./snapshot SnapshotCache), or whether there was nothing to save.
  */
 const saveRun = (
 	plan: Extract<PassPlan, { kind: 'save' }>,
 	memory: Uint8Array,
 	exports: WebAssembly.Exports,
-): boolean => {
+): 'kept' | 'not kept' | 'nothing' => {
 	const dump = coreDump;
 	const read = library.jobFileRead();
-	if (dump === null || read === undefined) return false;
+	if (dump === null || read === undefined) return 'nothing';
 	const prefix = decoder.decode(plan.input.subarray(0, read));
-	if (!plan.text.startsWith(prefix)) return false;
+	if (!plan.text.startsWith(prefix)) return 'nothing';
 	const spans = saveSpans(memory, CORE_LAYOUT, marksOf(exports), library.hostWrites());
-	if (spans === undefined) return false;
+	if (spans === undefined) return 'nothing';
 	const host = library.captureHostState();
 	const log = [...plan.log];
 	const missing = [...plan.missing];
@@ -320,7 +323,7 @@ const saveRun = (
 	);
 	const bytes =
 		stretches.reduce((n, s) => n + s.bytes.length, 0) + library.hostStateBytes(host) + logBytes(log);
-	return saved.set({
+	const kept = saved.set({
 		prefix,
 		logging: plan.logging,
 		route: plan.route ?? routeKey(prefix, plan.logging),
@@ -331,6 +334,7 @@ const saveRun = (
 		missing,
 		bytes,
 	});
+	return kept ? 'kept' : 'not kept';
 };
 
 // --- transcript analysis --------------------------------------------------------------------------
@@ -659,11 +663,13 @@ const runPass = async (job: string, spent: RenderTimings, plan?: PassPlan): Prom
 			tried = true;
 			const t = performance.now();
 			try {
-				// A run saved is the save's time, not TeX's; one that was not kept stays TeX's.
-				if (saveRun(plan, new Uint8Array(memory.buffer), exports)) {
+				// A run saved is the save's time, not TeX's, whether it was kept or not.
+				const outcome = saveRun(plan, new Uint8Array(memory.buffer), exports);
+				if (outcome !== 'nothing') {
 					saving = performance.now() - t;
 					spent.saveMs = (spent.saveMs ?? 0) + saving;
 				}
+				if (outcome === 'not kept') spent.saveNotKept = true;
 			} catch {
 				// Whatever it was, nothing is kept and TeX goes on as if no save had been asked for:
 				// a save must never cost the diagram (library.ts snapshotPoint).
@@ -743,6 +749,7 @@ const rounded = (spent: RenderTimings): RenderTimings => ({
 	passes: spent.passes,
 	...(spent.resumed === true ? { resumed: true } : {}),
 	...(spent.saveMs !== undefined ? { saveMs: Math.round(spent.saveMs) } : {}),
+	...(spent.saveNotKept === true ? { saveNotKept: true } : {}),
 	...(spent.saveFailed === true ? { saveFailed: true } : {}),
 });
 
@@ -814,12 +821,13 @@ async function render(
 		for (const name of resumable.missing) if (!missing.includes(name)) missing.push(name);
 		saved.pin(resumable);
 		firstPlan = { kind: 'resume', run: resumable, input };
-	} else if (budget > 0 && saved.wants()) {
+	} else if (budget > 0) {
 		// Saved at a preamble's first diagram, not its second: waiting for a second sighting spared the
 		// first its save and cost a third of the resumes in a run of every fixture twice (D32). Whether
 		// or not the host can tell where its \begin{document} is (./document predictedPoint): the run is
-		// saved where TeX stands, under what TeX had read.
-		firstPlan = { kind: 'save', input, text, logging, route: routeOf(text, logging), log, missing };
+		// saved where TeX stands, under what TeX had read. Not when it could not be kept (wants).
+		const route = routeOf(text, logging);
+		if (saved.wants(route)) firstPlan = { kind: 'save', input, text, logging, route, log, missing };
 	}
 
 	/** Where the first pass's transcript ends, so its diagnosis can never be read out of pass two. */

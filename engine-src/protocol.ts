@@ -180,6 +180,11 @@ export interface RenderTimings {
 	resumed?: boolean | undefined;
 	/** The first pass was saved for later diagrams with the same preamble, which took this long. */
 	saveMs?: number | undefined;
+	/**
+	 * The first pass was saved, in saveMs, and not kept: within the budget there was no room for it,
+	 * however much of what the worker held could go (engine-src/snapshot.ts SnapshotCache).
+	 */
+	saveNotKept?: boolean | undefined;
 	/** Saving the first pass failed, and nothing was kept; the diagram is drawn as without it. */
 	saveFailed?: boolean | undefined;
 }
