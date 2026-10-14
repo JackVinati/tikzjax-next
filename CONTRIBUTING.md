@@ -152,7 +152,8 @@ verify:snapshot` holds every fixture and every case in `scripts/snapshot-hazards
 the same diagram from the start, in the engine and in the shipped worker, and does not read the
 golden corpus, so it still holds when that is recorded again for a new TeX Live. A new way for a
 preamble to learn something about the diagram after it, or a change to `engine-src/snapshot.ts` or
-to what the host keeps of a run (`library.ts` `captureHostState`), wants a hazard of its own there.
+to what the host keeps of a run (`library.ts` `captureHostState`) or of a file TeX can write, wants a
+hazard of its own there.
 
 Building the image is the only step that touches the network: it pins the upstream sources by commit
 (`engine-build/pins.env`), the font archive by SHA-256 and binaryen by the integrity npm publishes

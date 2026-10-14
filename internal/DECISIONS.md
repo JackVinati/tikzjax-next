@@ -2083,8 +2083,9 @@ diagrams end that way has not been measured. `TODO.md` lists it as open.
 
 **Amends D24, whose closing paragraph left the preamble snapshot and routing by preamble to 0.2.3,
 D31, whose reset now also covers a run that resumed, and DESIGN.md §4.3 and §5.4. Builds on the
-0.2.x study's prototype and its review (findings M1, M3, S2, S3, S4, S5, S7, N3, N4). Date of
-record: 2026-10-14.**
+0.2.x study's prototype and its review (findings M1, M3, S2, S3, S4, S5, S7, N3, N4), and amended
+after the review of 0.2.1-beta.3's changes: what is saved and kept, the switch, how runs are named,
+the proof, and a campaign at a phone's budget. Date of record: 2026-10-14.**
 
 A diagram that loads packages spends most of TeX's time loading them, and every diagram did it
 again, also the second of two with the same preamble in one note. Since this release a diagram's
@@ -2131,13 +2132,15 @@ was `->`, on one of its 156,067 lines. `filesize-self` and `read-self` draw what
 **What a saved run stands for.** The exact text TeX had read when the point ran, through the newline
 that ends that line, and whether the log is kept, since a run that kept none has none to say again.
 Everything else a run depends on is fixed for a worker's life: the engine, its files, its clock, and
-the first pass's job name, `input`. A later first pass resumes from the saved run whose text its
-input starts with, the longest if several do, compared as text in the worker, so two inputs that
-differ anywhere up to there never share one. Nothing is saved when TeX learnt more of the job's own
-file than the lines its main input read (M1): the host notes a `\filesize` of `input.tex` and any
-second opening of it, by `\openin`, `\input` or `\openout`, and then says nothing can be saved
-(`library.ts` `jobFileRead`), nor when the main input has read the file to its end. A second pass
-never resumes: it reads at `\begin{document}` the `.aux` the first wrote.
+the first pass's job name, `input`; the files only since D35, before which a diagram that wrote a
+file named as a bundled font's metrics wrote into that font for every later diagram. A later first
+pass resumes from the saved run whose text its input starts with, the longest if several do,
+compared as text in the worker, so two inputs that differ anywhere up to there never share one.
+Nothing is saved when TeX learnt more of the job's own file than the lines its main input read (M1):
+the host notes a `\filesize` of `input.tex` and any second opening of it, by `\openin`, `\input` or
+`\openout`, and then says nothing can be saved (`library.ts` `jobFileRead`), nor when the main input
+has read the file to its end. A second pass never resumes: it reads at `\begin{document}` the `.aux`
+the first wrote.
 
 **What is saved.** At the point, the worker reckons the parts of TeX's globals the run can have
 written so far exactly as the reset does after a run (D31: every global but the big arrays, those up
@@ -2146,10 +2149,15 @@ bytes, and keeps each block in which a byte differs from the core dump, blocks s
 stretch (`engine-src/snapshot.ts`). Not the string literals, which instantiating the engine writes
 afresh, nor the stack: its frames belong to calls a resumed run does not return to. With the
 stretches go the host's table of files, the bytes of the files TeX is writing (`input.log`,
-`input.aux`, a `\write` stream left open) copied, the files it reads by their place in them, and
-what TeX had said on the terminal and failed to find by then. The build now packs the dump's runs on
-8 bytes (`scripts/engine-assets.mjs` `packCoreDump`), so that the comparison reads TeX's memory and
-the dump a word at a time; the dump's bytes are as before. A saved run of the fixtures is 0.60 MiB
+`input.aux`, a `\write` stream left open) copied, the files it reads by their place in them but the
+job's own, whose text a run that resumes is always given anew, and what TeX had said on the
+terminal and failed to find by then. Until the review of beta.3 the saving diagram's whole text was
+kept too, twice, by reference, outside what the budget counts. The build now packs the dump's runs
+on 8 bytes (`scripts/engine-assets.mjs` `packCoreDump`), so that the comparison reads TeX's memory
+and the dump a word at a time; the dump's bytes are as before. A word cut by the end of a run of the
+dump that is not on a word, from a dump packed some other way, is read a byte at a time: until the
+review the zeros up to such a run were read a word at a time, rounded down, and up to three changed
+bytes before it were never compared. A saved run of the fixtures is 0.60 MiB
 for TikZ alone, 2.62 for siunitx, 6.42 for pgfplots and 8.83 for circuitikz, the same as the
 prototype's.
 
@@ -2194,24 +2202,48 @@ was not kept either. In the build that ships the save's time is its own step, no
 
 **What is kept, and the switch.** An engine holds saved runs up to a budget the host sends with
 every job: 32 MiB on a computer, which holds the three largest preambles of the fixtures beside
-TikZ's, and 12 MiB on a phone or a tablet, well under that until a phone has been measured (S7).
-Least recently used goes first, but never the run the render under way resumed from, nor one resumed
-from within the last 16 renders, so that diagrams cycling through more preambles than the budget
-holds do not each save and evict the one the next needed; a run that would not be kept is not saved.
-The runs go with the engine: its idle stop, the app going to the background, Restart the TeX engine
-(S3, and `TODO.md` for keeping them across restarts). `"preambleSnapshots": false` in the plugin's
-`data.json` turns them off without a release: the host then sends 0, and the worker neither saves
-nor resumes and lets what it holds go. It is not in the settings tab, which saves a string to
-translate and a setting nobody should need, and a release can change its default the same way.
+TikZ's, and 12 MiB on a phone or a tablet, well under that until a phone has been measured (S7),
+and on a computer that reports less than 8 GiB of memory, which runs one engine already (D24;
+`src/platform/budgets.ts` `snapshotBytes`, since the review of beta.3). Least recently used goes
+first, but never the run the render under way resumed from, nor one resumed from within the last 16
+renders, so that diagrams cycling through more preambles than the budget holds do not each save and
+evict the one the next needed.
 
-**Two engines (S5).** Each engine keeps its own runs, so the host names each job's run as the worker
-names those it holds (`engine-src/document.ts` `routeOf`, from the input's first `\begin{document}`
-line that is not in a comment) and gives the job to the idle engine that holds it; else to one that
-holds none of the runs the other waiting jobs want, else to the first idle one
-(`src/engine/route.ts`). It never keeps a job waiting for a busy engine. The worker reports the
-names with each reply. In a note the queue hands the host as many jobs as there are engines (D24),
-and in this harness's note of 0.2.0's 37 fixtures twice, handed over that way, routing changed
-little:
+A run that would not fit once everything that may go had gone is not kept, and nothing is evicted
+for it; and a run is not saved at all where the room there would be is less than the last run saved
+under the same name took, or, for a name with none, the smallest run saved yet. Until the review of
+beta.3 this paragraph said that a run that would not be kept is not saved, and it was not so:
+`wants()` asked only whether anything could go, and `set()` evicted before it knew whether the run
+would fit. With 12 MiB, through the worker in Node 22.19, basic, siunitx twice, pgfplots-axis twice,
+then circuitikz and basic in turn three times: circuitikz's 8.83 MiB could not fit beside the two
+runs being resumed from, took TikZ's 0.60 with it at each circuitikz diagram, and every basic after
+saved again, in 14 to 16 ms of TeX where it resumes in 5 to 7; the save's time was counted as TeX's
+and nothing said so. Now circuitikz's run is saved once and not kept, TikZ's stays, the later
+circuitikz diagrams save nothing, and every later basic resumes. A save that was not kept is the
+save's time, not TeX's, and the diagnostics say "preamble saved in N ms, not kept: no room".
+
+The runs go with the engine: its idle stop, the app going to the background, Restart the TeX engine
+(S3, and `TODO.md` for keeping them across restarts). Settings → Rendering → Saved preambles,
+`"preambleSnapshots"` in `data.json`, turns them off without a release: the host then sends 0, and
+the worker neither saves nor resumes and lets what it holds go. Until the review of beta.3 it was in
+`data.json` only, to save a string to translate and a setting nobody should need, but a phone, where
+saved preambles are least proven, cannot reach `data.json`: the Files app on iOS hides folders whose
+names start with a dot, and Sync brings the file only with "Installed community plugins", which the
+README tells Sync Standard users to turn off. A release can still change its default.
+
+**Two engines (S5).** Each engine keeps its own runs, so the host names each job's run
+(`engine-src/document.ts` `routeOf`, from the input's first `\begin{document}` line that is not in a
+comment) and gives the job to the idle engine that holds it; else to one that holds none of the runs
+the other waiting jobs want, else to the first idle one (`src/engine/route.ts`). The worker names
+each run it saves as the host named the diagram that saved it, so that the host finds it again for
+the next diagram it names the same, or, where the host has no name, by the text the run stands for.
+The name is only for routing: since the review of beta.3 the worker saves whether or not there is
+one, where it saved only a diagram the host could name, so that a block whose `\begin{document}`
+followed `\%` on its line, or was written nowhere in its text, never saved its preamble; and a `%`
+is a comment only with an even run of backslashes before it (`engine-src/comment.ts`). It never
+keeps a job waiting for a busy engine. The worker reports the names with each reply. In a note the
+queue hands the host as many jobs as there are engines (D24), and in this harness's note of 0.2.0's
+37 fixtures twice, handed over that way, routing changed little:
 
 | a note of 74, 0.2.0's 37 fixtures twice, two engines, ms | 0.2.1-beta.2 | routed | not routed |
 |---|---:|---:|---:|
@@ -2239,7 +2271,10 @@ from the start, saving, resumed from its own run and resumed from the other body
   and, at every save, that every byte of TeX's globals that differs from the dump lies in what the
   save compared, the prototype's `validate-ranges` over the layout the build writes;
 - in the shipped worker: every reply field the plugin reads, and that each case saved and resumed,
-  or did not, as it says;
+  or did not, as it says, once with TeX's log kept, the plugin's default, and once without, which a
+  setting can have and which a saved run stands for (since the review of beta.3, which ran every
+  case without the log by hand and found every reply as from the start); and that a run saved with
+  the log kept starts no diagram drawn without it;
 - and that a save that fails at its first copy, or at its comparison, keeps nothing, draws the
   diagram as from the start, and is counted.
 
@@ -2253,13 +2288,16 @@ both saving nothing, and ten of this release's: a missing package, a fatal error
 which saves nothing, the body on `\begin{document}`'s line, `\begin{document}` from a macro, a
 `filecontents` file holding one, the hook's order, characters the Unicode bridge declares, the job's
 file read in the body, a terminal line unfinished at the point, and two blocks that differ only
-after `\begin{document}` on its line, which must not share a run. On 2026-10-14: 74 cases, 844 runs
-in the engine, 548 of them resumed, and in the worker 140 renders that saved and 205 that resumed,
-every one as from the start, in two and a half minutes. `npm run verify:reset` now sends the budget
-with every render and requires a resumed run's Memory to be the dump with the globals of the run it
-resumed from, as they stood at the point, and nothing else: 285 runs in five orders, 159 of them
-resumed, every Memory as required. `verify:worker` sends the budget too, so the fixtures run there
-as the plugin runs them.
+after `\begin{document}` on its line, which must not share a run; and the review of beta.3's three:
+a body that writes `eufm10.tfm` under a preamble that loads the font (D35), a `\begin{document}`
+after `\%` on its line, and one written nowhere in the block's text, the last two of which saved
+nothing before. On 2026-10-14, on the build that ships: 77 cases, 880 runs in the engine, 572 of
+them resumed, and in the worker 292 renders that saved and 428 that resumed, over both passes, every
+one as from the start, in two minutes. `npm run verify:reset` now sends the budget with every render
+and requires a resumed run's Memory to be the dump with the globals of the run it resumed from, as
+they stood at the point, and nothing else: 290 runs in five orders, 163 of them resumed, every
+Memory as required; one of its inputs writes a file under the name of every bundled font's metrics
+(D35). `verify:worker` sends the budget too, so the fixtures run there as the plugin runs them.
 
 What the checks catch, each tried as one change in a copy of the repository: the job file's size or
 second opening no longer stopping a save (`filesize-self` and `read-self` resume a run that saw the
@@ -2270,11 +2308,17 @@ unfinished-line case, and only it); and the reset after a resumed run leaving ou
 (`verify:reset`, in two of its five orders, a byte of `str_pool` past where the resumed run's marks
 reach). Copying the written files again when a run resumes is a guard none can show failing: the
 saved copies are exactly as long as what was written, so the first write grows them into a new array
-anyway.
+anyway. The review of beta.3's changes, each undone in turn on this branch: a bundled `.tfm` opened
+to write handed the bundled bytes (the hazard fails in the engine and in the worker, `verify:reset`
+in four of its five orders); a save planned only for a diagram the host can name (the two new
+hazards' first bodies are drawn from the start, not saved); and the zeros before a run of the dump
+read a word at a time (`test/snapshot.test.ts`, a change two bytes before a run that starts off a
+word is not kept).
 
 **What it gains**, against 0.2.1-beta.2 built from its release commit, on the desktop of D27 on
-2026-10-14 with the harness as above, the build that ships with saved preambles on as the plugin
-sends them:
+2026-10-14 with the harness as above, the build before the review of beta.3's changes, with saved
+preambles on as the plugin sent them at a computer's 32 MiB (the build that ships, and 12 MiB, are
+measured below):
 
 | | 0.2.1-beta.2 | this release |
 |---|---:|---:|
@@ -2324,6 +2368,66 @@ the round from 45,201 to 30,758 ms (medians, −32%); the first diagram after th
 JIT a save costs a tenth of a second where it costs ten milliseconds, and a resumed diagram saves
 seconds.
 
+**Measured again after the review of beta.3**, because the campaigns above, of the build before its
+changes, all ran at a computer's 32 MiB and none at the 12 MiB a phone has. The build that ships
+against 0.2.1-beta.2's `main.js` as published, on the same Windows desktop on 2026-10-14, with
+Playwright 1.63's headless WebKit 26.6 and Chromium 153 and the 0.2.x study's harness, sending
+the budget with every render as the plugin does, five rounds of each, each a
+fresh browser, the builds interleaved, every SVG as smoke draws it:
+
+| | 0.2.1-beta.2 | 0.2.1-beta.3, 32 MiB | 0.2.1-beta.3, 12 MiB |
+|---|---:|---:|---:|
+| TeX, the 44 fixtures' second render in a row, sum of each one's fastest, WebKit | 5,444 ms | 3,550 (−34.8%) | 4,296 (−21.1%) |
+| the same, Chromium | 3,671 ms | 2,432 (−33.8%) | |
+| their first render, after a cold `basic`, WebKit | 5,468 ms | 4,992 (−8.7%) | 5,128 (−6.2%) |
+| the same, Chromium | 3,695 ms | 3,405 (−7.8%) | |
+| the round's renders, each posted to its reply, added up, WebKit | 11,504 (11,472–11,642) | 9,345 (9,233–9,400) | 10,202 (10,176–10,231) |
+| the same, Chromium | 7,840 (7,808–7,971) | 6,434 (6,364–6,465) | |
+| saves a round, of them not kept, and resumes, WebKit | – | 23, 0, 74 | 22, 3, 68 |
+| the first diagram, `basic`, posted to its reply, WebKit | 40 (39–46) | 49 (48–55), its save 9 (8–10) | 49 (49–50), its save 9 (8–10) |
+| the same, Chromium | 34 (33–37) | 45 (44–52), its save 12 (12–14) | |
+| a note of 74, 0.2.0's 37 fixtures each twice in a row, one engine, WebKit | 5,824 (5,791–5,875) | 4,231 (4,201–4,282) (−27.4%) | 4,777 (4,764–4,822) (−18.0%) |
+| the same, Chromium | 3,881 (3,837–3,908) | 2,894 (2,852–2,922) (−25.4%) | |
+| saves, of them not kept, and resumes in it, WebKit | – | 20, 0, 52 | 19, 4, 47 |
+| the same note spread, every fixture and then every one again, WebKit | 5,824 (5,797–5,858) | 5,652 (5,626–5,713) (−3.0%) | 5,644 (5,569–5,655) (−3.1%) |
+| the same, Chromium | 3,869 (3,844–3,895) | 3,928 (3,911–3,975) (+1.5%) | |
+| peak working set, the fixtures' round, WebKit | 428 (426–468) MiB | 456 (452–491) | 453 (448–454) |
+| the same, Chromium | 235 (234–239) MiB | 277 (276–280) | |
+| peak working set, the note in pairs, WebKit | 420 (412–430) MiB | 447 (440–534) | 445 (439–514) |
+| the same, Chromium | 237 (225–243) MiB | 286 (284–299) | |
+| peak working set, the note spread, WebKit | 447 (442–464) MiB | 488 (484–542) | 489 (481–493) |
+| the same, Chromium | 244 (243–246) MiB | 326 (320–327) | |
+
+Medians (range); a note is the time from its first job to its last reply. At a phone's 12 MiB the
+fixtures run twice in a row keep 19 runs of 22 saved where 32 MiB keep all 23, and resume 68
+diagrams where 32 MiB resume 74: `forest`'s, `pgfplots-fillbetween`'s and `pgfplotstable`'s runs, in
+every round, could not fit beside the runs resumed from within the last 16 renders, and the note in
+pairs kept 15 of 19. So the second render's TeX went down by a fifth there rather than by
+a third, and the note in pairs by 18% rather than 27%. Spread, the note keeps and resumes as many at
+12 MiB as at 32: neither holds its preambles until their second diagram. The peak working set grew
+by more than the budget: at 12 MiB by 25 to 42 MiB in WebKit, the medians of the three, and at 32
+by 27 to 41 in WebKit and 42 to 82 in Chromium. A save copies what it keeps, and a run let go is
+memory until the collector frees it, so the budget bounds what is held, not the peak; on a phone,
+the 12 MiB stand until `TODO.md` §9's check of the memory, procedure C under the Web Inspector, says
+what a phone pays.
+
+Without the JIT, WebKit with `JSC_useJIT=false`, the same desktop and harness, three rounds of
+`basic`, `siunitx`, `circuitikz` and `pgfplots-axis` twice each after a cold `basic`, at the 12 MiB
+a phone in Lockdown Mode has: the second render's TeX, by each one's fastest, went from 375 to
+136 ms, 3,103 to 354, 7,660 to 7,646 and 7,186 to 2,989, and the round from 37,471 (37,414–37,518)
+to 30,404 (30,376–30,407) ms; the first diagram from 416 (410–416) to 509 (500–511) ms, its save 108
+(108–110), and every save 103 (83–110). `circuitikz`'s run of 8.83 MiB did not fit beside TikZ's and
+siunitx's, resumed from just before, and was not kept, so its second render compiled from the start.
+
+And the sequence that showed runs evicted for nothing, at 12 MiB in WebKit, two rounds of each:
+`basic`, `siunitx` twice, `pgfplots-axis` twice, then `circuitikz` and `basic` in turn three times.
+With the build before the review, each `basic` after a `circuitikz` saved again, in 16 to 18 ms of
+TeX, and `circuitikz` saved nothing it said; with the build that ships, `circuitikz`'s first save
+says it was not kept, the later ones are not made, and each `basic` resumes, in 6 to 7 ms.
+
+`main.js` is 12,202,333 bytes, 20,208 more than beta.2's and 4,525 more than the build before the
+review's.
+
 **Not done, and open.** Saved runs do not survive the engine's stop; keeping them in IndexedDB,
 keyed by ENGINE_ID, is the 0.2.4 plan's, and on a phone, where the engine stops after 30 s idle and
 in the background, they matter most (S3). `\ShowHook{begindocument/end}` and `\tracingmacros` show
@@ -2345,10 +2449,10 @@ in 1.3 s instead of 0.13 s. Lockdown Mode runs Obsidian's web content without th
 the TeX engine with it. Nothing in a WebView says whether it has a JIT, and `navigator.userAgent`
 is out of bounds anyway (D21), so someone in that state saw slow diagrams and nothing to say why.
 
-**The probe** (`engine-src/jit.ts`). At the end of each start, once tex.wasm is compiled, the worker
-compiles a module of its own, 68 bytes of WebAssembly 1.0 with one function that takes a step of a
-linear congruential generator `n` times: a chain of dependent integer multiplies and adds that no
-compiler can shorten, whose result it returns. It calls it once for 2,000 steps, untimed, so that
+**The probe** (`engine-src/jit.ts`). At each start, beside tex.wasm, the worker compiles a module of
+its own, 68 bytes of WebAssembly 1.0 with one function that takes a step of a linear congruential
+generator `n` times: a chain of dependent integer multiplies and adds that no compiler can shorten,
+whose result it returns. Once both are compiled, it calls it once for 2,000 steps, untimed, so that
 no attempt pays for the function's first compile, and then times attempts of 600,000 steps, each in
 8 calls of 75,000, by the worker's `performance.now()`. An attempt that reaches 3 ms before it is
 done stops there and is slow. The JIT is taken to be off when 4 attempts in a row are slow, and on
@@ -2359,10 +2463,13 @@ fastest attempt, how many attempts, what the probe took).
   is off, the probe says what TeX gets. JavaScriptCore with its WebAssembly compiler off and its
   JavaScript ones on, below, is taken for without; with only its optimising JavaScript compiler
   off, for with.
-- **After tex.wasm is compiled**, because in JavaScriptCore the first WebAssembly module of a
-  process costs more: in the calibration below, the probe's module took 4 to 5 ms to compile in the
-  first worker of each fresh WebKit with its JIT, and under a millisecond by its clock in every later
-  one. tex.wasm's compile, off the worker's thread, has paid that by then.
+- **Compiled beside tex.wasm, off the worker's thread** (`WebAssembly.compile`), because in
+  JavaScriptCore the first WebAssembly module of a process costs more: in the calibration below, the
+  probe's module took 4 to 5 ms to compile in the first worker of each fresh WebKit with its JIT,
+  and under a millisecond by its clock in every later one. Until the review of beta.3 it was
+  compiled with `new WebAssembly.Module` on the worker's thread once tex.wasm was compiled, which on
+  the loaded desktop below cost WebKit's starts tens of milliseconds and up to 242, while each
+  start's first attempt read 0 to 1 ms; see "What it costs the start".
 - **Four attempts**, because an attempt the system takes the thread away from in the middle is
   slow whatever the JIT does. With three, on the loaded desktop below, one start of 130 with the JIT
   needed its third.
@@ -2423,26 +2530,72 @@ is likeliest to be wrong is a slow Android phone, whose V8 runs the loop compile
 measured how slowly; so the diagnostics say "on (probably)" and "off (probably)", and only iOS acts
 on it (below).
 
+How narrow the margin is, by arithmetic from the figures above, not by measurement: compiled, the
+loop takes 0.77 to 0.83 ns a step on a core of about 5.5 to 5.8 GHz, some 4.2 to 4.8 cycles a step.
+At that, compiled code reaches WebKit's 3.3 ns on a core below about 1.4 GHz, and V8's 5 ns below
+about 0.9 GHz, and a phone's efficiency cores, Low Power Mode, a phone hot from launching the app,
+or an A10 iPad on iPadOS 17, which has Lockdown Mode, could run that slowly. In WebKit, with its
+clock a millisecond at a time, fast and slow are one tick apart: loaded attempts with the JIT read
+up to 2, and slow is 3. So since the review of beta.3 the plugin says less of one reading (below).
+
 **What it costs the start.** With the JIT, under a millisecond in Chromium and Node and 0 to 1 ms by
 WebKit's clock, the start being 27 to 38 ms there; without, 12 to 16 ms, four attempts of about 3 ms,
 where the start without the JIT took 52 to 59 ms with the platform's gzip and base64 and 1,762 to
 1,794 ms without them. `main.js` grows by 2,615 bytes, 692 of them the probe in the worker and the
 rest what the view and the notice below say.
 
-**What it says.** The diagnostics view has a JIT line, "on (probably)", "off (probably)" or "not
-measured yet", from the latest engine to start that timed it, and each engine's line says what its
-probe found and took; Copy carries both. On iOS and iPadOS, when it is off, the view says that TeX
-runs without the JIT compiler there, about twenty times slower, that Lockdown Mode is the usual
-cause, and where to exclude Obsidian from it (Settings → Privacy & Security → Lockdown Mode →
-Configure Web Browsing), with a link to the README's answer. The first time an engine starts there
-without the JIT, a notice says the same once, and stays until it is tapped; `"jitNoticeShown": true`
-in `data.json` remembers it, and false shows it again. Not on Android: nothing a user knows of turns
-the JIT off there, and a slow phone is where the probe is likeliest to be wrong. Not on a computer,
-where Obsidian runs V8, which without its JIT has no WebAssembly and would not start the engine.
+Loaded, it cost more, and not in its attempts. Measured again for the review of beta.3 on the same
+desktop on 2026-10-14, with Playwright 1.63's WebKit 26.6 and the 0.2.x study's harness (each
+worker started from a Blob of the build's worker and terminated once ready), the build before the
+probe was compiled off the thread against the build after it, five rounds of ten starts each,
+interleaved, with 48 processes spinning on the 32 threads: the probe took 1 to 68 ms, median 8, 28
+of 50 starts over 5 ms, compiled on the worker's thread, and 0 to 36 ms, median 1, 2 of 50 over
+5 ms, compiled beside tex.wasm. Every start said on, and the fastest attempt read 0 to 1 ms in both.
+Idle, nothing changed: 0 to 1 ms in WebKit and 0.4 to 0.7 in Chromium, 30 and 20 starts of each
+build, all on; without the JIT, 8 starts of each, all off, in 12 to 13 ms. The whole start, loaded,
+is the thread waiting for a processor: 80 to 2,022 ms, median 244, before, and 76 to 2,578, median
+305, after, too spread to tell the two apart.
+
+**What it says.** The diagnostics view has a JIT line, "on (probably)", "off (probably)", "not
+measured yet" or "no WebAssembly", from the latest engine to start that timed it, and each engine's
+line says what its probe found and took; Copy carries both. On iOS and iPadOS, when it is off, the
+view says that TeX seems to run without the JIT compiler there, about twenty times slower, that if
+Lockdown Mode is on it is the likely cause, and where to exclude Obsidian from it (Settings →
+Privacy & Security → Lockdown Mode → Configure Web Browsing), with a link to the README's answer.
+When two engine starts of a session have found the JIT off there, and none on, a notice says the
+same once, and stays until it is tapped; `"jitNoticeShown": true` in `data.json` remembers it, and
+false shows it again. One start is one moment of the phone's, which a hot or busy phone, or Low
+Power Mode, can make slow; the engine starts again after every 30 s idle and every return from the
+background, which is another. Until the review of beta.3 the first start without it showed the
+notice, and both said as fact that TeX ran without the JIT and that Lockdown Mode was the usual
+cause, though iOS before 16 has no Lockdown Mode. Naming Lockdown Mode only where a feature check
+says iOS 16 was left out: the wording is conditional, and a check of a feature Lockdown Mode itself
+turns off would mislead. `data.json` is synced with the plugin, so a notice one device showed is not
+shown on another, whose view still says it, and a `data.json` Sync brings back from before can show
+it again. Not on Android: nothing a user knows of turns the JIT off there, and a slow phone is where
+the probe is likeliest to be wrong. Not on a computer, where Obsidian runs V8, which without its JIT
+has no WebAssembly and would not start the engine.
+
+**No WebAssembly at all.** On some versions of iOS, Lockdown Mode takes WebAssembly away rather than
+only its JIT: WebKit's bug 273824, "REGRESSION (iOS 17.4): WebAssembly blocked in lockdown mode,
+even if exception is added", reports that since iOS 17.4 WebAssembly does not work in app WebViews
+or Safari in Lockdown Mode, even with an exception, which restored it on iOS 17.3 (status NEW, last
+changed 2025-03-14, read 2026-10-14). The maintainer's iPhone, which ran it interpreted, shows that
+not every version does. The engine's start then fails at its first use of WebAssembly, as in
+Node with `--jitless` above, before the probe, and the card said that the engine could not start,
+"on mobile this is usually memory pressure, so close other apps first", and the view "not measured
+yet". Since the review the host starts no worker where `WebAssembly` is not there, and the job fails
+with "This device runs no WebAssembly."; that, or a worker's "Can't find variable: WebAssembly" or
+"WebAssembly is not defined", puts on the card that the device runs no WebAssembly, that Lockdown
+Mode turns it off on some versions of iOS, how to exclude Obsidian, and that on some versions this
+does not bring it back (`src/engine/hints.ts`). The view's JIT line says "no WebAssembly", with the
+same hint on iOS, and the copied WebView line whether there is WebAssembly. Nothing here has run on
+such a phone.
 
 **Not measured, and open.** No phone has run the probe. An iPhone with Lockdown Mode on has to say
-off, and with Obsidian excluded on, and the oldest iPhone and Android device at hand have to say on;
-`TODO.md` §9 has it. The desktop also suggests why the start took 1.3 s with Lockdown Mode: 0.2.0
+off, at two starts, and with Obsidian excluded on, and the oldest iPhone and Android device at hand
+have to say on, in Low Power Mode and at a cold launch too; `TODO.md` §9 has it, and the iOS version
+it was all read on. The desktop also suggests why the start took 1.3 s with Lockdown Mode: 0.2.0
 inflated the dump with pako, in JavaScript, which the interpreter runs, and here the start without
 the JIT took 1.8 s with pako and 0.05 s with the platform's gzip, which iOS has from 16.4. Whether
 0.2.1 starts faster under Lockdown Mode is for the phone to say.
@@ -2473,11 +2626,15 @@ says what to do; this makes the plugin say it.
   `manifest.json` goes into it, so a commit still builds to the same bytes.
 - **The plugin compares it at load** with `this.manifest.version`, which Obsidian reads from the
   `manifest.json` beside it, right after its settings are loaded. When they differ, a notice says
-  which version each is, that Obsidian Sync Standard leaves a plugin so, and how to put it right:
-  reinstall the plugin on that device, with BRAT's "Choose a single plugin to reinstall" or by
-  uninstalling it and installing it again from the community store, and with Sync Standard, turn
-  off "Installed community plugins". It links to the README's answer and stays until it is tapped.
-  Either way round warns: an old `manifest.json` beside a new `main.js` too.
+  which version each is, what can have left them so, and how to put it right: reinstall the plugin
+  on that device, with BRAT's "Choose a single plugin to reinstall" or by uninstalling it and
+  installing it again from the community store. It links to the README's answer and stays until it
+  is tapped. Either way round warns, and what it says left them so depends on which is newer, by
+  semantic versioning's order (`compareVersions`): a newer `manifest.json` is what Obsidian Sync
+  Standard can leave, with how to turn that off, and an older one something brought back, a sync
+  service or a backup. Until the review of beta.3 it said of both that "Obsidian Sync Standard
+  leaves the plugin like this", which reads as the diagnosis to someone who syncs with iCloud or not
+  at all, and no copy of a new `manifest.json` explains an older one.
 - **Once for each pair.** `data.json` keeps the pair it was shown for, `"outOfStepNoticeShown":
   "0.2.1-beta.3 → 0.2.1"` (`main.js`'s version first), so it is not shown at every start, and is
   shown again when the pair changes. Not in the app's `localStorage`, which would be this device's
@@ -2502,6 +2659,52 @@ itself: that would mean fetching its own release, and the plugin makes no networ
 Tests: `test/version.test.ts`, `test/notices.test.ts` (once per pair; never for the same version or
 an unknown one), `test/report.test.ts`, `test/debug-view.test.ts`, `test/settings.test.ts` and
 `test/readme.test.ts`.
+
+---
+
+## D35 — A font's metrics stay as bundled, and a preamble's last comment ends at its line
+
+**Found by the review of 0.2.1-beta.3's saved preambles, outside what they change. Amends D32, whose
+"its files … fixed for a worker's life" did not hold until this. Date of record: 2026-10-14.**
+
+**A .tfm opened to write starts empty.** `library.ts` `openSync` took its branch for font metrics for
+any name ending in `.tfm`, also one TeX opened to write. For a font of the bundle, `cmex7`,
+`eufm5`/`7`/`10`, `rsfs5`/`7`/`10` or `tcrm0500`/`0700`/`1000`, that handed TeX the very array the
+worker keeps inflated for its life, and `\immediate\openout\w=eufm10.tfm` wrote into it. Every later
+diagram in the worker read the font from what was written: "Bad metric (TFM) file", and with saved
+preambles on, a diagram resumed from a run that loaded the font before drew what the same diagram
+from the start no longer drew. `tcrm1000` is the TS1 font behind the stand-ins for `°` and `×`. The
+branch is now taken only to read (change 13); a `.tfm` opened to write starts empty, as any other
+name does. One the engine has no metrics for was refused, and TeX stopped with "I can't write on
+file `nosuch.tfm'." and drew nothing; it opens now. `verify:snapshot` has a hazard of it,
+`font-metrics-written`, and `verify:reset` an input that writes a file under the name of every
+bundled font's metrics: on the host as it was, the hazard failed in the engine and in the worker,
+and `verify:reset` in four of its five orders, where `every-font` no longer loaded all 121 metrics
+and `mathfrak` and `mathscr` replied differently.
+
+**A preamble whose last line is a comment ends with a newline.** The worker writes its own
+`\begin{document}`, and a block's `\standaloneconfig` of `border=`, on the end of the preamble's
+last line (`engine-src/document.ts`, `src/block/processor.ts`). A preamble file saved without a
+newline at its end, as VS Code saves one, whose last line is a comment had both taken for the rest
+of the comment: through the worker in Node 22.19, `\usepackage{amsmath}` and `% end of preamble` as
+the preamble drew 375 bytes with "LaTeX Error: Missing \begin{document}.", and with a newline after
+the comment the diagram's 402. Nor did such a block save its preamble, as the host named no run for
+it. `src/preamble/resolve.ts` now ends the resolved preamble with a newline when its last line holds
+a comment as TeX's default catcodes read one, a `%` with an even run of backslashes before it
+(`engine-src/comment.ts`), and the line it adds is the file's next, as a file that ended in a newline
+gives.
+
+**Why neither moves `OUTPUT_REVISION`.** The fixtures draw as before. The resolved preamble is part of
+the cache key, so the second fix gives exactly the blocks under such a preamble a new key, and each
+compiles again, which the broken drawing each has cached needs (D20: a diagram TeX drew after an
+error is cached); a block with its own `\begin{document}` under such a preamble, which drew
+correctly, compiles again too, a line lower. The first changes what a diagram draws only after it,
+or a diagram before it in the same worker, wrote a file under the name of a bundled font's metrics,
+which a diagram does not do but to break one; moving the revision would compile every cached diagram
+of every user again for it.
+
+Tests: `test/library.test.ts`, `test/preamble.test.ts`, `test/processor.test.ts`, and the two
+checks above.
 
 ---
 

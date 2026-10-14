@@ -445,11 +445,11 @@ The format runs the engine's `\tikzjaxsnapshot` at the end of LaTeX's `begindocu
 | | |
 |---|---|
 | Where | In the worker, per engine; gone with it (idle teardown, background, restart) |
-| Budget | 32 MiB an engine on a computer, 12 MiB on a phone (§5.4); least recently used first, never one in use or resumed from within the last 16 renders |
-| Switch | `preambleSnapshots` in `data.json`, default on, not in the settings tab; the host sends the budget, or 0, with every job |
-| Routing | The host names each job's run as the worker names what it holds (`routeOf`) and gives the job to the idle engine that holds it, else to any idle one (`src/engine/route.ts`) |
+| Budget | 32 MiB an engine on a computer, 12 MiB on a phone and on a computer that reports less than 8 GiB (§5.4); least recently used first, never one in use or resumed from within the last 16 renders; a run that would not fit once everything that may go had gone evicts nothing and is not kept, and one of a preamble whose last run did not fit, or smaller than any saved yet, is not saved at all |
+| Switch | Settings → Rendering → Saved preambles (`preambleSnapshots` in `data.json`), default on, on every platform; the host sends the budget, or 0, with every job |
+| Routing | The host names each job's run (`routeOf`), and the worker names a run as the host named the diagram that saved it, or by its text where the host has no name, and saves either way. The host gives a job to the idle engine that holds its run; else to an idle engine that holds none of the runs the other waiting jobs want; else to the first idle one (`src/engine/route.ts`) |
 | Reset | The reset after a resumed run also puts back the saved stretches (D31) |
-| Proof | `verify:snapshot` (every fixture and hazard, resumed against from the start, engine and worker, no golden corpus), `verify:reset` with resumed runs |
+| Proof | `verify:snapshot` (every fixture and hazard, resumed against from the start, engine and worker, with the log kept and without, no golden corpus), `verify:reset` with resumed runs |
 
 ---
 
@@ -512,7 +512,7 @@ A bare `setTimeout(() => pool.kill(...))` around an `await host.run(...)` is **n
 | L1 / L2 | 256 entries, 24 MB / 64 MB | 64 entries, 8 MB / 24 MB |
 | SVGO default | `targeted` (after the iOS gate) | `preset` |
 | Worker idle teardown | 5 min | 30 s, **and immediately on `visibilitychange → hidden`** |
-| Saved preambles, per engine (0.2.1, §4.7) | 32 MiB | 12 MiB |
+| Saved preambles, per engine (0.2.1, §4.7) | 32 MiB; 12 MiB where less than 8 GiB is reported | 12 MiB |
 
 Mobile concurrency 1 is not conservatism: even after P1/P2b each worker retains ~68.75 MiB, and two workers is ~137 MiB resident inside one WKWebView content process whose measured ceiling ranges from ~100 MB (iPhone SE3, iOS 26.2) to ~450 MB.
 

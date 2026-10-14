@@ -106,49 +106,69 @@ top of its notes on GitHub, and will not publish a version that has none.
   its `\begin{document}` was done, and TeX compiles only its body. That is every diagram after the
   first with the same packages, libraries and preamble text, the blocks of a note that are only a
   `tikzpicture` among them, and a diagram you are typing in, each time it is compiled again. The
-  first diagram of each preamble takes a few milliseconds more, to save where TeX stands. Measured
-  on a Windows desktop against 0.2.1-beta.2, rendering each of the 44 test diagrams twice in a row,
-  the second took 37% less TeX time in Chromium, the browser engine of Obsidian's desktop app, and
-  34% less in WebKit, the one of the iPhone and iPad: a plain TikZ diagram 5 ms instead of 14 in
-  Chromium and 7 instead of 19 in WebKit, circuitikz 68 instead of 213 and 108 instead of 321. The
-  first diagram after the engine started took 63 ms instead of 46 in Chromium and 69 instead of 42
-  in WebKit, of which saving its preamble was 14 and 10 ms. A note of 74 diagrams, 37 test diagrams
-  twice each, one after the other, took 26% less time with one engine, as on a phone, in Chromium
-  and 28% less in WebKit; spread out, every diagram and then every one again, it took as long as
-  before, because one engine's 32 MB do not hold all of its preambles. Without the JIT, as with
-  Lockdown Mode on an iPhone, a save took about a tenth of a second on the same desktop, and the
-  second render of circuitikz 3.0 s of TeX instead of 8.7. A diagram drawn this way is the same,
-  byte for byte, as one drawn from the start: every release now checks that for every test diagram
-  and for thirty cases written to break it, and a preamble that reads the diagram's own file is
-  never saved. An engine keeps up to 32 MB of saved preambles on a computer and 12 MB on a phone or
-  tablet, and lets them go when it stops. Nothing has been measured on a phone yet.
+  first diagram of each preamble takes a few milliseconds more, to save where TeX stands, and about
+  a tenth of a second without the JIT. Measured on a Windows desktop in headless WebKit and Chromium
+  against 0.2.1-beta.2, with the 32 MB a computer keeps, rendering each of the 44 test diagrams
+  twice in a row, the second took 35% less TeX time in WebKit, the browser engine of the iPhone and
+  iPad, and 34% less in Chromium, the one of Obsidian's desktop app: a plain TikZ diagram 6 ms
+  instead of 17 in WebKit and 4 instead of 11 in Chromium, circuitikz 101 instead of 298 and 61
+  instead of 194. With the 12 MB a phone keeps, in WebKit, it took 21% less, as three of those
+  preambles did not fit beside the others. The first diagram after the engine started took 49 ms
+  instead of 40 in WebKit and 45 instead of 34 in Chromium, of which saving its preamble was 9 and
+  12 ms. A note of 74 diagrams, 37 test diagrams twice each, one after the other, on one engine,
+  took 27% less time in WebKit and 25% less in Chromium with 32 MB, and 18% less in WebKit with 12
+  MB; spread out, every diagram and then every one again, it took about as long as before, 3% less
+  in WebKit and 1.5% more in Chromium, because one engine's budget does not hold all of its
+  preambles. The most memory the page had in use at once grew by more than the budget, by 25 to 42
+  MB in WebKit with 12 MB: what a save copies and what is let go wait for the collector. Without the
+  JIT, as with Lockdown Mode on an iPhone, with 12 MB, a save took about a tenth of a second on the
+  same desktop, and the second render of pgfplots 3.0 s of TeX instead of 7.2; circuitikz's preamble
+  did not fit there beside two others. A diagram drawn this way is the same, byte for byte, as one
+  drawn from the start: every release now checks that for every test diagram and for 33 cases
+  written to break it, with TeX's log kept and without, and a preamble that reads the diagram's own
+  file is never saved. An engine keeps up to 32 MB of saved preambles on a computer and 12 MB on a
+  phone or tablet, or on a computer that reports less than 8 GB of memory, and lets them go when it
+  stops. A preamble that does not fit beside the ones being used is not kept, and pushes none of
+  them out. Nothing has been measured on a phone yet.
 - With two engines on a computer, a diagram goes to the engine that holds its preamble when that one
   is free. In the notes above that made no measurable difference: two diagrams of one preamble next
   to each other start together, one on each engine, so neither has a saved preamble to start from.
   Two engines with saved preambles took from 2% more to 2% less time than beta.2's two with the
   diagrams in pairs, and 8 to 12% less spread out.
-- `"preambleSnapshots": false` in the plugin's `data.json` turns saved preambles off, should a
-  diagram ever draw differently from one: the README says how. Please report the diagram if one
-  does.
+- Settings → Saved preambles turns saved preambles off, on a phone or tablet as on a computer,
+  should a diagram ever draw differently from one: the README says more. Please report the diagram
+  if one does.
 - The diagnostics view says of each diagram whether it started from a saved preamble, or saved its
-  own and in how long, and of each engine how many preambles it holds, in how many MB, and how many
-  saves failed; Copy includes it.
+  own and in how long, or saved it and did not keep it for want of room, and of each engine how many
+  preambles it holds, in how many MB, and how many saves failed; Copy includes it.
 - The TeX engine is rebuilt with the point where a diagram is saved. Nothing draws differently, so
   nothing cached is compiled again.
-- The diagnostics view says whether TeX runs with the JIT compiler on your device: "on (probably)"
-  or "off (probably)". The engine times a short loop when it starts, which took a millisecond or less
-  with the JIT on a Windows desktop and stops after about 13 ms without it. Without the JIT, as with
-  Lockdown Mode on an iPhone or iPad, TeX is about twenty times slower; there the view says that
-  Lockdown Mode is the usual cause and how to exclude Obsidian from it, with a link to the README,
-  and a notice says so once, the first time the engine starts without the JIT. On that desktop, in
-  WebKit, Chromium and Node, idle and with every core busy, 425 starts with the JIT all said on and
-  53 without it all said off. Nothing has been measured on a phone yet.
+- The diagnostics view says whether TeX seems to run with the JIT compiler on your device: "on
+  (probably)" or "off (probably)". The engine times a short loop when it starts, which took a
+  millisecond or less with the JIT on an idle Windows desktop, and in WebKit 36 ms at most with
+  every core busy, and stops after about 13 ms without it. Without the JIT, as with Lockdown Mode on
+  an iPhone or iPad, TeX is about twenty times slower; there the view says that Lockdown Mode, if it
+  is on, is the likely cause and how to exclude Obsidian from it, with a link to the README, and a
+  notice says so once, when two engine starts of a session have found the JIT off. On that desktop,
+  in WebKit, Chromium and Node, idle and with every core busy, 425 starts with the JIT all said on
+  and 53 without it all said off. Nothing has been measured on a phone yet.
+- Where Lockdown Mode turns WebAssembly off altogether, as it does on some versions of iOS, the
+  engine cannot start, and the diagram's card now says that the device runs no WebAssembly, what
+  Lockdown Mode has to do with it and how to exclude Obsidian, where it said to close other apps;
+  the diagnostics view says "no WebAssembly".
 - When the `main.js` a device runs is not the version its `manifest.json` says, the plugin says so
   once, with how to put it right, and the diagnostics view shows both versions. Obsidian Sync
-  Standard leaves a plugin like this when it carries installed plugins: it copies the new
+  Standard can leave a plugin like this when it carries installed plugins: it copies the new
   `manifest.json` and not `main.js`, which is over its 5 MB limit, so the device shows the new
-  version and runs the old one. Only a `main.js` from this release on can tell; on a device whose
-  `main.js` is older, the README says what to do.
+  version and runs the old one. Where `manifest.json` is the older of the two, the plugin says that
+  something brought an old one back instead. Only a `main.js` from 0.2.1-beta.3 on can tell; on a
+  device whose `main.js` is older, the README says what to do.
+- A diagram that writes a file named like the metrics of a font the engine bundles, such as
+  `eufm10.tfm`, no longer writes into that font for every diagram after it until the engine stops.
+- A preamble file that ends with a comment and no newline after it, as some editors save one, no
+  longer swallows the `\begin{document}` the plugin writes after it, which made every diagram under
+  it draw "Missing \begin{document}" instead of itself. Those diagrams are compiled once more, and
+  no other.
 
 ## 0.2.0 — 2026-10-13
 

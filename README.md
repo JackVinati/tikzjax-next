@@ -499,24 +499,27 @@ stands once a diagram's `\begin{document}` is done, with its packages and preamb
 later diagram whose text is the same up to there starts from that point and compiles only its body.
 "The same up to there" is everything the plugin puts in front of the block: the packages and
 libraries in its `%!tikz` line or the settings, the global preamble, a preamble file, and the
-block's own lines before `\begin{document}`; blocks that are only a `tikzpicture` all share one, but
-for a block with a character drawn in sans-serif, or one of the stand-ins for `°` `×` `£` and the
-like, which adds to what comes first. On my desktop, drawn a second time in a row, a plain TikZ
-diagram took 5 ms of TeX instead of 14 in Chromium, the engine of Obsidian's desktop app, and
-circuitikz 68 instead of 213; in WebKit, the engine of the iPhone and iPad, 7 instead of 19 and 108
-instead of 321. The first diagram of each preamble takes a few milliseconds more, to save it. An
-engine keeps up to 32 MB of saved preambles on a computer and 12 MB on a phone or tablet, and lets
-them go when it stops: on a phone, after 30 seconds without a diagram and whenever Obsidian goes to
-the background, so there the second diagram has to come soon after the first. A diagram drawn this
-way is the same, byte for byte, as one drawn from the start, and every release checks that for every
-test diagram; a preamble that asks the size of the diagram's own file, or reads it, is never saved.
-The diagnostics view says of each diagram whether it started from a saved preamble.
+block's own lines before `\begin{document}`. Blocks that are only a `tikzpicture` all share one,
+except a block with a character drawn in sans-serif, or with one of the stand-ins for `°` `×` `£`
+and the like: those add to what comes first, so they share one only with blocks that add the same.
+On a Windows desktop, in headless Chromium and WebKit through Playwright rather than in Obsidian,
+drawn a second time in a row, a plain TikZ diagram took 4 ms of TeX instead of 11 in Chromium, the
+engine of Obsidian's desktop app, and circuitikz 61 instead of 194; in WebKit, the engine of the
+iPhone and iPad, 6 instead of 17 and 101 instead of 298. The first diagram of each preamble takes a
+few milliseconds more, to save it, and about a tenth of a second without the JIT (below). An engine
+keeps up to 32 MB of saved preambles on a computer and 12 MB on a phone or tablet, and lets them go
+when it stops: on a phone, after 30 seconds without a diagram and whenever Obsidian goes to the
+background, so there the second diagram has to come soon after the first. In 12 MB a large preamble
+does not always fit beside the ones in use, and is then not kept. A diagram drawn this way is the
+same, byte for byte, as one drawn from the start, and every release checks that for every test
+diagram; a preamble that asks the size of the diagram's own file, or reads it, is never saved. The
+diagnostics view says of each diagram whether it started from a saved preamble.
 
-**How do I turn saved preambles off?** Should a diagram ever draw differently because of them, close
-Obsidian, set `"preambleSnapshots": false` in `.obsidian/plugins/tikzjax-next/data.json` in your
-vault, and open it again; every diagram is then compiled from the start, as in 0.2.0. Please open an
-issue with the diagram if that changes how it draws. `true`, or removing the line, turns them back
-on.
+**How do I turn saved preambles off?** Should a diagram ever draw differently because of them, turn
+off Settings → TikZJax Next → Saved preambles, on a phone as on a computer; from the next diagram on,
+every diagram is compiled from the start, as in 0.2.0. Please open an issue with the diagram if that
+changes how it draws. Before 0.2.1-beta.3 the only switch was `"preambleSnapshots": false` in
+`.obsidian/plugins/tikzjax-next/data.json`, which the setting writes.
 
 **Can I put TikZ in a `$$ … $$` math block?** No. Obsidian hands math blocks to MathJax before any
 plugin sees them, and MathJax does not run TikZ. Use a `tikz` block; for an inline-looking result,
@@ -560,9 +563,15 @@ with 0.2.0, a circuitikz diagram took 7.3 s of TeX with Lockdown Mode on and 0.2
 excluded from it, and the engine started in 1.3 s instead of 0.13 s. Lockdown Mode can stay on for
 everything else: under Configure Web Browsing in its settings you can exclude Obsidian alone, then
 restart Obsidian. The exclusion takes Lockdown Mode's protection away from Obsidian's web content,
-so whether it is worth it is your call. Since 0.2.1 the diagnostics view says whether TeX runs with
-the JIT, "on (probably)" or "off (probably)", and an iPhone or iPad without it says so once, the
-first time the engine starts.
+so whether it is worth it is your call. Those figures are from one iPhone, on 14 October 2026, and
+Lockdown Mode has not done the same on every version of iOS: on some it turns WebAssembly off
+altogether, and then the engine does not start at all, and the diagram's card says that the device
+runs no WebAssembly; on some of those, excluding Obsidian has been reported not to bring it back.
+Since 0.2.1 the diagnostics view says whether TeX seems to run with the JIT, "on (probably)" or "off
+(probably)", or that there is no WebAssembly, and an iPhone or iPad that seems to run without the
+JIT says so once, when two engine starts of a session have found it off.
+
+<!-- IPHONE-FIGURES: the 7.3 s, 0.27 s, 1.3 s and 0.13 s above are one reading each on the maintainer's iPhone with 0.2.0 (diagnostics view, 14 October 2026), whose model and iOS version were not written down. Name them here once TODO.md §9's JIT probe check has been done, which records them. -->
 
 <a id="out-of-step"></a>**After an update, another device shows the new version but nothing changed.**
 Obsidian Sync Standard does not copy a file over 5 MB, and `main.js` is about 12 MB. When Sync
@@ -572,8 +581,8 @@ no update. With Sync Standard, turn off "Installed community plugins" in Sync's 
 the plugin on each device. To repair a device already in this state, reinstall the plugin there:
 with BRAT, its "Choose a single plugin to reinstall"; from the community store, uninstall it and
 install it again, which also resets its settings on that device. Since 0.2.1 a device in this state
-says so once, and the diagnostics view shows both versions, but only when its `main.js` is 0.2.1 or
-later: an older one cannot tell.
+says so once, and the diagnostics view shows both versions, but only when its `main.js` is
+0.2.1-beta.3 or later: an older one, 0.2.1-beta.2 among them, cannot tell.
 
 **Where can I ask something, or suggest a feature?** In
 [Discussions](https://github.com/JackVinati/tikzjax-next/discussions):
