@@ -57,10 +57,14 @@ describe('executeAsync', () => {
 describe('the committed engine', () => {
 	const engine = new WebAssembly.Module(ungzip(readBytes('engine-build/out/tex.wasm.gz')));
 
-	it('exports what web2js gives every program, and none of asyncify', () => {
-		// The stack pointer's accessors (web2js's pascal/stack.js), the main program, and the
-		// memory it was handed. asyncify added five functions of its own to these.
+	it('exports what web2js gives every program, the marks a reset reads, and none of asyncify', () => {
+		// The marks of how far the string pool and the shadow stack went (engine-build/web2js-codegen,
+		// internal/DECISIONS.md D31), the stack pointer's accessors (web2js's pascal/stack.js), the
+		// main program, and the memory it was handed. asyncify added five functions of its own.
 		expect(WebAssembly.Module.exports(engine).map((e) => `${e.kind} ${e.name}`)).toEqual([
+			'function getPoolPtrHigh',
+			'function getStrPtrHigh',
+			'function getStackLow',
 			'function getStackPointer',
 			'function setStackPointer',
 			'function main',

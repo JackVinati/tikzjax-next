@@ -173,6 +173,8 @@ module.exports = class FunctionEvaluation {
             }
 
             commands.push(stack.extend(type.bytes()));
+            // How far down the stack went, for a reset of only what a run wrote (memory.js).
+            commands.push(environment.program.memory.markStack());
 
             exp = p.generate(environment);
             let v = undefined;

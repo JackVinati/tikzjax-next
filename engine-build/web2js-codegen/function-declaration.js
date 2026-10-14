@@ -293,6 +293,8 @@ module.exports = class FunctionDeclaration {
         const body = [];
         if (usesStack) {
             body.push(stack.extend(frame));
+            // How far down the stack went, for a reset of only what a run wrote (memory.js).
+            body.push(memory.markStack());
             body.push(module.local.set(fp, module.global.get('stack', Binaryen.i32)));
         }
         body.push(...prologue, code);

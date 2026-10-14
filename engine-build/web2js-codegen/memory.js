@@ -1,11 +1,34 @@
 'use strict';
 
+const Binaryen = require('binaryen');
+
+// What a reset of only the memory a run wrote needs, and TeX does not keep (internal/DECISIONS.md
+// D31): how far up `pool_ptr` and `str_ptr` went, since a string made and then flushed leaves its
+// characters, and its start, past where they end the run; and how far down the shadow stack went.
+// Each is a WebAssembly global, so every instance starts it afresh, and an exported function reads
+// it after the run: a store to one of these variables raises its mark, and every growth of the
+// stack (function-declaration.js, function-evaluation.js) lowers that one.
+const HIGH_WATER = { pool_ptr: 'getPoolPtrHigh', str_ptr: 'getStrPtrHigh' };
+const STACK_LOW = 'getStackLow';
+
 module.exports = class Memory {
     constructor(m, pages) {
         this.module = m;
         this.strings = [];
         this.memorySize = 0;
         this.pages = pages;
+
+        const getter = (name, global) => {
+            m.addFunction(name, Binaryen.createType([]), Binaryen.i32, [], m.global.get(global, Binaryen.i32));
+            m.addFunctionExport(name, name);
+        };
+        for (const name of Object.keys(HIGH_WATER)) {
+            m.addGlobal(`${name}_high`, Binaryen.i32, true, m.i32.const(0));
+            getter(HIGH_WATER[name], `${name}_high`);
+        }
+        // Where stack.js starts the stack pointer, which grows down from there.
+        m.addGlobal('stack_low', Binaryen.i32, true, m.i32.const(pages * 65536 - 1));
+        getter(STACK_LOW, 'stack_low');
 
         const commands = (bytes, loader, storer) => {
             return {
@@ -129,6 +152,16 @@ module.exports = class Memory {
         };
     }
 
+    /** The stack pointer's lowest point so far, lowered to where it is now: after each growth of it. */
+    markStack() {
+        const module = this.module;
+        const sp = () => module.global.get('stack', Binaryen.i32);
+        return module.if(
+            module.i32.lt_u(sp(), module.global.get('stack_low', Binaryen.i32)),
+            module.global.set('stack_low', sp())
+        );
+    }
+
     allocateVariable(name, type) {
         // align everything to 4-byte boundaries
         if (this.memorySize % 4 !== 0) this.memorySize += 4 - (this.memorySize % 4);
@@ -136,7 +169,27 @@ module.exports = class Memory {
         const pointer = this.memorySize;
         this.memorySize += type.bytes();
 
-        return this.variable(name, type, pointer);
+        const variable = this.variable(name, type, pointer);
+        if (!(name in HIGH_WATER)) return variable;
+
+        // Every store to the variable raises its mark to what it now holds. A write through its
+        // address would bypass that, so taking its address stops the build.
+        const module = this.module;
+        const mark = `${name}_high`;
+        const store = variable.set.bind(variable);
+        variable.set = (expression) =>
+            module.block(null, [
+                store(expression),
+                module.if(
+                    module.i32.gt_u(variable.get(), module.global.get(mark, Binaryen.i32)),
+                    module.global.set(mark, variable.get())
+                )
+            ]);
+        variable.pointer = variable.rebase = () => {
+            throw new Error(`web2js memory: the address of ${name} is taken, which its high-water mark cannot follow`);
+        };
+
+        return variable;
     }
 
     byType(type) {

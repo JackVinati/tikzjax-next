@@ -581,8 +581,14 @@ if (!names.includes("library.jumpOut")) {
     console.error("tex.wasm does not import library.jumpOut, so a jump out of TeX has nowhere to go");
     process.exit(1);
 }
+// The marks a reset of only what a run wrote reads (engine-build/web2js-codegen, D31).
+const marks = ["getStackLow", "getPoolPtrHigh", "getStrPtrHigh"].filter((n) => !names.includes(n));
+if (marks.length) {
+    console.error(`tex.wasm does not export ${marks.join(", ")}`);
+    process.exit(1);
+}
 ' || die "tex.wasm is not the engine without asyncify that this build makes"
-ok "tex.wasm imports library.jumpOut and has no asyncify left"
+ok "tex.wasm imports library.jumpOut, exports the marks a reset reads, and has no asyncify left"
 
 # memory-layout.json, as program.js wrote it while TeX was compiled (above), checked and completed
 # with the two numbers it does not know: the memory's pages, and hash_prime, the slots a name can
