@@ -15,6 +15,9 @@ import { readRecord } from '../scripts/output-revision.mjs';
  * Built through the build's own function, with plugins standing in for the parts being varied. The
  * 8 MB of engine assets are replaced by a stub where they are not the subject, so each build takes
  * milliseconds; what is asserted is how the id follows the bundle, which the stub does not change.
+ *
+ * Since 0.2.1 the worker starts from a payload the host sends it, tex.wasm, the core dump and the
+ * TeX files (internal/DECISIONS.md D30), and the id covers that payload as it covers the code.
  */
 
 /** Relative to the project root, which is where vitest runs (vitest.config.ts lives there). */
@@ -56,21 +59,16 @@ interface StubDump {
 
 const STUB_DUMP: StubDump = { size: 65536, runs: [16, 4], gz: 'AAAA' };
 
-/**
- * `virtual:engine-assets` with one bundled TeX file whose base64 contents are `texFile`, and the
- * core dump `dump`.
- */
-const stubAssets = (texFile = 'AAAA', dump = STUB_DUMP): Plugin => ({
+/** `virtual:engine-assets`, what the worker's code carries of the engine: the dump's size and runs. */
+const stubAssets = (dump = STUB_DUMP): Plugin => ({
 	name: 'stub-assets',
 	setup(build) {
 		build.onResolve({ filter: /^virtual:engine-assets$/ }, () => ({ path: 'assets', namespace: 'stub' }));
 		build.onLoad({ filter: /^assets$/, namespace: 'stub' }, () => ({
 			contents: [
-				`export const TEX_WASM_GZ = '';`,
+				`export const TEX_WASM_SIZE = 8;`,
 				`export const CORE_DUMP_SIZE = ${dump.size};`,
 				`export const CORE_DUMP_RUNS = ${JSON.stringify(dump.runs)};`,
-				`export const CORE_DUMP_GZ = ${JSON.stringify(dump.gz)};`,
-				`export const TEX_FILES = ${JSON.stringify({ 'pgf.sty': texFile })};`,
 				`export const ENGINE_ID = ${JSON.stringify(ENGINE_ID_PLACEHOLDER)};`,
 				`export const INVENTORY = ${JSON.stringify({ engineId: ENGINE_ID_PLACEHOLDER })};`,
 			].join('\n'),
@@ -78,6 +76,19 @@ const stubAssets = (texFile = 'AAAA', dump = STUB_DUMP): Plugin => ({
 		}));
 	},
 });
+
+/**
+ * The payload the worker is sent: tex.wasm `wasm`, the core dump's bytes `dump.gz`, and one bundled
+ * TeX file whose base64 contents are `texFile`.
+ */
+const stubPayload = (texFile = 'AAAA', dump = STUB_DUMP, wasm = '') => ({
+	wasm,
+	dump: dump.gz,
+	files: { 'pgf.sty': texFile },
+});
+
+/** Both stubs, for a build where neither is the subject. */
+const stubbed = (plugins: Plugin[] = []) => ({ plugins: [stubAssets(), ...plugins], payload: stubPayload() });
 
 /** Every engine-src file served with `eol` line endings, after `edit`, as another checkout would have it. */
 const checkout = (
@@ -116,21 +127,43 @@ const sha256 = async (text: string): Promise<string> =>
 // coverage on a loaded machine that alone has taken 10 s, twice vitest's default.
 describe('ENGINE_ID', { timeout: 60_000 }, () => {
 	it('is the sha256 of the worker that ships, written into it in place of the placeholder', async () => {
-		const built = await buildWorker(ROOT, { plugins: [stubAssets()] });
+		const built = await buildWorker(ROOT, stubbed());
 		expect(built.engineId).toMatch(/^[0-9a-f]{64}$/);
 		expect(built.source).not.toContain(ENGINE_ID_PLACEHOLDER);
 		expect(built.source).toContain(built.engineId);
 		expect(built.inventory.engineId).toBe(built.engineId);
-		expect(await sha256(built.source.split(built.engineId).join(ENGINE_ID_PLACEHOLDER))).toBe(
-			built.engineId,
-		);
+		// The code with the placeholder back in it, then the payload it is sent.
+		expect(
+			await sha256(
+				`${built.source.split(built.engineId).join(ENGINE_ID_PLACEHOLDER)}\n${JSON.stringify(stubPayload())}`,
+			),
+		).toBe(built.engineId);
+		expect(built.assets).toEqual(stubPayload());
+	});
+
+	it('keeps the payload out of the code, which every start parses', async () => {
+		const built = await buildWorker(ROOT, {
+			plugins: [stubAssets()],
+			payload: stubPayload('UGF5bG9hZE9ubHk=', { ...STUB_DUMP, gz: 'RHVtcE9ubHk=' }, 'V2FzbU9ubHk='),
+		});
+		for (const text of ['UGF5bG9hZE9ubHk=', 'RHVtcE9ubHk=', 'V2FzbU9ubHk='])
+			expect(built.source).not.toContain(text);
+	});
+
+	it('moves when tex.wasm changes', async () => {
+		const before = await buildWorker(ROOT, { plugins: [stubAssets()], payload: stubPayload() });
+		const after = await buildWorker(ROOT, {
+			plugins: [stubAssets()],
+			payload: stubPayload('AAAA', STUB_DUMP, 'AAAA'),
+		});
+		expect(after.engineId).not.toBe(before.engineId);
 	});
 
 	it('moves when a bundled TeX file changes under the same name', async () => {
 		// The old id hashed `names.join('\n')`: a circuitikz or siunitx fix that kept its file names
 		// left it where it was, and every diagram drawn with the old package stayed in the cache.
-		const before = await buildWorker(ROOT, { plugins: [stubAssets('AAAA')] });
-		const after = await buildWorker(ROOT, { plugins: [stubAssets('AAAB')] });
+		const before = await buildWorker(ROOT, { plugins: [stubAssets()], payload: stubPayload('AAAA') });
+		const after = await buildWorker(ROOT, { plugins: [stubAssets()], payload: stubPayload('AAAB') });
 		expect(after.engineId).not.toBe(before.engineId);
 	});
 
@@ -145,7 +178,10 @@ describe('ENGINE_ID', { timeout: 60_000 }, () => {
 			{ ...STUB_DUMP, runs: [17, 4] },
 			{ ...STUB_DUMP, size: 131072 },
 		]) {
-			ids.add((await buildWorker(ROOT, { plugins: [stubAssets('AAAA', dump)] })).engineId);
+			ids.add(
+				(await buildWorker(ROOT, { plugins: [stubAssets(dump)], payload: stubPayload('AAAA', dump) }))
+					.engineId,
+			);
 		}
 		expect(ids.size).toBe(4);
 	});
@@ -153,48 +189,46 @@ describe('ENGINE_ID', { timeout: 60_000 }, () => {
 	it('moves when an npm package bundled into the worker changes', async () => {
 		// dvi2html draws every SVG, and pako and buffer sit on the path to it; none of the three
 		// was in the old list at all.
-		const one = await buildWorker(ROOT, { plugins: [stubAssets(), otherPako(1)] });
-		const two = await buildWorker(ROOT, { plugins: [stubAssets(), otherPako(2)] });
+		const one = await buildWorker(ROOT, stubbed([otherPako(1)]));
+		const two = await buildWorker(ROOT, stubbed([otherPako(2)]));
 		expect(two.engineId).not.toBe(one.engineId);
 	});
 
 	it('is the same for a CRLF checkout and an LF one', async () => {
 		// A Windows clone gets CRLF and a Linux one LF. An id that followed them would give one
 		// commit two main.js, and a user moving between a local build and a release a full recompile.
-		const asIs = await buildWorker(ROOT, { plugins: [stubAssets()] });
-		const lf = await buildWorker(ROOT, { plugins: [stubAssets(), checkout('\n')] });
-		const crlf = await buildWorker(ROOT, { plugins: [stubAssets(), checkout('\r\n')] });
+		const asIs = await buildWorker(ROOT, stubbed());
+		const lf = await buildWorker(ROOT, stubbed([checkout('\n')]));
+		const crlf = await buildWorker(ROOT, stubbed([checkout('\r\n')]));
 		expect(crlf.source).toBe(lf.source);
 		expect(crlf.engineId).toBe(lf.engineId);
 		expect(asIs.engineId).toBe(lf.engineId);
 	});
 
 	it('is the same for a development build and a release build of one commit', async () => {
-		const release = await buildWorker(ROOT, { plugins: [stubAssets()] });
-		const development = await buildWorker(ROOT, { minify: false, plugins: [stubAssets()] });
+		const release = await buildWorker(ROOT, stubbed());
+		const development = await buildWorker(ROOT, { minify: false, ...stubbed() });
 		expect(development.source).not.toBe(release.source);
 		expect(development.source).toContain(release.engineId);
 		expect(development.engineId).toBe(release.engineId);
 	});
 
 	it('moves with the code, and not with a comment about it', async () => {
-		const base = await buildWorker(ROOT, { plugins: [stubAssets(), checkout('\n')] });
-		const commented = await buildWorker(ROOT, {
-			plugins: [
-				stubAssets(),
-				checkout('\n', (name, text) => (name === 'worker.ts' ? `${text}\n// a note\n` : text)),
-			],
-		});
-		const changed = await buildWorker(ROOT, {
-			plugins: [
-				stubAssets(),
+		const base = await buildWorker(ROOT, stubbed([checkout('\n')]));
+		const commented = await buildWorker(
+			ROOT,
+			stubbed([checkout('\n', (name, text) => (name === 'worker.ts' ? `${text}\n// a note\n` : text))]),
+		);
+		const changed = await buildWorker(
+			ROOT,
+			stubbed([
 				checkout('\n', (name, text) =>
 					name === 'worker.ts'
 						? text.split("const FIRST_JOB = 'input'").join("const FIRST_JOB = 'job'")
 						: text,
 				),
-			],
-		});
+			]),
+		);
 		expect(commented.engineId).toBe(base.engineId);
 		expect(changed.engineId).not.toBe(base.engineId);
 	});

@@ -3,7 +3,7 @@
  * of them. Only what a test needs is declared; keep it in step with the .mjs beside it.
  */
 import type { Plugin } from 'esbuild';
-import type { EngineInventory } from '../engine-src/protocol';
+import type { EngineAssets, EngineInventory } from '../engine-src/protocol';
 
 export declare const ENGINE_ID_PLACEHOLDER: string;
 
@@ -22,9 +22,11 @@ export declare function encodeCoreDump(root: string): { size: number; runs: numb
 
 export declare function buildWorker(
 	root: string,
-	options?: { minify?: boolean; plugins?: Plugin[] },
+	options?: { minify?: boolean; plugins?: Plugin[]; payload?: EngineAssets },
 ): Promise<{
 	source: string;
+	/** What the host sends the worker as its first message. */
+	assets: EngineAssets;
 	engineId: string;
 	inventory: EngineInventory;
 	stats: { wasmGz: number; dumpGz: number; texFiles: number; texFilesBytes: number };

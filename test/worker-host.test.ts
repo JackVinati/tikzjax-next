@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EngineInventory, WorkerRequest, WorkerResponse } from '../engine-src/protocol';
+import type { BootTimings, EngineInventory, WorkerRequest, WorkerResponse } from '../engine-src/protocol';
 
-// The real module is the 9 MB worker string, produced by the build; nothing here reads it.
-vi.mock('virtual:engine', () => ({ WORKER_SOURCE: '', ENGINE_ID: 'test-engine', ENGINE_INVENTORY: null }));
+// The real module is the worker string and its 9.7 MB payload, produced by the build; a payload of
+// three short strings stands in for it.
+vi.mock('virtual:engine', () => ({
+	WORKER_SOURCE: '',
+	ENGINE_ASSETS: { wasm: 'd2FzbQ==', dump: 'ZHVtcA==', files: { 'pgf.sty': 'c3R5' } },
+	ENGINE_ID: 'test-engine',
+	ENGINE_INVENTORY: null,
+}));
 
 import { WorkerHost } from '../src/engine/worker-host';
 import { QueueError } from '../src/queue/queue';
@@ -47,11 +53,11 @@ class FakeWorker {
 
 	/** Render requests this worker has been handed, in order. */
 	get renders(): number[] {
-		return this.posted.map((m) => m.id);
+		return this.posted.flatMap((m) => (m.type === 'boot' ? [] : [m.id]));
 	}
 
-	boot(): void {
-		this.emit({ type: 'ready', engineId: 'test-engine', inventory: INVENTORY });
+	boot(timings?: BootTimings): void {
+		this.emit({ type: 'ready', engineId: 'test-engine', inventory: INVENTORY, boot: timings });
 	}
 
 	reply(id: number, svg = '<svg/>'): void {
@@ -312,6 +318,40 @@ describe('an abandoned job', () => {
 	});
 });
 
+describe('the payload the engine starts from', () => {
+	it('is the first thing a new worker is sent, once, before any job', async () => {
+		const host = new WorkerHost({ poolSize: 2 });
+		render(host, 'a');
+		render(host, 'b');
+		for (const w of FakeWorker.spawned) {
+			expect(w.posted).toEqual([
+				{
+					type: 'boot',
+					assets: { wasm: 'd2FzbQ==', dump: 'ZHVtcA==', files: { 'pgf.sty': 'c3R5' } },
+				},
+			]);
+		}
+		worker(0).boot();
+		await tick();
+		expect(worker(0).posted.map((m) => m.type)).toEqual(['boot', 'render']);
+	});
+
+	it('fails the jobs waiting for a worker that could not start from it, rather than leaving them waiting', async () => {
+		// A payload that does not inflate to what the build recorded: the worker throws, and that is
+		// its error event (engine-src/worker.ts).
+		const host = new WorkerHost();
+		const a = render(host, 'a');
+		const started = host.ready();
+		started.catch(() => undefined);
+		worker(0).crash('Error: inflated to 4096 B, expected 23379108 B');
+		await tick();
+		expect((a.result.error as TexError).kind).toBe('engine-unavailable');
+		expect((a.result.error as TexError).message).toContain('inflated to 4096 B');
+		await expect(started).rejects.toBeInstanceOf(TexError);
+		expect(host.report().lives).toEqual([{ startMs: null, boot: null, stop: 'error' }]);
+	});
+});
+
 describe('a worker that crashes', () => {
 	it('fails every render waiting on a boot that crashed, and does not respawn behind them', async () => {
 		const host = new WorkerHost();
@@ -387,7 +427,7 @@ describe('idle teardown', () => {
 		expect(worker(0).terminated).toBe(false);
 		timers.advance(1);
 		expect(worker(0).terminated).toBe(true);
-		expect(host.report().lives).toEqual([{ startMs: null, stop: 'idle' }]);
+		expect(host.report().lives).toEqual([{ startMs: null, boot: null, stop: 'idle' }]);
 	});
 
 	it('is called off by a job arriving for the engine still starting', () => {
@@ -475,10 +515,10 @@ describe('what the diagnostics view is told about the engine', () => {
 		expect(host.report()).toEqual({
 			starts: 4,
 			lives: [
-				{ startMs: 212, stop: 'idle' },
-				{ startMs: 188, stop: 'timeout' },
-				{ startMs: null, stop: 'background' },
-				{ startMs: null, stop: 'error' },
+				{ startMs: 212, boot: null, stop: 'idle' },
+				{ startMs: 188, boot: null, stop: 'timeout' },
+				{ startMs: null, boot: null, stop: 'background' },
+				{ startMs: null, boot: null, stop: 'error' },
 			],
 			lastStop: 'error',
 			poolSize: 1,
@@ -490,12 +530,30 @@ describe('what the diagnostics view is told about the engine', () => {
 		void host.ready();
 		worker(0).boot();
 		await tick();
-		expect(host.report().lives).toEqual([{ startMs: 0, stop: null }]);
+		expect(host.report().lives).toEqual([{ startMs: 0, boot: null, stop: null }]);
 
 		host.kill();
 		expect(host.report()).toMatchObject({ lives: [{ stop: 'restart' }], lastStop: 'restart' });
 		host.dispose();
 		expect(host.report().lastStop).toBe('restart');
+	});
+
+	it('keeps where each start went inside the worker, as the worker said it', async () => {
+		let now = 0;
+		const host = new WorkerHost({ now: () => now });
+		void host.ready();
+		now = 86;
+		const timings: BootTimings = {
+			decodeMs: 3,
+			inflateMs: 45,
+			compileMs: 0,
+			totalMs: 49,
+			nativeInflate: true,
+			nativeBase64: false,
+		};
+		worker(0).boot(timings);
+		await tick();
+		expect(host.report().lives).toEqual([{ startMs: 86, boot: timings, stop: null }]);
 	});
 
 	it('keeps the last twenty, and counts them all', () => {

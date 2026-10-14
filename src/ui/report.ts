@@ -93,9 +93,18 @@ export function renderName(record: RenderRecord, index: number): string {
 	return `#${index + 1} ${record.key.slice(0, 8)}`;
 }
 
-/** One engine's life, as a line: how long it took to start, and how it ended. */
+/**
+ * One engine's life, as a line: how long it took to start, where that went inside the worker and
+ * whether it had the platform's own gzip and base64 (which iOS has from 16.4 and 18.2), and how it
+ * ended.
+ */
 export function engineLife(life: EngineReport['lives'][number]): string {
-	const start = life.startMs === null ? STRINGS.engineNeverStarted : STRINGS.engineStartedIn(life.startMs);
+	const start =
+		life.startMs === null
+			? STRINGS.engineNeverStarted
+			: life.boot === null
+				? STRINGS.engineStartedIn(life.startMs)
+				: STRINGS.engineStartedWith(life.startMs, life.boot);
 	return life.stop === null ? STRINGS.engineRunning(start) : STRINGS.engineStopped(start, life.stop);
 }
 

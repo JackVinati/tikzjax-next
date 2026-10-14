@@ -1,7 +1,9 @@
 /**
  * Supplied by the `virtual:engine-assets` esbuild plugin in scripts/esbuild.config.mjs, which
  * reads engine-build/out/ at build time. Nothing here exists in the source tree: the payload is
- * ~8 MB and is reproducible with `npm run engine:image && npm run engine:build`.
+ * ~8 MB and is reproducible with `npm run engine:image && npm run engine:build`. Since 0.2.1 the
+ * worker carries only the dump's layout and sizes; the payload itself is `virtual:engine`'s
+ * ENGINE_ASSETS, which the host posts to the worker (internal/DECISIONS.md D30).
  *
  * EngineInventory is referenced as `import('../engine-src/protocol').EngineInventory`, an import
  * TYPE, and never through an `import type { … }` declaration inside the `declare module` block.
@@ -12,16 +14,12 @@
  * rules to keep the fork diffable.
  */
 declare module 'virtual:engine-assets' {
-	/** gzipped tex.wasm, base64. */
-	export const TEX_WASM_GZ: string;
+	/** tex.wasm's length, which it must inflate to exactly. It comes in the payload (protocol.ts). */
+	export const TEX_WASM_SIZE: number;
 	/** core.dump's length: the whole 2500-page WebAssembly.Memory image, zeros included. */
 	export const CORE_DUMP_SIZE: number;
 	/** core.dump's non-zero runs, in order: an offset and a length for each, flat. */
 	export const CORE_DUMP_RUNS: readonly number[];
-	/** The runs' bytes back to back, gzipped, base64 (scripts/engine-assets.mjs `packCoreDump`). */
-	export const CORE_DUMP_GZ: string;
-	/** TeX input filename -> gzipped contents, base64. */
-	export const TEX_FILES: Record<string, string>;
 	/**
 	 * sha256 of the minified worker bundle that embeds it, the id itself left out
 	 * (scripts/engine-assets.mjs `buildWorker`). Names the build; the cache key holds
@@ -34,6 +32,11 @@ declare module 'virtual:engine-assets' {
 declare module 'virtual:engine' {
 	/** The bundled TeX worker, as a string, for `new Worker(URL.createObjectURL(blob))`. */
 	export const WORKER_SOURCE: string;
+	/**
+	 * What the worker starts from, sent to it as its first message (engine-src/protocol.ts). Null only
+	 * for a build made without an engine.
+	 */
+	export const ENGINE_ASSETS: import('../engine-src/protocol').EngineAssets | null;
 	export const ENGINE_ID: string;
 	/**
 	 * What the engine ships, known at build time rather than announced by the running worker.

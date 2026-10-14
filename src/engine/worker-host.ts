@@ -1,5 +1,6 @@
-import { WORKER_SOURCE, ENGINE_ID, ENGINE_INVENTORY } from 'virtual:engine';
+import { WORKER_SOURCE, ENGINE_ASSETS, ENGINE_ID, ENGINE_INVENTORY } from 'virtual:engine';
 import type {
+	BootTimings,
 	EngineInventory,
 	RenderOptions,
 	RenderTimings,
@@ -44,6 +45,12 @@ export interface EngineLife {
 	 * never was.
 	 */
 	startMs: number | null;
+	/**
+	 * Where the start went inside the worker once its payload arrived, as it said in `ready`, and
+	 * whether it had the platform's own gzip and base64 (engine-src/protocol.ts BootTimings). Null
+	 * until it is ready, or from a worker that does not say.
+	 */
+	boot: BootTimings | null;
 	/** Null while it runs. */
 	stop: EngineStop | null;
 }
@@ -412,11 +419,17 @@ export class WorkerHost implements TexHost {
 
 	private spawn(): Engine {
 		let blobUrl: string | null = null;
-		let worker: Worker;
+		let worker: Worker | undefined;
 		try {
 			blobUrl = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: 'application/javascript' }));
 			worker = new Worker(blobUrl);
+			// The engine's payload, as data: the worker starts once it has it, and answers `ready`
+			// (internal/DECISIONS.md D30). Posted at once, so it waits in the worker's queue while the
+			// thread starts and the script is parsed, which is now 0.45 MB rather than 10.
+			if (ENGINE_ASSETS !== null)
+				worker.postMessage({ type: 'boot', assets: ENGINE_ASSETS } satisfies WorkerRequest);
 		} catch (cause) {
+			worker?.terminate();
 			if (blobUrl) URL.revokeObjectURL(blobUrl);
 			throw new TexError('engine-unavailable', [], undefined, undefined, String(cause));
 		}
@@ -431,7 +444,7 @@ export class WorkerHost implements TexHost {
 		// no one awaiting `ready()` must not surface as an unhandled rejection.
 		ready.catch(() => undefined);
 
-		const life: EngineLife = { startMs: null, stop: null };
+		const life: EngineLife = { startMs: null, boot: null, stop: null };
 		this.starts++;
 		this.lives.push(life);
 		if (this.lives.length > ENGINE_LIVES) this.lives.shift();
@@ -463,6 +476,7 @@ export class WorkerHost implements TexHost {
 			engine.up = true;
 			engine.readyAt = this.now();
 			engine.life.startMs = Math.round(engine.readyAt - engine.spawnedAt);
+			engine.life.boot = message.boot ?? null;
 			this.inventory = message.inventory;
 			this.caps = capabilitiesOf(message.inventory);
 			// The blob URL has done its job the moment the worker is running. Upstream never revokes

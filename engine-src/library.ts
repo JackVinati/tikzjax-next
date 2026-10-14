@@ -74,11 +74,14 @@ let callback: (() => void) | null = null;
 // ---------------------------------------------------------------------------------------------
 // Injected environment (change 1, 4, 5, 6)
 
-/** name -> gzip-compressed bytes, as shipped in the bundle. */
-let bundledGz: ReadonlyMap<string, Uint8Array> | null = null;
+/**
+ * name -> the file as shipped, gzipped, in whatever form the worker holds it: since 0.2.1 the base64
+ * text it was sent, which it decodes only when TeX first asks for that file (D30).
+ */
+let bundledGz: ReadonlyMap<string, unknown> | null = null;
 /** name -> inflated bytes. Deliberately NOT cleared by deleteEverything(). */
 const inflatedCache = new Map<string, Uint8Array>();
-let inflate: ((gz: Uint8Array) => Uint8Array) | null = null;
+let inflate: ((packed: never) => Uint8Array) | null = null;
 
 let logSink: ((line: string) => void) | null = null;
 let missingSink: ((name: string) => void) | null = null;
@@ -88,10 +91,8 @@ let consoleBuffer = '';
 /** Fixed epoch so TeX's \year/\month/\day/\time are reproducible. Overridable for real clocks. */
 let clock = { year: 2026, month: 1, day: 1, minutes: 0 };
 
-export const setBundledFiles = (
-	map: ReadonlyMap<string, Uint8Array>,
-	inflateFn: (gz: Uint8Array) => Uint8Array,
-) => {
+/** The bundled files, and how to turn one of them into its bytes: decoded, if need be, and inflated. */
+export const setBundledFiles = <T>(map: ReadonlyMap<string, T>, inflateFn: (packed: T) => Uint8Array) => {
 	bundledGz = map;
 	inflate = inflateFn;
 };
@@ -117,7 +118,7 @@ const resolveBundled = (filename: string): Uint8Array | undefined => {
 	if (hit) return hit;
 	const gz = bundledGz?.get(filename);
 	if (!gz || !inflate) return undefined;
-	const data = inflate(gz);
+	const data = inflate(gz as never);
 	inflatedCache.set(filename, data);
 	return data;
 };

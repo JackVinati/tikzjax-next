@@ -64,13 +64,56 @@ export interface PingRequest {
 	id: number;
 }
 
-export type WorkerRequest = RenderRequest | PingRequest;
+/**
+ * The engine's payload, as base64 text: what main.js carries of tex.wasm, of the core dump and of
+ * the bundled TeX files. The host sends it to the worker as data, in the first message, rather than
+ * the build writing it into the worker's script, which every start had to parse, 9.7 MB of string
+ * literals, before it could run a line of it (internal/DECISIONS.md D30).
+ */
+export interface EngineAssets {
+	/** tex.wasm, gzipped. */
+	wasm: string;
+	/** The core dump's non-zero runs back to back, gzipped (scripts/engine-assets.mjs `packCoreDump`). */
+	dump: string;
+	/** TeX input file name -> its contents, gzipped. */
+	files: Record<string, string>;
+}
+
+/** Always the first message a worker is sent, and only once; it answers `ready` when it has started. */
+export interface BootRequest {
+	type: 'boot';
+	assets: EngineAssets;
+}
+
+export type WorkerRequest = RenderRequest | PingRequest | BootRequest;
+
+/**
+ * Where the engine's start went inside the worker, in whole milliseconds, and which of the
+ * platform's own decoders it had, for the diagnostics view. The host times the start as a whole,
+ * thread and all; this is the part of it the worker spent after the payload arrived.
+ */
+export interface BootTimings {
+	/** base64 to bytes: tex.wasm's and the dump's. The TeX files are decoded when TeX first opens one. */
+	decodeMs: number;
+	/** The dump's runs inflated and checked. */
+	inflateMs: number;
+	/** What compiling tex.wasm took after the dump was ready: it runs while the dump inflates. */
+	compileMs: number;
+	/** From the payload's arrival to `ready`. */
+	totalMs: number;
+	/** Whether the platform's DecompressionStream inflated the dump, rather than pako. */
+	nativeInflate: boolean;
+	/** Whether the platform's Uint8Array.fromBase64 decoded, rather than the worker's own loop. */
+	nativeBase64: boolean;
+}
 
 export interface ReadyMessage {
 	type: 'ready';
 	engineId: string;
 	/** Package versions and file list, so error messages can be specific about what is bundled. */
 	inventory: EngineInventory;
+	/** Absent from a worker that does not say, which every worker before 0.2.1-beta.2 is. */
+	boot?: BootTimings | undefined;
 }
 
 export interface LogMessage {

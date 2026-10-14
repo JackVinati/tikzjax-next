@@ -37,7 +37,10 @@ const external = ['obsidian', 'electron', ...codemirror, ...lezer, ...builtinMod
  * because it runs as a Worker created from a Blob — Obsidian's community installer only ever
  * fetches main.js, manifest.json and styles.css, so a sibling worker file would not reach users.
  *
- * ENGINE_ID is the sha256 of the worker itself (scripts/engine-assets.mjs, buildWorker). It names
+ * The engine's payload, tex.wasm, the core dump and the TeX files, goes in beside it as an object,
+ * which the host posts to the worker when it starts one (internal/DECISIONS.md D30).
+ *
+ * ENGINE_ID is the sha256 of the worker and its payload (scripts/engine-assets.mjs, buildWorker). It names
  * the build: change anything the worker runs and it moves. Since 0.2.1 the cache key holds
  * OUTPUT_REVISION instead (src/cache/key.ts), which moves only when what the engine draws does.
  */
@@ -46,7 +49,7 @@ async function buildWorker() {
 	try {
 		await access(entry);
 	} catch {
-		return { source: '', engineId: 'unbuilt', inventory: null };
+		return { source: '', assets: null, engineId: 'unbuilt', inventory: null };
 	}
 
 	if (!engineIsBuilt(root)) {
@@ -58,16 +61,21 @@ async function buildWorker() {
 		);
 	}
 
-	const { source, engineId, stats, inventory } = await buildEngineWorker(root, { minify: prod });
+	const { source, assets, engineId, stats, inventory } = await buildEngineWorker(root, { minify: prod });
 	const mb = (n) => `${(n / 1048576).toFixed(2)} MB`;
 	console.log(
-		`  worker ${mb(source.length)}  (wasm ${mb(stats.wasmGz)} + dump ${mb(stats.dumpGz)} gz, ` +
+		`  worker ${mb(source.length)} + payload (wasm ${mb(stats.wasmGz)} + dump ${mb(stats.dumpGz)} gz, ` +
 			`${stats.texFiles} tex files ${mb(stats.texFilesBytes)} b64)  ENGINE_ID ${engineId.slice(0, 12)}…`,
 	);
-	return { source, engineId, inventory };
+	return { source, assets, engineId, inventory };
 }
 
-const { source: workerSource, engineId, inventory: engineInventory } = await buildWorker();
+const {
+	source: workerSource,
+	assets: engineAssets,
+	engineId,
+	inventory: engineInventory,
+} = await buildWorker();
 
 const styles = buildStyles(root, banner.css);
 {
@@ -78,7 +86,7 @@ const styles = buildStyles(root, banner.css);
 	);
 }
 
-/** Resolves `virtual:engine` to the built worker string. Keeps the 7 MB payload out of the source tree. */
+/** Resolves `virtual:engine` to the built worker and its payload, which stay out of the source tree. */
 const virtualEngine = {
 	name: 'virtual-engine',
 	setup(build) {
@@ -89,6 +97,8 @@ const virtualEngine = {
 		build.onLoad({ filter: /^virtual:engine$/, namespace: 'virtual' }, () => ({
 			contents:
 				`export const WORKER_SOURCE = ${JSON.stringify(workerSource)};\n` +
+				// What the worker starts from, which the host posts to it as its first message.
+				`export const ENGINE_ASSETS = ${JSON.stringify(engineAssets)};\n` +
 				`export const ENGINE_ID = ${JSON.stringify(engineId)};\n` +
 				// The file list, package versions and capabilities, known at build time. The main
 				// thread needs them BEFORE the worker has booted — and a session that only shows cached

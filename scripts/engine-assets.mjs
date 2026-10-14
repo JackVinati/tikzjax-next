@@ -3,7 +3,8 @@
  *
  * The engine is ~8 MB of base64. It is committed in compressed form (internal/DECISIONS.md D12) and
  * reproducible from pinned inputs with `npm run engine:image && npm run engine:build`; this file is
- * what turns those archives into the string main.js carries.
+ * what turns those archives into what main.js carries: the worker's code as a string, and the
+ * payload the worker is sent when it starts.
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -194,17 +195,25 @@ export function buildEngineAssets(root) {
 		},
 	};
 
+	// The payload the worker starts from, which the host sends it as its first message
+	// (engine-src/protocol.ts EngineAssets) rather than the build writing it into the worker's script
+	// (internal/DECISIONS.md D30). The keys are in a fixed order: ENGINE_ID hashes it (buildWorker).
+	const assets = {
+		wasm: wasmGz.toString('base64'),
+		dump: Buffer.from(dump.gz).toString('base64'),
+		files: texFiles,
+	};
+
 	const source =
-		`export const TEX_WASM_GZ = ${JSON.stringify(wasmGz.toString('base64'))};\n` +
+		`export const TEX_WASM_SIZE = ${gunzipSync(wasmGz).length};\n` +
 		`export const CORE_DUMP_SIZE = ${dump.size};\n` +
 		`export const CORE_DUMP_RUNS = ${JSON.stringify(dump.runs)};\n` +
-		`export const CORE_DUMP_GZ = ${JSON.stringify(Buffer.from(dump.gz).toString('base64'))};\n` +
-		`export const TEX_FILES = ${JSON.stringify(texFiles)};\n` +
 		`export const ENGINE_ID = ${JSON.stringify(ENGINE_ID_PLACEHOLDER)};\n` +
 		`export const INVENTORY = ${JSON.stringify(inventory)};\n`;
 
 	return {
 		source,
+		assets,
 		inventory,
 		stats: {
 			wasmGz: wasmGz.length,
@@ -291,20 +300,28 @@ async function bundleWorker(root, minify, plugins) {
  * the same bundle and the same id; test/engine-id.test.ts holds it to that, since an id that
  * depended on the checkout would mean two different main.js for one commit.
  *
- * `plugins` run before the build's own, so a test can stand in for a source file or the assets.
+ * Since 0.2.1 the worker's code and the payload it starts from travel apart (D30): the payload is
+ * data the host posts to the worker. Both are what it runs, so the id is the hash of the two
+ * together, the minified code and then the payload as JSON, and moves when a bundled file, the dump
+ * or tex.wasm changes as it does when the code changes.
+ *
+ * `plugins` run before the build's own, so a test can stand in for a source file or the assets;
+ * `payload` stands in for the payload the same way.
  */
-export async function buildWorker(root, { minify = true, plugins = [] } = {}) {
+export async function buildWorker(root, { minify = true, plugins = [], payload } = {}) {
 	const assets = buildEngineAssets(root);
+	if (payload !== undefined) assets.assets = payload;
 	const all = [...plugins, dvi2htmlPatch(), engineAssetsPlugin(assets)];
 
 	const canonical = await bundleWorker(root, true, all);
 	// Hashed with the dvi2html patch already in it, so applying, changing or retiring the patch
 	// moves the id like any other change to what the worker runs.
-	const engineId = engineIdOf(canonical);
+	const engineId = engineIdOf(`${canonical}\n${JSON.stringify(assets.assets)}`);
 	const shipped = minify ? canonical : await bundleWorker(root, false, all);
 
 	return {
 		source: withEngineId(shipped, engineId),
+		assets: assets.assets,
 		engineId,
 		inventory: { ...assets.inventory, engineId },
 		stats: assets.stats,

@@ -20,7 +20,7 @@ import { buildWorker } from '../scripts/engine-assets.mjs';
 let send: (source: string, options?: RenderOptions) => Promise<OkMessage | ErrorMessage>;
 
 beforeAll(async () => {
-	const { source } = await buildWorker('.');
+	const { source, assets } = await buildWorker('.');
 	const inbox: WorkerResponse[] = [];
 	let onmessage: ((event: { data: WorkerRequest }) => void) | null = null;
 	(globalThis as { self?: unknown }).self = {
@@ -33,6 +33,10 @@ beforeAll(async () => {
 		},
 	};
 	new Function(source)();
+	// The payload arrives as the first message, and the worker answers `ready` once it has started.
+	(onmessage as ((event: { data: WorkerRequest }) => void) | null)?.({ data: { type: 'boot', assets } });
+	for (let waited = 0; inbox.length === 0 && waited < 60_000; waited += 5)
+		await new Promise((resolve) => setTimeout(resolve, 5));
 	expect(inbox[0]?.type).toBe('ready');
 
 	let id = 0;

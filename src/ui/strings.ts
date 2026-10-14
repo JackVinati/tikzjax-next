@@ -1,3 +1,4 @@
+import type { BootTimings } from '../../engine-src/protocol';
 import type { EngineStop } from '../engine/worker-host';
 import type { WebViewFeatures } from '../platform/device';
 
@@ -73,6 +74,11 @@ export const STRINGS = {
 			? 'The engine started once this session.'
 			: `The engine started ${count} times this session.`,
 	engineStartedIn: (ms: number) => `started in ${ms} ms`,
+	/** A start, with where it went once the worker had its payload, and which native decoders it had. */
+	engineStartedWith: (ms: number, boot: BootTimings) =>
+		`started in ${ms} ms (in the worker ${boot.totalMs} ms: decode ${boot.decodeMs} ms, ` +
+		`inflate ${boot.inflateMs} ms, compile ${boot.compileMs} ms; native gzip ${yesNo(boot.nativeInflate)}, ` +
+		`native base64 ${yesNo(boot.nativeBase64)})`,
 	engineNeverStarted: 'never finished starting',
 	engineRunning: (start: string) => `${start}, running`,
 	engineStopped: (start: string, why: EngineStop) => `${start}, ${STOPPED[why]}`,

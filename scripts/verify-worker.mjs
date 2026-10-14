@@ -2,11 +2,15 @@
  * Runs the SHIPPED worker bundle — the exact string that goes into main.js — against every
  * fixture, and compares it to the reference SVGs from scripts/smoke.mjs.
  *
- *   node scripts/verify-worker.mjs
+ *   node scripts/verify-worker.mjs [--legacy] [fixture ...]
+ *
+ * --legacy runs it as iOS 14.5 to 16.3 would, and Chromium before 140: without the platform's
+ * DecompressionStream and Uint8Array.fromBase64, so that the worker starts by pako and by its own
+ * base64 (internal/DECISIONS.md D30). Node 22 has no fromBase64 to begin with.
  *
  * verify-golden.mjs holds the engine and engine-src/library.ts to the recorded golden corpus. This
- * proves the whole artifact renders what they do: base64 decode, pako inflate, WebAssembly
- * compile, the conditional \begin{document} wrapping, \nonstopmode, error classification and the
+ * proves the whole artifact renders what they do: the start from the payload the host sends it,
+ * base64 decode, inflate, WebAssembly compile, the conditional \begin{document} wrapping, \nonstopmode, error classification and the
  * message protocol. Everything between the source and the SVG, in the form the user will actually
  * install.
  *
@@ -26,6 +30,9 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const FIXTURES = join(root, 'test', 'fixtures', 'tex');
 const REFERENCE = join(root, 'engine-build', 'out', 'smoke');
 const RESULTS = join(root, 'engine-build', 'out', 'worker');
+const ARGS = process.argv.slice(2);
+const LEGACY = ARGS.includes('--legacy');
+const ONLY = ARGS.filter((arg) => !arg.startsWith('--'));
 
 if (!engineIsBuilt(root)) {
 	console.error('No engine build. Run: npm run engine:image && npm run engine:build');
@@ -35,8 +42,18 @@ if (!engineIsBuilt(root)) {
 // The production build's worker, minified and carrying its ENGINE_ID, from the same function the
 // build calls, so the string evaluated here is the one a release puts into main.js.
 console.log('Bundling the worker…');
-const { source: workerSource, engineId } = await buildWorker(root);
-console.log(`  ${(workerSource.length / 1048576).toFixed(2)} MB\n`);
+const { source: workerSource, assets, engineId } = await buildWorker(root);
+console.log(
+	`  ${(workerSource.length / 1048576).toFixed(2)} MB, and a payload of ` +
+		`${(JSON.stringify(assets).length / 1048576).toFixed(2)} MB\n`,
+);
+
+if (LEGACY) {
+	// What a WebView without them has: neither is there for the worker to find.
+	delete globalThis.DecompressionStream;
+	delete Uint8Array.fromBase64;
+	console.log('Without DecompressionStream and Uint8Array.fromBase64, as on iOS 14.5 to 16.3.\n');
+}
 
 // --- boot it ---------------------------------------------------------------------------------
 const inbox = [];
@@ -53,6 +70,11 @@ globalThis.self = {
 
 const t0 = Date.now();
 new Function(workerSource)();
+// The payload arrives as the first message, as the plugin's host sends it, and `ready` follows the
+// start. A start that fails throws out of the worker, which ends this script with it.
+onmessage({ data: { type: 'boot', assets } });
+for (let waited = 0; !inbox.some((m) => m.type === 'ready') && waited < 60_000; waited += 2)
+	await new Promise((resolve) => setTimeout(resolve, 2));
 const bootMs = Date.now() - t0;
 
 const ready = inbox.find((m) => m.type === 'ready');
@@ -67,10 +89,20 @@ if (ready.engineId !== engineId || ready.inventory.engineId !== engineId) {
 	console.error(`Worker announced ENGINE_ID ${ready.engineId}, the build computed ${engineId}.`);
 	process.exit(1);
 }
+// Which way it started has to be the way this platform allows: by the platform's own gzip where
+// there is one, by pako where there is none.
+const nativeInflate = typeof globalThis.DecompressionStream === 'function';
+if (ready.boot?.nativeInflate !== nativeInflate) {
+	console.error(
+		`Worker started with nativeInflate ${ready.boot?.nativeInflate}, expected ${nativeInflate}.`,
+	);
+	process.exit(1);
+}
 console.log(
 	`ready in ${bootMs} ms — engine ${ready.inventory.engine}, ` +
 		`${ready.inventory.files.length} tex files, expl3=${ready.inventory.capabilities.expl3}, ` +
-		`ENGINE_ID ${ready.engineId.slice(0, 12)}…\n`,
+		`ENGINE_ID ${ready.engineId.slice(0, 12)}…\n` +
+		`  in the worker: ${JSON.stringify(ready.boot)}\n`,
 );
 
 /**
@@ -107,7 +139,7 @@ mkdirSync(RESULTS, { recursive: true });
 const names = readdirSync(FIXTURES)
 	.filter((f) => f.endsWith('.tex'))
 	.map((f) => basename(f, '.tex'))
-	.filter((n) => process.argv.length <= 2 || process.argv.slice(2).includes(n));
+	.filter((n) => ONLY.length === 0 || ONLY.includes(n));
 
 let id = 0;
 let failures = 0;

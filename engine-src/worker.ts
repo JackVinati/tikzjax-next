@@ -6,7 +6,8 @@
  * This file remains GPL-3.0-or-later. See NOTICE.
  *
  * CHANGES FROM UPSTREAM (internal/DECISIONS.md D10):
- *  - assets are injected at build time instead of fetched from a urlRoot;
+ *  - assets come with the plugin instead of being fetched from a urlRoot: the host sends them as the
+ *    worker's first message, which it starts from (D30);
  *  - the WebAssembly.Module is compiled ONCE, not on every render;
  *  - no `coredump.slice(0)` — at pages=2500 that copy is 156.25 MiB per render — and the dump
  *    ships as its non-zero runs, packed by the build, which are all that is inflated at boot and
@@ -36,18 +37,12 @@ import { dvi2html } from '@drgrice1/dvi2html';
 import * as library from './library';
 import { describeConvertError } from './convert-error';
 import { buildInput } from './document';
-import { inflateExactly } from './inflate';
-import { checkCoreDump, packedLength, startingMemory, unpackCoreDump } from './core-dump';
-import {
-	CORE_DUMP_GZ,
-	CORE_DUMP_RUNS,
-	CORE_DUMP_SIZE,
-	ENGINE_ID,
-	INVENTORY,
-	TEX_FILES,
-	TEX_WASM_GZ,
-} from 'virtual:engine-assets';
+import { gunzipExactly } from './inflate';
+import { checkCoreDump, packedLength, startingMemory, unpackCoreDump, type CoreDump } from './core-dump';
+import { CORE_DUMP_RUNS, CORE_DUMP_SIZE, ENGINE_ID, INVENTORY, TEX_WASM_SIZE } from 'virtual:engine-assets';
 import type {
+	BootTimings,
+	EngineAssets,
 	ErrorMessage,
 	OkMessage,
 	RenderOptions,
@@ -59,52 +54,114 @@ import { restoreUnicode } from './unicode';
 
 // --- base64 -------------------------------------------------------------------------------------
 
-const fromBase64 = (b64: string): Uint8Array => {
-	// Uint8Array.fromBase64 lands in newer engines and decodes several times faster than the
-	// atob loop, which matters for a 5.9 MB core dump on a phone.
-	const fromB64 = (Uint8Array as unknown as { fromBase64?: (s: string) => Uint8Array }).fromBase64;
-	if (typeof fromB64 === 'function') return fromB64(b64);
+/**
+ * Uint8Array.fromBase64, where the platform has it: Safari 18.2, Chrome 140. It decodes several times
+ * faster than anything written in JavaScript, which matters for a 7.9 MB dump on a phone.
+ */
+const nativeFromBase64 = (Uint8Array as unknown as { fromBase64?: (s: string) => Uint8Array }).fromBase64;
 
-	const binary = atob(b64);
-	const out = new Uint8Array(binary.length);
-	for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+/** Each base64 character's six bits, by its character code; anything else is 0. */
+const SEXTETS = new Uint8Array(256);
+for (let i = 0; i < 64; i++)
+	SEXTETS['ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'.charCodeAt(i)] = i;
+
+const fromBase64 = (b64: string): Uint8Array => {
+	if (typeof nativeFromBase64 === 'function') return nativeFromBase64(b64);
+
+	// Four characters at a time, straight into the bytes, where `atob` made a binary string that was
+	// then copied out a character at a time: the dump decodes in 9 rather than 15 ms in Chromium, in
+	// 7 rather than 12 in WebKit (internal/DECISIONS.md D30). The text is the build's own
+	// (scripts/engine-assets.mjs: Buffer's base64, padded, without line breaks), and what it decodes
+	// to is checked where it is inflated, which a corrupt payload does not survive.
+	const n = b64.length;
+	if (n % 4 !== 0) throw new Error('the payload is not base64');
+	const pad = n > 1 && b64.charCodeAt(n - 1) === 61 ? (b64.charCodeAt(n - 2) === 61 ? 2 : 1) : 0;
+	const out = new Uint8Array((n >> 2) * 3 - pad);
+	const full = pad ? n - 4 : n;
+	const s = SEXTETS;
+	let o = 0;
+	let i = 0;
+	for (; i < full; i += 4) {
+		const v =
+			(s[b64.charCodeAt(i) & 255]! << 18) |
+			(s[b64.charCodeAt(i + 1) & 255]! << 12) |
+			(s[b64.charCodeAt(i + 2) & 255]! << 6) |
+			s[b64.charCodeAt(i + 3) & 255]!;
+		out[o++] = v >> 16;
+		out[o++] = (v >> 8) & 255;
+		out[o++] = v & 255;
+	}
+	if (pad) {
+		const v =
+			(s[b64.charCodeAt(i) & 255]! << 18) |
+			(s[b64.charCodeAt(i + 1) & 255]! << 12) |
+			(s[b64.charCodeAt(i + 2) & 255]! << 6);
+		out[o++] = v >> 16;
+		if (pad === 1) out[o] = (v >> 8) & 255;
+	}
 	return out;
 };
 
 // --- engine boot --------------------------------------------------------------------------------
 
 /**
- * Bundled TeX inputs, still gzipped. They are inflated lazily on first use and then cached for
- * the lifetime of the worker (library.ts), so a vault full of diagrams pays for the pgf tree once.
- */
-const bundled = new Map<string, Uint8Array>();
-for (const [name, b64] of Object.entries(TEX_FILES)) bundled.set(name, fromBase64(b64));
-
-library.setBundledFiles(bundled, (gz) => ungzip(gz));
-
-/**
  * Compiled once. Upstream calls WebAssembly.instantiate() with the raw bytes on every render,
- * which recompiles its 526 KB of wasm each time (this engine, without asyncify, is 356 KB);
- * instantiating a Module reuses the compiled code.
+ * which recompiles its 526 KB of wasm each time (this engine is 236 KB); instantiating a Module
+ * reuses the compiled code. Null until the worker has started.
  */
-const texModule = new WebAssembly.Module(ungzip(fromBase64(TEX_WASM_GZ)));
+let texModule: WebAssembly.Module | null = null;
 
 /**
  * The dump's non-zero runs, 22.3 MiB of its 156.25, which the build packed back to back
  * (scripts/engine-assets.mjs `packCoreDump`): they are all a run's fresh Memory needs written into
- * it (./core-dump). Inflating the whole dump took half a second of every boot on the desktop.
- *
- * Inflated straight into one buffer of the size the runs add up to, and asserted to be exactly that
- * size. Not `ungzip`, which glues 64 KiB chunks into a copy and so holds the bytes twice (./inflate).
- * The dump has to fill the Memory exactly, or live TeX state would start at zero — a corruption
- * that would surface much later as garbage output — so that is checked here, at boot.
+ * it (./core-dump). Null until the worker has started.
  */
-const coreDump = unpackCoreDump(
-	CORE_DUMP_SIZE,
-	CORE_DUMP_RUNS,
-	inflateExactly(fromBase64(CORE_DUMP_GZ), packedLength(CORE_DUMP_RUNS)),
-);
-checkCoreDump(coreDump, library.pages);
+let coreDump: CoreDump | null = null;
+
+/**
+ * Start the engine from the payload the host sent (protocol.ts EngineAssets), rather than from string
+ * literals in this script, which every start had to parse before it could run a line (D30):
+ *
+ *  - tex.wasm is inflated and compiled asynchronously, which the platform does off this thread,
+ *    while the dump is inflated here;
+ *  - both are inflated by the platform's own zlib where it has one, pako otherwise or after a native
+ *    attempt that failed (./inflate gunzipExactly), into exactly the size the build recorded, which
+ *    is checked: the dump has to fill the Memory exactly, or live TeX state would start at zero, a
+ *    corruption that would surface much later as garbage output, so it fails here instead;
+ *  - the bundled TeX files stay base64 text until TeX first asks for one, when that one is decoded
+ *    and inflated, and library.ts keeps it inflated for the rest of the worker's life.
+ */
+async function boot(assets: EngineAssets): Promise<BootTimings> {
+	const started = performance.now();
+	const compiled = gunzipExactly(fromBase64(assets.wasm), TEX_WASM_SIZE).then(({ bytes }) =>
+		WebAssembly.compile(bytes as Uint8Array<ArrayBuffer>),
+	);
+	// A failure is handled where the result is awaited, below; this keeps an early one from being
+	// reported as unhandled meanwhile.
+	compiled.catch(() => undefined);
+
+	const dumpGz = fromBase64(assets.dump);
+	const decoded = performance.now();
+
+	const inflated = await gunzipExactly(dumpGz, packedLength(CORE_DUMP_RUNS));
+	const dump = unpackCoreDump(CORE_DUMP_SIZE, CORE_DUMP_RUNS, inflated.bytes);
+	checkCoreDump(dump, library.pages);
+	const ready = performance.now();
+
+	texModule = await compiled;
+	coreDump = dump;
+	library.setBundledFiles(new Map(Object.entries(assets.files)), (b64: string) => ungzip(fromBase64(b64)));
+	const done = performance.now();
+
+	return {
+		decodeMs: Math.round(decoded - started),
+		inflateMs: Math.round(ready - decoded),
+		compileMs: Math.round(done - ready),
+		totalMs: Math.round(done - started),
+		nativeInflate: inflated.native,
+		nativeBase64: typeof nativeFromBase64 === 'function',
+	};
+}
 
 // --- transcript analysis --------------------------------------------------------------------------
 
@@ -387,7 +444,10 @@ const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> =
 	// A new Memory with the dump's non-zero runs written into it: 22.3 MiB rather than all 156.25,
 	// the rest being zero from the start. Upstream also copies the dump with .slice(0) first, an
 	// extra 156.25 MiB allocated and discarded on every single render.
-	const memory = startingMemory(coreDump, library.pages);
+	const dump = coreDump;
+	const module = texModule;
+	if (dump === null || module === null) throw new Error('the engine has not started');
+	const memory = startingMemory(dump, library.pages);
 	const reset = performance.now();
 
 	library.setMemory(memory.buffer);
@@ -402,7 +462,7 @@ const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> =
 	let texDone: number | undefined;
 	let drawing: number | undefined;
 	try {
-		const instance = await WebAssembly.instantiate(texModule, {
+		const instance = await WebAssembly.instantiate(module, {
 			library,
 			env: { memory },
 		});
@@ -658,8 +718,28 @@ declare const self: {
 
 const post = (message: unknown) => self.postMessage(message);
 
+/** The start, once the payload has arrived. */
+let booted: Promise<unknown> | null = null;
+
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 	const request = event.data;
+	if (request.type === 'boot') {
+		if (booted !== null) return;
+		booted = boot(request.assets).then(
+			(timings) => post({ type: 'ready', engineId: ENGINE_ID, inventory: INVENTORY, boot: timings }),
+			(error: unknown) => {
+				// Thrown again outside the promise, so that it reaches the host as the worker's error
+				// event, which is how a start that failed has always been reported (worker-host.ts
+				// `crashed`): a promise that rejects in a worker raises no error event, and the host
+				// would wait for a `ready` that never comes. A payload that does not inflate to what the
+				// build recorded ends here.
+				queueMicrotask(() => {
+					throw error;
+				});
+			},
+		);
+		return;
+	}
 	if (request.type === 'ping') {
 		post({ type: 'ok', id: request.id, svg: '', log: [], missing: [], durationMs: 0 });
 		return;
@@ -678,5 +758,3 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 		});
 	}
 };
-
-post({ type: 'ready', engineId: ENGINE_ID, inventory: INVENTORY });

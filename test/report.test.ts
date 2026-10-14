@@ -32,9 +32,20 @@ function snapshot(over: Partial<DiagnosticsSnapshot> = {}): DiagnosticsSnapshot 
 		engine: {
 			starts: 3,
 			lives: [
-				{ startMs: 230, stop: 'idle' },
-				{ startMs: 214, stop: 'background' },
-				{ startMs: 221, stop: null },
+				{ startMs: 230, boot: null, stop: 'idle' },
+				{ startMs: 214, boot: null, stop: 'background' },
+				{
+					startMs: 221,
+					boot: {
+						decodeMs: 21,
+						inflateMs: 114,
+						compileMs: 3,
+						totalMs: 138,
+						nativeInflate: false,
+						nativeBase64: false,
+					},
+					stop: null,
+				},
 			],
 			lastStop: 'background',
 			poolSize: 1,
@@ -95,7 +106,10 @@ describe('the text the diagnostics view copies', () => {
 		expect(text).toContain('The engine started 3 times this session.');
 		expect(text).toContain('  1. started in 230 ms, stopped after it had nothing to do');
 		expect(text).toContain('  2. started in 214 ms, stopped when the app went to the background');
-		expect(text).toContain('  3. started in 221 ms, running');
+		expect(text).toContain(
+			'  3. started in 221 ms (in the worker 138 ms: decode 21 ms, inflate 114 ms, compile 3 ms; ' +
+				'native gzip no, native base64 no), running',
+		);
 		expect(text).toContain('Last stopped: stopped when the app went to the background.');
 		expect(text).toContain('One engine compiles at a time.');
 	});
@@ -105,7 +119,7 @@ describe('the text the diagnostics view copies', () => {
 			snapshot({
 				engine: {
 					starts: 25,
-					lives: [{ startMs: null, stop: 'error' }],
+					lives: [{ startMs: null, boot: null, stop: 'error' }],
 					lastStop: 'error',
 					poolSize: 2,
 				},

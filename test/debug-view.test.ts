@@ -160,8 +160,19 @@ describe('the engine in the diagnostics view', () => {
 			source([], {
 				starts: 2,
 				lives: [
-					{ startMs: 230, stop: 'background' },
-					{ startMs: 214, stop: null },
+					{ startMs: 230, boot: null, stop: 'background' },
+					{
+						startMs: 86,
+						boot: {
+							decodeMs: 3,
+							inflateMs: 45,
+							compileMs: 0,
+							totalMs: 49,
+							nativeInflate: true,
+							nativeBase64: true,
+						},
+						stop: null,
+					},
 				],
 				lastStop: 'background',
 				poolSize: 2,
@@ -170,7 +181,10 @@ describe('the engine in the diagnostics view', () => {
 		const text = view.contentEl.querySelector('.tikzjax-debug-starts')?.textContent ?? '';
 		expect(text).toContain('The engine started 2 times this session.');
 		expect(text).toContain('started in 230 ms, stopped when the app went to the background');
-		expect(text).toContain('started in 214 ms, running');
+		expect(text).toContain(
+			'started in 86 ms (in the worker 49 ms: decode 3 ms, inflate 45 ms, compile 0 ms; ' +
+				'native gzip yes, native base64 yes), running',
+		);
 		expect(text).toContain('Last stopped: stopped when the app went to the background.');
 		expect(text).toContain('Up to 2 engines compile at once.');
 	});

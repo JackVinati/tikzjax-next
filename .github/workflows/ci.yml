@@ -110,6 +110,11 @@ jobs:
       - name: The shipped worker renders identically
         run: npm run verify:worker
 
+      - name: The shipped worker renders identically without the platform's gzip and base64
+        # As on iOS 14.5 to 16.3: no DecompressionStream, no Uint8Array.fromBase64, so the engine
+        # starts by pako and by the worker's own base64 (internal/DECISIONS.md D30).
+        run: npm run verify:worker -- --legacy
+
       - name: Build
         # The sha256 is printed, not just computed. A release asset has to match what anyone gets by
         # building the same commit — the community store checks exactly that — and this is where a

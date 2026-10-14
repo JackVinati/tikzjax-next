@@ -32,3 +32,57 @@ export function inflateExactly(gz: Uint8Array, size: number): Uint8Array {
 	}
 	return whole;
 }
+
+/** Whether the platform inflates gzip itself: Safari and iOS 16.4, Chrome 80, Node 18. */
+export const hasNativeGunzip = (): boolean => typeof DecompressionStream === 'function';
+
+/**
+ * inflateExactly by the platform's own zlib, DecompressionStream, where there is one, read a chunk at
+ * a time into the one buffer of exactly `size` bytes, so the bytes are never held twice. pako is
+ * zlib written in JavaScript: it took 105 to 114 ms of the desktop's 192 to 205 ms engine start in
+ * WebKit and Chromium, and the platform's takes less than half that (internal/DECISIONS.md D30).
+ *
+ * pako inflates instead where there is no DecompressionStream, iOS before 16.4 above all, and after
+ * any failure of the native attempt, once: a platform that has the API and gets it wrong costs a
+ * start some time, not the engine. A stream that really is wrong then fails in pako too, with the
+ * same checks as before, and the start fails with it.
+ */
+export async function gunzipExactly(
+	gz: Uint8Array,
+	size: number,
+): Promise<{ bytes: Uint8Array; native: boolean }> {
+	if (hasNativeGunzip()) {
+		try {
+			return { bytes: await nativeGunzip(gz, size), native: true };
+		} catch {
+			// pako, below.
+		}
+	}
+	return { bytes: inflateExactly(gz, size), native: false };
+}
+
+async function nativeGunzip(gz: Uint8Array, size: number): Promise<Uint8Array> {
+	const out = new Uint8Array(size);
+	const stream = new DecompressionStream('gzip');
+	const writer = stream.writable.getWriter();
+	// Not awaited: a write settles only as the readable side is drained, below, and a stream that
+	// fails says so there, as a read that rejects.
+	writer.write(gz as Uint8Array<ArrayBuffer>).catch(() => undefined);
+	writer.close().catch(() => undefined);
+	const reader = stream.readable.getReader();
+	let at = 0;
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			if (at + value.length > size) throw new Error(`inflated past ${size} B`);
+			out.set(value, at);
+			at += value.length;
+		}
+	} catch (error) {
+		reader.cancel().catch(() => undefined);
+		throw error;
+	}
+	if (at !== size) throw new Error(`inflated to ${at} B, expected ${size} B`);
+	return out;
+}
