@@ -362,20 +362,24 @@ const storedContent: ContentSources = {
 };
 
 /**
- * A run the host sent with a render (protocol.ts StoredRun), as the worker holds one, or undefined
+ * A run the host sent with a render (protocol.ts StoredRun), as the worker holds one; or 'corrupt'
  * when its bytes do not inflate to what the host said, or do not read back as a run of this
- * engine's (./stored-run): the render then goes on as if none had been sent, and the host deletes it.
- * Gzipped bytes carry a CRC-32 of what they hold, which the platform's inflate and pako both check,
- * so the run's own checksum is checked on bytes kept uncompressed only.
+ * engine's (./stored-run), and the host deletes it; or 'failed' when putting it back failed for want
+ * of memory, a RangeError, which says nothing of the bytes, and the host keeps it. Either way the
+ * render then goes on as if none had been sent. Gzipped bytes carry a CRC-32 of what they hold,
+ * which the platform's inflate and pako both check, so the run's own checksum is checked on bytes
+ * kept uncompressed only.
  */
-const readStored = async (stored: StoredRun): Promise<SavedRun | undefined> => {
+const readStored = async (stored: StoredRun): Promise<SavedRun | 'corrupt' | 'failed'> => {
 	try {
 		const bytes = stored.compressed
 			? (await gunzipExactly(new Uint8Array(stored.data), stored.rawBytes)).bytes
 			: new Uint8Array(stored.data);
 		return decodeSavedRun(bytes, ENGINE_ID, CORE_LAYOUT.globalsEnd, storedContent, !stored.compressed);
-	} catch {
-		return undefined;
+	} catch (error) {
+		// A stream that is wrong fails in the inflate with an Error, and bytes that are wrong in the
+		// decode with a StoredRunError; an array that cannot be allocated is a RangeError.
+		return error instanceof RangeError ? 'failed' : 'corrupt';
 	}
 };
 
@@ -1054,7 +1058,7 @@ async function render(
 			const restoring = performance.now();
 			const run = await readStored(stored);
 			spent.restoreMs = performance.now() - restoring;
-			if (run === undefined) storedOutcome = 'corrupt';
+			if (typeof run === 'string') storedOutcome = run;
 			else if (run.logging !== logging || !text.startsWith(run.prefix)) storedOutcome = 'mismatch';
 			else {
 				storedOutcome = 'used';

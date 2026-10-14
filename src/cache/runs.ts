@@ -266,10 +266,9 @@ export class RunStore {
 			this.errors++;
 			return undefined;
 		}
-		// Not there, or not as long as it was stored: deleted, not sent.
+		// Not there, as when the browser evicted it, or not as long as it was stored: deleted, not sent.
 		if (!(record?.data instanceof ArrayBuffer) || record.data.byteLength !== info.bytes) {
-			if (record !== undefined) this.errors++;
-			await this.forget(route);
+			await (record === undefined ? this.deleteRun(route) : this.forget(route));
 			return undefined;
 		}
 		info.lastUsed = this.options.now();
@@ -401,8 +400,18 @@ export class RunStore {
 		for (const other of evicted) this.index?.delete(other.route);
 	}
 
-	/** Delete the run stored under `route`: its bytes did not read back as a run (engine-src/stored-run.ts). */
+	/**
+	 * Delete the run stored under `route`: its bytes did not read back as a run, here or in the worker
+	 * (engine-src/stored-run.ts). A storage error, which the diagnostics view counts.
+	 */
 	async forget(route: string): Promise<void> {
+		if (this.index?.has(route) !== true) return;
+		this.errors++;
+		await this.deleteRun(route);
+	}
+
+	/** Delete the run stored under `route`. */
+	private async deleteRun(route: string): Promise<void> {
 		const info = this.index?.get(route);
 		if (info === undefined) return;
 		this.index?.delete(route);
@@ -499,6 +508,8 @@ export class RunStore {
 					info.engineId === this.options.engineId &&
 					info.key === this.keyOf(info.route) &&
 					Number.isFinite(info.bytes) &&
+					Number.isInteger(info.rawBytes) &&
+					info.rawBytes > 0 &&
 					Number.isFinite(info.lastUsed)
 				)
 					mine.set(info.route, info);

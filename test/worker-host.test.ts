@@ -1328,6 +1328,22 @@ describe('saved preambles kept across the engines’ stops', () => {
 		expect(runs.forgotten).toEqual([route]);
 	});
 
+	it('send no run again this session that the worker had not the memory to put back', async () => {
+		const runs = new FakeRuns();
+		runs.stored.set(route, storedRun());
+		const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+		send(host, 'a');
+		worker(0).boot();
+		await tick();
+		reply(worker(0), renders(worker(0))[0]!.id, { stored: 'failed' });
+		await tick();
+		expect(runs.forgotten).toEqual([]);
+		send(host, 'b');
+		await tick();
+		expect(runs.reads).toEqual([route]);
+		expect(renders(worker(0))[1]?.stored).toBeUndefined();
+	});
+
 	it('learn what putting a run back took, and say what reading it took', async () => {
 		let now = 0;
 		const runs = new FakeRuns();

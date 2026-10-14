@@ -324,9 +324,11 @@ export interface ErrorMessage {
 /**
  * What became of a run the host sent with a render: the render started from it; the worker held a
  * run for it already; its bytes did not read back as a run of this engine's (./stored-run), which the
- * host then deletes; or it stands for text this diagram does not start with, under the same name.
+ * host then deletes; it stands for text this diagram does not start with, under the same name; or
+ * putting it back failed for want of something other than good bytes, memory above all, as inflating
+ * 8.9 MiB can on a phone, which the host keeps and does not send again that session.
  */
-export type StoredOutcome = 'used' | 'unneeded' | 'corrupt' | 'mismatch';
+export type StoredOutcome = 'used' | 'unneeded' | 'corrupt' | 'mismatch' | 'failed';
 
 export type WorkerResponse = ReadyMessage | LogMessage | OkMessage | ErrorMessage | SavedRunMessage;
 

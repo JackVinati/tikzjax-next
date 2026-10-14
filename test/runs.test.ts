@@ -156,12 +156,38 @@ describe('RunStore — bytes that do not read back', () => {
 		expect(keys('index')).toEqual([]);
 	});
 
-	it('deletes a run the worker could not read back (forget)', async () => {
+	it('deletes a run the worker could not read back (forget), and counts it', async () => {
 		await store.keep(saved('r1', 1000));
 		await store.forget('r1');
 		expect(keys('runs')).toEqual([]);
 		expect(keys('index')).toEqual([]);
-		expect(store.stats().runs).toBe(0);
+		expect(store.stats()).toMatchObject({ runs: 0, errors: 1 });
+		// Once.
+		await store.forget('r1');
+		expect(store.stats().errors).toBe(1);
+	});
+
+	it('counts no error for a run the browser evicted', async () => {
+		await store.keep(saved('r1', 1000));
+		const db = await openDB(DB, 1);
+		await db.delete('runs', 'engine-a/r1');
+		db.close();
+		expect(await store.read('r1')).toBeUndefined();
+		expect(store.stats().errors).toBe(0);
+	});
+
+	it('deletes an index record that does not say how long its run is inflated, unread', async () => {
+		await store.keep(
+			saved('r1', 1000, {
+				run: { route: 'r1', data: new ArrayBuffer(8), compressed: true, rawBytes: -1 },
+			}),
+		);
+		store.close();
+		store = make();
+		await store.load();
+		expect(store.has('r1')).toBe(false);
+		await fake.idle();
+		expect(keys('runs')).toEqual([]);
 	});
 });
 

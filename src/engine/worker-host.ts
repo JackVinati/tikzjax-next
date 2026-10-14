@@ -173,7 +173,7 @@ export interface StoredRuns {
 	/** The run kept under `route`, if one is and it is worth sending; its own copy of the bytes. */
 	read(route: string): Promise<StoredRun | undefined>;
 	keep(message: SavedRunMessage): Promise<void>;
-	/** Delete the run kept under `route`: its bytes did not read back as a run. */
+	/** Delete the run kept under `route`: its bytes did not read back as a run. A storage error. */
 	forget(route: string): Promise<void>;
 	/** What putting a run back took: reading it, and in the worker. */
 	measured(run: { bytes: number; rawBytes: number }, readMs: number, restoreMs: number): void;
@@ -274,6 +274,12 @@ export class WorkerHost implements TexHost {
 	 * not answering, and no other job's run is read until it has (fetchStored).
 	 */
 	private overdueReads = 0;
+	/**
+	 * The stored runs a worker could not put back this session for want of memory (StoredOutcome
+	 * 'failed'): kept for the next session, and not read or sent again in this one, where each try
+	 * would cost the inflate it failed in and then the preamble.
+	 */
+	private readonly unsendable = new Set<string>();
 
 	/** For the diagnostics view: see EngineReport. */
 	private starts = 0;
@@ -854,7 +860,8 @@ export class WorkerHost implements TexHost {
 	private fetchStored(job: Job): void {
 		const runs = this.runs;
 		const route = job.route;
-		if (runs === undefined || !runs.readable || route === undefined || this.overdueReads > 0) return;
+		if (runs === undefined || !runs.readable || route === undefined) return;
+		if (this.overdueReads > 0 || this.unsendable.has(route)) return;
 		const holders = this.engines.filter((engine) => engine.held.has(route));
 		if (holders.some((engine) => engine.up && engine.current === null)) return;
 		if (holders.length > 0 && this.size === 1) return;
@@ -902,8 +909,9 @@ export class WorkerHost implements TexHost {
 	}
 
 	/**
-	 * What became of a stored run sent with a job: deleted when its bytes did not read back, and what
-	 * putting it back took, for the next estimate of whether one is worth sending.
+	 * What became of a stored run sent with a job: deleted when its bytes did not read back, not sent
+	 * again this session when the worker had not the memory to put it back, and what putting it back
+	 * took, for the next estimate of whether one is worth sending.
 	 */
 	private storedOutcome(
 		job: Job,
@@ -913,6 +921,7 @@ export class WorkerHost implements TexHost {
 		const runs = this.runs;
 		if (runs === undefined || job.route === undefined || outcome === undefined) return;
 		if (outcome === 'corrupt') runs.forget(job.route).catch(() => undefined);
+		if (outcome === 'failed') this.unsendable.add(job.route);
 		// A read made while the engine started is not what a read takes: the two shared the processor.
 		if (outcome === 'used' && job.sent !== undefined && timings?.restoreMs !== undefined)
 			runs.measured(
