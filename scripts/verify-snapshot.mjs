@@ -25,7 +25,9 @@
  *    did not have;
  *  - in the worker that ships, run as verify-worker runs it: each body from the start, then saved,
  *    resumed from its own run and resumed from the other body's, every field of every reply the
- *    plugin reads the same as from the start, and each saved or resumed as the case says;
+ *    plugin reads the same as from the start, and each saved or resumed as the case says; once with
+ *    TeX's log kept, the plugin's default, and once without, which a saved run is kept apart by, and
+ *    a run saved with the log kept never starts a diagram without it;
  *  - and in the worker, a save that fails, at its first copy or at its comparison with the dump,
  *    keeps nothing, draws the diagram as from the start, says so, and is counted.
  *
@@ -344,13 +346,13 @@ if (!inbox.some((m) => m.type === 'ready')) {
 	process.exit(1);
 }
 let id = 0;
-const send = (source, options, snapshots) =>
+const send = (source, options, snapshots, captureLog = true) =>
 	new Promise((resolve, reject) => {
 		const request = {
 			type: 'render',
 			id: ++id,
 			source,
-			options: { ...options, captureLog: true },
+			options: { ...options, captureLog },
 			snapshots,
 		};
 		const deadline = Date.now() + 120_000;
@@ -383,48 +385,76 @@ const how = (reply) =>
 
 let workerResumed = 0;
 let workerSaved = 0;
-for (const c of cases) {
-	const [b1, b2] = c.bodies;
-	const o = c.options;
-	const cold1 = await send(b1, o, 0);
-	const cold2 = await send(b2, o, 0);
-	const saved1 = await send(b1, o, BUDGET);
-	const own1 = await send(b1, o, BUDGET);
-	const other2 = await send(b2, o, BUDGET);
-	await send(b2, o, 0);
-	const saved2 = await send(b2, o, BUDGET);
-	const other1 = await send(b1, o, BUDGET);
-	const replies = [
-		['saved', saved1, cold1, 'the first body'],
-		['own', own1, cold1, 'the first body again'],
-		['other', other2, cold2, 'the second body'],
-		['saved', saved2, cold2, 'the second body, after the runs were let go'],
-		['other', other1, cold1, 'the first body again'],
-	];
-	const expectSave = c.save !== false;
-	const shared = expectSave && c.shared !== false;
-	const wrong = [];
-	for (const [role, reply, cold, what] of replies) {
-		if (gist(reply) !== gist(cold)) wrong.push(`${what} (${how(reply)}) is not as from the start`);
-		const want = !expectSave
-			? 'from the start'
-			: role === 'saved'
-				? 'saved'
-				: role === 'own' || shared
-					? 'resumed'
-					: 'saved';
-		if (how(reply) !== want) wrong.push(`${what} was ${how(reply)}, not ${want}`);
-		if (how(reply) === 'resumed') workerResumed++;
-		if (how(reply) === 'saved') workerSaved++;
-		if (reply.timings?.saveFailed) wrong.push(`${what}: a save failed`);
+// The log kept, as the plugin keeps it by default, and not, as the setting can have it.
+for (const logging of [true, false])
+	for (const c of cases) {
+		const [b1, b2] = c.bodies;
+		const o = c.options;
+		const ask = (body, budget) => send(body, o, budget, logging);
+		const cold1 = await ask(b1, 0);
+		const cold2 = await ask(b2, 0);
+		const saved1 = await ask(b1, BUDGET);
+		const own1 = await ask(b1, BUDGET);
+		const other2 = await ask(b2, BUDGET);
+		await ask(b2, 0);
+		const saved2 = await ask(b2, BUDGET);
+		const other1 = await ask(b1, BUDGET);
+		const replies = [
+			['saved', saved1, cold1, 'the first body'],
+			['own', own1, cold1, 'the first body again'],
+			['other', other2, cold2, 'the second body'],
+			['saved', saved2, cold2, 'the second body, after the runs were let go'],
+			['other', other1, cold1, 'the first body again'],
+		];
+		const expectSave = c.save !== false;
+		const shared = expectSave && c.shared !== false;
+		const wrong = [];
+		for (const [role, reply, cold, what] of replies) {
+			if (gist(reply) !== gist(cold)) wrong.push(`${what} (${how(reply)}) is not as from the start`);
+			const want = !expectSave
+				? 'from the start'
+				: role === 'saved'
+					? 'saved'
+					: role === 'own' || shared
+						? 'resumed'
+						: 'saved';
+			if (how(reply) !== want) wrong.push(`${what} was ${how(reply)}, not ${want}`);
+			if (how(reply) === 'resumed') workerResumed++;
+			if (how(reply) === 'saved') workerSaved++;
+			if (reply.timings?.saveFailed) wrong.push(`${what}: a save failed`);
+		}
+		// The host sends a diagram to the worker that holds the name of its run (engine-src/document.ts).
+		const route = lib.routeOf(lib.buildInput(b1, { ...o, captureLog: logging }).text, logging);
+		if (expectSave && !saved1.snapshots?.held.includes(route))
+			wrong.push('the worker does not hold the run under the name the host gives it');
+		if (!expectSave && (saved1.snapshots?.held.length ?? 0) > 0) wrong.push('the worker holds a run');
+		const where = logging ? 'worker ' : 'worker, log off,';
+		if (wrong.length) fail(`${where} ${c.name}: ${wrong.join('; ')}`);
+		else pass(`${where} ${c.name}: ${replies.map(([, reply]) => how(reply)).join(', ')}`);
 	}
-	// The host sends a diagram to the worker that holds the name of its run (engine-src/document.ts).
-	const route = lib.routeOf(lib.buildInput(b1, { ...o, captureLog: true }).text, true);
-	if (expectSave && !saved1.snapshots?.held.includes(route))
-		wrong.push('the worker does not hold the run under the name the host gives it');
-	if (!expectSave && (saved1.snapshots?.held.length ?? 0) > 0) wrong.push('the worker holds a run');
-	if (wrong.length) fail(`worker  ${c.name}: ${wrong.join('; ')}`);
-	else pass(`worker  ${c.name}: ${replies.map(([, reply]) => how(reply)).join(', ')}`);
+
+// A run saved with the log kept says again what TeX had said by then, which a diagram drawn without
+// the log never says: it saves a run of its own, and resumes from that.
+{
+	const basic = fixtures.find((c) => c.name === 'basic');
+	const [body] = basic.bodies;
+	const cold = await send(body, basic.options, 0, false);
+	const withLog = await send(body, basic.options, BUDGET, true);
+	const without = await send(body, basic.options, BUDGET, false);
+	const again = await send(body, basic.options, BUDGET, false);
+	if (
+		how(withLog) === 'saved' &&
+		how(without) === 'saved' &&
+		how(again) === 'resumed' &&
+		gist(without) === gist(cold) &&
+		gist(again) === gist(cold) &&
+		again.log.length === 0
+	)
+		pass('a run saved with the log kept starts no diagram drawn without it');
+	else
+		fail(
+			`a run saved with the log kept, then the same diagram without: ${how(withLog)}, ${how(without)}, ${how(again)}`,
+		);
 }
 
 // A save that fails, at its first copy or at its comparison with the dump: nothing is kept, the
