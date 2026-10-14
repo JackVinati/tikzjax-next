@@ -16,8 +16,9 @@
  * character in a Computer Modern face the plugin ships. A codepoint from U+0080 up that is not
  * listed is not native on that engine. ASCII is TeX's own and is not listed at all.
  *
- * It imports nothing, and must not: the pre-flight lint reads it on the main thread and the engine
- * worker may bundle it too, and neither should pull the other in with it.
+ * It imports nothing, and must not: the engine worker bundles it for its Unicode bridge
+ * (engine-src/unicode.ts), which draws every character not listed here, and should pull nothing
+ * else in with it.
  */
 
 /** Native codepoints as inclusive [first, last] runs, ascending and non-overlapping. */

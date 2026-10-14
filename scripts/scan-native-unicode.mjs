@@ -10,7 +10,9 @@
  * engine prints them all as garbage. It does not: the format's LaTeX reads UTF-8 by default and
  * builds a great many characters out of OT1 glyphs and accents — Dvořák, Erdős, İstanbul, the
  * curly quotes and dashes iOS types on its own, the ﬁ ligature. So the warning sat under diagrams
- * that rendered perfectly, and on a phone it sat under nearly all of them.
+ * that rendered perfectly, and on a phone it sat under nearly all of them. Since 0.2.1 there is no
+ * warning at all: the worker draws every character that is not native over a box TeX sets for it
+ * (engine-src/unicode.ts), and this list is what tells it which ones to leave to TeX.
  *
  * Which characters work is a property of the engine BUILD — of the LaTeX kernel frozen into
  * core.dump, of the fonts dvi2html can draw — not something to write down from memory. A list
@@ -65,7 +67,7 @@ if (!engineIsBuilt(root)) {
  * checks the declaration census below: if one of them ever came out native, the census would be
  * missing characters, and the scan stops rather than trust it. Latin-1 is probed like the rest,
  * because it is not all native either (° compiles into a TS1 font dvi2html cannot draw), and the
- * lint and a consumer deciding what to substitute both need to know which of it is.
+ * Unicode bridge, which draws what is not native, needs to know which of it is.
  */
 const RANGES = [
 	[0x00a0, 0x00ff, 'Latin-1 Supplement'],
@@ -445,8 +447,9 @@ function renderModule(engineId) {
  * character in a Computer Modern face the plugin ships. A codepoint from U+0080 up that is not
  * listed is not native on that engine. ASCII is TeX's own and is not listed at all.
  *
- * It imports nothing, and must not: the pre-flight lint reads it on the main thread and the engine
- * worker may bundle it too, and neither should pull the other in with it.
+ * It imports nothing, and must not: the engine worker bundles it for its Unicode bridge
+ * (engine-src/unicode.ts), which draws every character not listed here, and should pull nothing
+ * else in with it.
  */
 
 /** Native codepoints as inclusive [first, last] runs, ascending and non-overlapping. */

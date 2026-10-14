@@ -69,17 +69,16 @@ describe('preflight', () => {
 \\usepackage{siunitx}
 \\usetikzlibrary{arrows.meta}
 \\pgfplotsset{compat=1.18}
-\\pgfmathsetmacro{\\epsilon}{0.2}
-\\node (ζ) {label};`;
+\\pgfmathsetmacro{\\epsilon}{0.2}`;
 		const found = preflight(source, baked(), caps());
 
-		expect(found.length).toBe(6);
+		expect(found.length).toBe(5);
 		for (const d of found) {
 			expect(d.kind).toBe('warning');
 			expect(d.hint).toBeTruthy();
 		}
 		// Sorted by position, so the strip reads in source order rather than rule order.
-		expect(found.map((d) => d.line)).toEqual([1, 2, 3, 4, 5, 6]);
+		expect(found.map((d) => d.line)).toEqual([1, 2, 3, 4, 5]);
 	});
 
 	it('counts lines the same way in a CRLF vault, where a comment ends at the \\r', () => {
@@ -300,72 +299,20 @@ describe('preflight', () => {
 		});
 	});
 
-	describe('Unicode outside bridged label text (#19 #36 #53)', () => {
-		it.each(['开始', 'Привет', 'Ωμέγα', '😀', 'Müller Ärger', '45° and 2×3', 'Dvořák it’s 2010–2020'])(
-			'accepts the label %s without an encoding warning',
-			(label) => {
-				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
-			},
-		);
-
+	describe('characters beyond ASCII (#19 #36 #53)', () => {
+		// The engine typesets what scan:native measured native, the TS1 shim draws its symbols, the
+		// Unicode bridge draws every other character in a label, and since 0.2.0 a name in any script
+		// works: in a picture, cases like these draw through the worker with no TeX error (D20).
 		it.each([
-			String.raw`\node (开始) {中文};`,
-			String.raw`\coordinate (开始) at (0,0);`,
-			String.raw`\draw (开始) -- (end);`,
-			String.raw`\node[开始=red] {中文};`,
-			String.raw`\node[name=开始] {中文};`,
-			String.raw`\node[alias=开始] {中文};`,
-			String.raw`\node[at={(开始)}] {中文};`,
-			String.raw`\node[below=of 开始] {中文};`,
-			String.raw`\node[fit={(开始) (end)}] {中文};`,
-			String.raw`\label{开始}\ref{开始}`,
-			String.raw`\detokenize{foo{开始}}`,
-			String.raw`\verb|开始|`,
-			String.raw`\verb*+开始+`,
-			String.raw`\def\开始{x}`,
-		])('warns about unsupported syntax in %s', (text) => {
-			const found = preflight(text, baked(), caps());
-			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain('U+5F00');
-			expect(found[0]?.hint).toContain('ASCII');
-		});
-
-		it('reports the structural position rather than earlier bridged labels', () => {
-			const found = preflight('\\node {开始};\n\\node (开始) {Ω and →};', baked(), caps());
-			expect(found).toHaveLength(1);
-			expect(found[0]?.line).toBe(2);
-			expect(found[0]?.message).not.toContain('U+03A9');
-			expect(found[0]?.message).not.toContain('U+2192');
-		});
-
-		it('counts astral characters once and limits the list of offenders', () => {
-			const found = preflight('\\node (😀开始结束甲乙) {};', baked(), caps());
-			expect(found[0]?.message).toContain('U+1F600');
-			expect(found[0]?.message).not.toContain('U+D83D');
-			expect(found[0]?.message).toContain('and 2 more');
-		});
-
-		it('ignores comments and Unicode in option values, quoted labels and label parentheses', () => {
-			const text =
-				'% \\node (开始) {};\n' +
-				'\\node[draw,label={中文},text=red] {开始 (结束) \\%中文}; \\arrow["中文"];';
+			String.raw`\node {开始 Привет Ωμέγα مرحبا 😀 ¥5 ‰};`,
+			String.raw`\node {Dvořák it’s 2010–2020, Müller, Łódź, 45° 3×4 £5 €5};`,
+			String.raw`\node (开始) {中文}; \draw (开始.east) -- (1,1);`,
+			String.raw`\coordinate (中点) at (0,0); \node[below=of 中点, name=Ωμέγα] {a};`,
+			String.raw`\tikzset{强调/.style={draw}} \colorlet{深红}{red} \node[强调, text=深红] {a};`,
+			String.raw`\label{开始}\ref{开始} \csname 开始\endcsname \def\开始{x}`,
+			String.raw`\node {\verb|开始|};`,
+		])('says nothing about %s', (text) => {
 			expect(preflight(text, baked(), caps())).toEqual([]);
-		});
-
-		it('checks nested style keys without warning about nested label values', () => {
-			const found = preflight('\\tikzset{foo/.style={draw,开始=red,label={中文}}}', baked(), caps());
-			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain('U+5F00');
-			expect(found[0]?.message).not.toContain('U+4E2D');
-			expect(preflight('\\tikzset{foo/.style={draw,label={中文}}}', baked(), caps())).toEqual([]);
-		});
-
-		it('retains the measured distinction for Latin-1 and native punctuation', () => {
-			expect(preflight('\\node (café) {中文};', baked(), caps())).toEqual([]);
-			const found = preflight('\\node (Müller ¥5) {45°};', baked(), caps());
-			expect(found[0]?.message).toContain('U+00A5');
-			expect(found[0]?.message).not.toContain('U+00FC');
-			expect(found[0]?.message).not.toContain('U+00B0');
 		});
 	});
 

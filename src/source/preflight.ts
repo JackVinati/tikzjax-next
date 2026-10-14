@@ -1,6 +1,4 @@
 import type { BakedOptions, Diagnostic, EngineCapabilities } from '../types';
-import { isTs1Symbol } from '../../engine-src/ts1-shim';
-import { isNativeUnicode } from './native-unicode';
 
 /**
  * Pre-flight source lint. See internal/DESIGN.md §7.6.
@@ -13,9 +11,7 @@ import { isNativeUnicode } from './native-unicode';
  *
  * Pure by construction: no DOM, no clock, no engine. Everything it knows about the engine arrives
  * in `caps`, which is generated from the built image (protocol.ts `EngineInventory`) rather than
- * hand-maintained, so the hints stay true across an engine bump instead of rotting into lies. The
- * one exception is which characters the engine can typeset, and it is generated too: measured from
- * the committed engine into ./native-unicode, which CI checks against that engine.
+ * hand-maintained, so the hints stay true across an engine bump instead of rotting into lies.
  *
  * Every Diagnostic is `kind: 'warning'`. Pre-flight NEVER blocks a render: the file list is an
  * inventory of what the virtual filesystem can serve, not a proof of what TeX will need — a
@@ -45,7 +41,6 @@ export function preflight(source: string, baked: BakedOptions, caps: EngineCapab
 		checkPgfplotsCompat(text, caps, out);
 	}
 
-	checkEncoding(text, out);
 	checkRedefinitions(text, out);
 
 	// Sorted by position so the warning strip reads in source order regardless of rule order.
@@ -309,157 +304,12 @@ function compareVersions(a: string, b: string): number {
 }
 
 // -------------------------------------------------------------------------------------------
-// Rule 5 — characters the engine cannot typeset. Upstream #19, #36, #53.
-
-/** Enough to identify the characters without turning the warning strip into a hex dump. */
-const MAX_REPORTED_CHARS = 5;
-
-/**
- * The worker bridges non-native label text. Warn only in structural positions where substituting
- * an SVG text marker cannot help. The native set is still measured, including Latin-1: neither a
- * font fallback nor inputenc makes a non-native character usable as a TeX identifier.
- */
-function checkEncoding(text: string, out: Diagnostic[]): void {
-	const offenders = new Map<string, number>();
-	const structural = structuralUnicodePositions(text);
-
-	let i = 0;
-	for (const ch of text) {
-		// `for..of` iterates codepoints, so an astral character is one entry rather than two
-		// surrogate halves — otherwise the report would name characters that do not exist.
-		const cp = ch.codePointAt(0) ?? 0;
-		if (structural[i] && cp > 0x7f && !isNativeUnicode(cp) && !isTs1Symbol(cp) && !offenders.has(ch))
-			offenders.set(ch, i);
-		i += ch.length;
-	}
-	if (offenders.size === 0) return;
-
-	const listed = [...offenders.keys()]
-		.slice(0, MAX_REPORTED_CHARS)
-		.map((ch) => `'${ch}' (${codepoint(ch)})`);
-	const rest = offenders.size - listed.length;
-	const first = [...offenders.values()][0] ?? 0;
-
-	out.push({
-		kind: 'warning',
-		message: `Unicode outside supported label text: ${listed.join(', ')}${rest > 0 ? ` and ${rest} more` : ''}.`,
-		line: lineOf(text, first),
-		hint:
-			'The Unicode bridge handles literal label text, not node or coordinate names, option keys, ' +
-			'\\label/\\ref identifiers, \\verb/\\detokenize arguments or macro names. ' +
-			'Use ASCII in these positions and put Unicode in the displayed label.',
-	});
-}
-
-/** Mark syntax, retaining offsets for line diagnostics; this is a lint, not a TeX parser. */
-function structuralUnicodePositions(text: string): Uint8Array {
-	const marked = new Uint8Array(text.length);
-	const mark = (start: number, end: number) => marked.fill(1, start, end);
-
-	// An odd number of backslashes introduces a command; even ones introduce a line break.
-	for (const m of text.matchAll(/\\+[A-Za-z@\u0080-\u{10FFFF}]+/gu)) {
-		const slashes = /^\\+/.exec(m[0])?.[0].length ?? 0;
-		if (slashes % 2 === 0) continue;
-		mark(m.index, m.index + m[0].length);
-	}
-	for (const m of text.matchAll(/\\(?:label|ref|pageref|eqref|autoref|detokenize)\s*\{/g)) {
-		if (isEscaped(text, m.index)) continue;
-		let end = m.index + m[0].length;
-		let depth = 1;
-		while (end < text.length && depth > 0) {
-			if (!isEscaped(text, end)) {
-				if (text[end] === '{') depth++;
-				if (text[end] === '}') depth--;
-			}
-			end++;
-		}
-		mark(m.index, end);
-	}
-	for (const m of text.matchAll(/\\verb\*?([^A-Za-z\s])/g)) {
-		if (isEscaped(text, m.index)) continue;
-		const start = m.index + m[0].length;
-		const end = text.indexOf(m[1] ?? '', start);
-		mark(start, end === -1 ? text.length : end);
-	}
-
-	// Node names and path coordinates occur outside label braces. In option lists only keys (and
-	// node-reference values) are structural; label values and tikz-cd's quoted labels remain text.
-	let braces = 0;
-	let coordinate = -1;
-	const keyLists = new Set<number>();
-	for (const m of text.matchAll(/\\(?:tikzset|pgfkeys|pgfplotsset)\s*\{/g)) {
-		if (!isEscaped(text, m.index)) keyLists.add(m.index + m[0].length - 1);
-	}
-	const options: Array<{ start: number; keyEnd: number; depth: number; close: string; quoted: boolean }> =
-		[];
-	const markOption = (end: number) => {
-		const option = options[options.length - 1];
-		if (option === undefined || text.slice(option.start, end).trimStart().startsWith('"')) return;
-		mark(option.start, option.keyEnd < 0 ? end : option.keyEnd);
-		if (option.keyEnd < 0) return;
-		const key = text.slice(option.start, option.keyEnd).trim();
-		if (/^(?:name|alias|at|fit)$/.test(key)) mark(option.keyEnd + 1, end);
-		else if (/^(?:above|below|left|right)(?: (?:left|right))?$/.test(key)) {
-			const reference = /\bof\s+/.exec(text.slice(option.keyEnd + 1, end));
-			if (reference) mark(option.keyEnd + 1 + reference.index + reference[0].length, end);
-		}
-	};
-	for (let i = 0; i < text.length; i++) {
-		if (isEscaped(text, i)) continue;
-		const ch = text[i];
-		const option = options[options.length - 1];
-		if (option !== undefined && braces === option.depth && ch === '"') option.quoted = !option.quoted;
-		if (option?.quoted) continue;
-		if (ch === '{') {
-			const style =
-				option !== undefined &&
-				option.keyEnd >= 0 &&
-				/\/\.(?:style|append style|prefix style)\s*$/.test(text.slice(option.start, option.keyEnd));
-			braces++;
-			if (keyLists.has(i) || style)
-				options.push({ start: i + 1, keyEnd: -1, depth: braces, close: '}', quoted: false });
-			continue;
-		}
-		if (ch === '}') {
-			if (option?.close === '}' && braces === option.depth) {
-				markOption(i);
-				options.pop();
-			}
-			braces = Math.max(0, braces - 1);
-			continue;
-		}
-		if (option !== undefined && braces === option.depth) {
-			if (ch === '=' && option.keyEnd < 0) option.keyEnd = i;
-			else if (ch === ',' || ch === option.close) {
-				markOption(i);
-				if (ch === option.close) options.pop();
-				else {
-					option.start = i + 1;
-					option.keyEnd = -1;
-				}
-			}
-		}
-		if (braces > 0) continue;
-		if (ch === '(') coordinate = i + 1;
-		else if (ch === ')' && coordinate >= 0) {
-			mark(coordinate, i);
-			coordinate = -1;
-		} else if (ch === '[') {
-			options.push({ start: i + 1, keyEnd: -1, depth: braces, close: ']', quoted: false });
-		}
-	}
-	return marked;
-}
-
-function isEscaped(source: string, at: number): boolean {
-	let slashes = 0;
-	for (let i = at - 1; i >= 0 && source[i] === '\\'; i--) slashes++;
-	return slashes % 2 === 1;
-}
-
-function codepoint(ch: string): string {
-	return `U+${(ch.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}`;
-}
+// Rule 5, characters the engine cannot typeset (upstream #19, #36, #53), is gone. The engine
+// typesets what scan:native measured native, engine-src/ts1-shim.ts draws its symbols, and
+// engine-src/unicode.ts draws every other character in a label over a box TeX sets for it; and
+// since 0.2.0's \ifincsname a name in any script works (internal/DECISIONS.md D20). There is no
+// character left to warn about truthfully: the last version of the rule warned about names, which
+// 0.2.0 draws, and before that about labels, which the bridge now draws.
 
 // -------------------------------------------------------------------------------------------
 // Rule 6 — redefining a TeX or TikZ built-in. Upstream #96.

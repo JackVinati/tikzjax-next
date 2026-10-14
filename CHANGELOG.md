@@ -16,6 +16,9 @@ top of its notes on GitHub, and will not publish a version that has none.
 - After updating, every cached diagram is compiled once more, the next time it is shown: the
   engine's id is part of the cache key, and the change above moved it. A diagram with none of
   these characters in its text comes out the same, byte for byte.
+- Pre-flight no longer warns about characters the engine cannot typeset, in a label or in a name:
+  the engine, its stand-ins for `°` `×` `£` `€` and the rest, or the sans-serif text above now draw
+  every one of them, and names in any script work since 0.2.0.
 
 ## 0.2.0 — 2026-10-13
 

@@ -23,8 +23,8 @@
  * text and in math. The ts1-symbols, ts1-currency, ts1-small-caps and siunitx fixtures keep it
  * that way.
  *
- * It imports nothing. The pre-flight lint reads the same table on the main thread, so that it does
- * not warn about a character the worker will draw.
+ * It imports nothing. The Unicode bridge (./unicode) reads the same table, so that it leaves to the
+ * shim what the shim draws.
  */
 
 /** One TS1 text command, the character LaTeX's UTF-8 input maps to it, and what it becomes. */
