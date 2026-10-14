@@ -285,13 +285,52 @@ if (names.includes('broken')) {
 }
 
 // --- deeper than the engine's stack ---------------------------------------------------------------
-// Twenty thousand nested \number: each one's scan_int expands the next, a few calls deeper in the
-// engine every time, and the worker's stack runs out long before any limit of TeX's own, so TeX says
-// nothing. Not a fixture, because what it shows is the stack of the JavaScript engine running it, and
-// smoke and verify-golden run TeX outside the worker. The reply has to say TeX ran out of room, not
-// that it produced nothing, and the same worker has to draw `basic` afterwards.
+// N nested \number: each one's scan_int expands the next, a few calls deeper in the engine every
+// time, and the worker's stack runs out long before any limit of TeX's own, so TeX says nothing. Not
+// a fixture, because what it shows is the stack of the JavaScript engine running it, and smoke and
+// verify-golden run TeX outside the worker.
+const nested = (n) =>
+	`\\edef\\y{${'\\number'.repeat(n)}7}\n\\begin{tikzpicture}\n\\node {\\y};\n\\end{tikzpicture}`;
+
+// How deep that can go is the engine's to keep. Holding TeX's locals in WebAssembly locals took some
+// of it for speed (internal/DECISIONS.md D27): in a Chromium worker the deepest \number that renders
+// went from 2,344 to 1,622. STACK_FLOOR holds what is left, here on Node's main thread, where this
+// engine reaches 3,132 to 3,196 in Node 22, 24 and 26; 2,900 stands for about 1,500 in Chromium at
+// the ratio measured for it. A change to the code generator or to the build that makes the engine's
+// frames bigger fails here, and the depth is printed either way, so a smaller loss shows in the log.
+const STACK_FLOOR = 2900;
 {
-	const deep = `\\edef\\y{${'\\number'.repeat(20_000)}7}\n\\begin{tikzpicture}\n\\node {\\y};\n\\end{tikzpicture}`;
+	const renders = async (n) => {
+		const reply = await send({
+			type: 'render',
+			id: ++id,
+			source: nested(n),
+			options: { captureLog: true },
+		}).catch((error) => ({ type: 'none', message: error.message }));
+		return reply.type === 'ok' && reply.svg.includes('<svg');
+	};
+	let deepest = (await renders(STACK_FLOOR)) ? STACK_FLOOR : 0;
+	if (deepest) {
+		// Bisected, between the floor and the twenty thousand below that must not render.
+		let fails = 20_000;
+		while (fails - deepest > 1) {
+			const mid = (deepest + fails) >> 1;
+			if (await renders(mid)) deepest = mid;
+			else fails = mid;
+		}
+	}
+	const ok = deepest >= STACK_FLOOR;
+	if (!ok) failures++;
+	console.log(
+		`${ok ? '\x1b[32mOK  \x1b[0m' : '\x1b[31mFAIL\x1b[0m'}  ${STACK_FLOOR} nested \\number render, the floor: ` +
+			`${ok ? `the deepest that renders is ${deepest}` : 'it does not'}`,
+	);
+}
+
+// Twenty thousand: the reply has to say TeX ran out of room, not that it produced nothing, and the
+// same worker has to draw `basic` afterwards.
+{
+	const deep = nested(20_000);
 	const reply = await send({ type: 'render', id: ++id, source: deep, options: { captureLog: true } }).catch(
 		(error) => ({ type: 'none', message: error.message }),
 	);

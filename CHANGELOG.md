@@ -59,6 +59,13 @@ top of its notes on GitHub, and will not publish a version that has none.
   and optimised with a newer binaryen; the plugin's `main.js` is 83 KB smaller. Every diagram draws
   as before, byte for byte, so none is compiled again for this. Nothing has been measured on a phone
   yet.
+- The faster engine leaves TeX less room to nest in Obsidian on a computer. Measured in Chromium on
+  the same desktop, 1,622 `\number` nested inside each other still draw, where 2,344 did; in WebKit
+  nothing changed, at 21,280. Android runs the same JavaScript engine as the desktop app and has not
+  been measured. Something nested deeper fails with "TeX nested deeper than the engine's stack
+  allows.", as it did past the old limit. The deepest real diagrams tried draw as before, a `forest`
+  tree 80 levels deep, 4,000 groups inside each other and a plot of 2,000 coordinates among them,
+  and those three are now among the diagrams every release is tested with.
 
 ## 0.2.0 — 2026-10-13
 

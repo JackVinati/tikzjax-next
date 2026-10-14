@@ -1630,9 +1630,8 @@ construction, bisected to one level in the shipped worker: in a Chromium worker 
 Node 22.19's main thread 3,798 → 3,132 (Node 24.21 4,615 → 3,194, Node 26.11 4,612 → 3,196). In a
 WebKit worker it stays at 21,281 → 21,280: both engines stop within one level of each other there,
 so what bounds it is not the size of the engine's frames, and JavaScriptCore loses nothing; an
-iPhone's limit has not been measured. A diagram nested past
-the limit fails as it did past the old one, with "TeX nested deeper than the engine's stack
-allows.".
+iPhone's limit has not been measured. A diagram nested past the limit fails as it did past the old
+one, with "TeX nested deeper than the engine's stack allows."; D28 weighs what to do about it.
 
 **The build.** Two builds of this source from a new image gave the same bytes, and the same as the
 build the study measured. The Engine workflow rebuilds and diffs `engine-build/out` as before.
@@ -1648,7 +1647,70 @@ that fits the array it counts, which an offset wrong by one variable does not gi
 covers the file.
 
 When web2js moves, the sums stop the build: port its change into our three files, update the sums,
-and hold the result to the golden corpus and to `verify:worker`.
+and hold the result to the golden corpus and to `verify:worker`, whose floor (D28) is the check on
+how deep TeX can still nest.
+
+---
+
+## D28 — How deep TeX can nest is held to a floor, and three deep inputs are fixtures
+
+**Follows D27, which lowered the nesting the engine's stack allows in V8, and amends D17, which
+measured that limit and left it unguarded. Date of record: 2026-10-14.**
+
+Each level of an expansion, or of a box inside a box, is a few calls deeper in the engine, and the
+JavaScript engine's stack gives out long before any limit of TeX's own (D17). D27 holds TeX's locals
+in WebAssembly locals, which takes more of that stack per call in V8: the deepest nesting of
+`\number` that renders, verify-worker's construction, went from 2,344 to 1,622 in a Chromium worker,
+and from 3,798 to 3,132 on Node 22.19's main thread. In a WebKit worker it did not move (21,281 →
+21,280). Obsidian's desktop app runs V8, and so does Android, which has not been measured.
+
+**What real input needs.** Fifteen deep or large inputs, rendered once each in a Chromium worker and
+in a WebKit worker, by 0.2.1-beta.1's worker and by D27's, on the desktop of D27 (the 0.2.x review
+chose them): `forest` trees 20, 40 and 80 levels deep, TikZ `child` chains as deep, 200, 1,000 and
+4,000 nested brace groups, 50 and 200 nested scopes, pgfplots plots of 500 and 2,000 coordinates,
+and `\foreach` over 500 and 2,000 items. All of them render in both browsers with both engines, and
+each draws the same SVG, length and hash, with either engine.
+
+**The alternative, measured.** The procedures nested `\number` recurses through, `expand`,
+`macro_call`, `scan_int`, `get_x_token`, `conv_toks` and `x_token`, can keep their locals in memory
+while every other procedure keeps D27's. Built that way, in the same campaign as D27's figures
+(seven paired rounds, 37 fixtures, sum of each fixture's minimum):
+
+| | D27's engine | expansion's locals in memory |
+|---|---:|---:|
+| deepest `\number`, Chromium 153 worker | 1,622 | 2,040 |
+| deepest `\number`, Node 22.19 / 24.21 / 26.11 main thread | 3,132 / 3,194 / 3,196 | 3,685 / 4,016 / 4,019 |
+| deepest `\number`, WebKit 26.6 worker | 21,280 | 21,280 |
+| TeX time, WebKit 26.6 | 2,837 ms | 2,978 ms (+5.0%) |
+| TeX time, Chromium 153 | 1,893 ms | 1,958 ms (+3.4%) |
+| TeX time, Node 22.19 | 2,301 ms | 2,345 ms (+1.9%) |
+| `main.js` | 12,174,339 B | 12,237,939 B |
+
+It is not taken. It gives back 418 of the 722 levels Chromium lost, for this one path through TeX
+only, and costs JavaScriptCore, the engine of the iPhone this work is for, 5% of TeX's time, where
+WebKit's limit did not move at all. No realistic input was found that needs the levels. The core
+dump also grows by 47,799 B gzipped, from the frames those procedures leave on the shadow stack
+while the format is built.
+
+**The floor.** `verify:worker` now requires 2,900 nested `\number` to render in the shipped worker,
+on Node's main thread where it runs, and prints the deepest that does, bisected up to the 20,000
+that must still fail as a capacity error. D27's engine reaches 3,132, 3,194 and 3,196 there in Node
+22.19, 24.21 and 26.11, the same after the fixtures have warmed it as before; 0.2.1-beta.1's
+reached 3,798, 4,615 and 4,612. At this engine's ratio between Chromium and Node, 2,900 stands for
+about 1,500 in a Chromium worker, the floor the review asked for. The ratio is not a constant, 0.62
+for the old engine and 0.52 for this one in Node 22.19, so the browser's figure has to be measured
+again when the code generator changes. A change that takes more of the stack than the floor allows
+fails `verify:worker`, in CI and in the Engine workflow, and a smaller one shows in its log. Set to
+3,300, above what the engine reaches, the check fails, as it should.
+
+**Three of the inputs are fixtures.** `stress-forest-depth` (80 levels), `stress-nested-groups`
+(4,000) and `stress-plot-coordinates` (2,000 coordinates, drawn as one path without marks, so that
+its golden SVG is 47,702 B; the review's plot, with marks, drew 616,245) are in the golden corpus,
+recorded from D27's engine. 0.2.1-beta.1's engine gives the same DVI, transcript and SVG for each.
+smoke, `verify:golden` and `verify:worker` run them like any fixture.
+
+How deep an iPhone's worker lets TeX go is not known: WebKit on Windows stops both engines at the
+same depth, and says nothing about a phone's stack. `TODO.md` has the note to read it with.
 
 ---
 

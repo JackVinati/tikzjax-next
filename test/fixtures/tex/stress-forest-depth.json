@@ -1,0 +1,8 @@
+{
+  "dataset": {
+    "texPackages": {
+      "forest": ""
+    }
+  },
+  "note": "A tree 80 levels deep: each level is a few calls deeper in the engine while forest walks it. One of three deep inputs kept when the engine was rebuilt with less room on its stack in Chromium (internal/DECISIONS.md D27); it drew there with room to spare."
+}

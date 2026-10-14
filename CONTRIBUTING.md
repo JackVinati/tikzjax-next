@@ -127,7 +127,9 @@ web2js compiles TeX to WebAssembly with three of its compiler's files replaced b
 instead of in memory (`internal/DECISIONS.md` D27). The build checks each of web2js's files against
 the sha256 of the one ours was written against, and stops if one has moved: moving the web2js pin
 means carrying its change into ours and updating the sum. binaryen 132's `wasm-opt` then optimises
-the engine.
+the engine. Values in WebAssembly locals take room on the JavaScript engine's own stack, which bounds
+how deep TeX can nest, so `verify:worker` requires a floor of nested `\number` to render and prints
+how deep they go (D28).
 
 Building the image is the only step that touches the network: it pins the upstream sources by commit
 (`engine-build/pins.env`), the font archive by SHA-256 and binaryen by the integrity npm publishes

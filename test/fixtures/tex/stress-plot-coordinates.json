@@ -1,0 +1,9 @@
+{
+  "dataset": {
+    "texPackages": {
+      "pgfplots": ""
+    },
+    "addToPreamble": "\\pgfplotsset{compat=1.16}"
+  },
+  "note": "A plot of 2,000 coordinates, drawn as one path without marks so that the recorded SVG stays small. One of three large inputs kept when the engine was rebuilt (internal/DECISIONS.md D27)."
+}

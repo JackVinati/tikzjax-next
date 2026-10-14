@@ -1,0 +1,20 @@
+This is e-TeX, Version 3.141592653-2.6 (preloaded format=latex 2026.1.1)
+**entering extended mode
+(input.tex
+LaTeX2e <2023-11-01> patch level 1
+L3 programming layer <2024-01-22>
+("forest.sty" (tikzlibraryshapes.code.tex (tikzlibraryshapes.geometric.code.tex
+(pgflibraryshapes.geometric.code.tex)) (tikzlibraryshapes.misc.code.tex
+(pgflibraryshapes.misc.code.tex)) (tikzlibraryshapes.symbols.code.tex
+(pgflibraryshapes.symbols.code.tex)) (tikzlibraryshapes.arrows.code.tex
+(pgflibraryshapes.arrows.code.tex)) (tikzlibraryshapes.callouts.code.tex
+(pgflibraryshapes.callouts.code.tex)) (tikzlibraryshapes.multipart.code.tex
+(pgflibraryshapes.multipart.code.tex))) (tikzlibraryfit.code.tex)
+(tikzlibrarycalc.code.tex) (pgflibraryintersections.code.tex
+(pgflibraryfpu.code.tex)) ("pgfopts.sty") ("etoolbox.sty") ("elocalloc.sty")
+("environ.sty" ("trimspaces.sty")) ("xparse.sty" ("expl3.sty"
+("l3backend-dvips.def"))) ("inlinedef.sty"))
+No file input.aux.
+[1] (input.aux) )
+Output written on input.dvi (1 page, 72504 bytes).
+Transcript written on input.log.
