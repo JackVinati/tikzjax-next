@@ -379,6 +379,11 @@ export class SnapshotCache {
 		}
 	}
 
+	/** Whether `run` itself is one of those held. */
+	holds(run: SavedRun): boolean {
+		return this.entries.get(SnapshotCache.keyOf(run.prefix, run.logging))?.run === run;
+	}
+
 	/** The route of each run held, for the host to send diagrams by. */
 	routes(): string[] {
 		return [...this.entries.values()].map((entry) => entry.run.route);

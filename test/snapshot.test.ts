@@ -267,6 +267,20 @@ describe('the saved runs a worker keeps', () => {
 		expect(cache.set(run('big\n', 31))).toBe(false);
 	});
 
+	it('say whether a run itself is still held, for the runs waiting to be handed over', () => {
+		const cache = new SnapshotCache(20);
+		const a = run('a\n', 10);
+		const b = run('b\n', 10);
+		cache.set(a);
+		cache.set(b);
+		expect(cache.holds(a)).toBe(true);
+		// The same text saved again is another run.
+		expect(cache.holds(run('a\n', 10))).toBe(false);
+		cache.set(run('c\n', 10));
+		expect(cache.holds(a)).toBe(false);
+		expect(cache.holds(b)).toBe(true);
+	});
+
 	it('keep the runs resumed from lately when they are full, and save again once one has been idle', () => {
 		// Two diagrams of each preamble in turn, as a note of diagrams that share theirs draws.
 		const cache = new SnapshotCache(30);

@@ -488,15 +488,27 @@ const toHandOver: { id: number; epoch: number; saving: Saving }[] = [];
 let handingOver = false;
 
 /**
- * Hand the host `saving`, once the worker is idle (whenIdle). The runs waiting hold at most `budget`
- * bytes between them, what the worker may hold of saved runs, the newest always: in a note of many
- * preambles the worker is idle only at the end, and a run waiting is memory, which a run the worker
- * no longer keeps would otherwise give back. The oldest is not handed over.
+ * Hand the host `saving`, once the worker is idle (whenIdle). In a note of many preambles the worker
+ * is idle only at its end, and a run waiting is memory: none more for a run the worker still keeps,
+ * but a run it has let go would otherwise give its memory back. So the runs waiting that it no longer
+ * keeps hold at most `budget` bytes between them, what it may keep of saved runs, the oldest of them
+ * let go first, and the newest always waits. They used to hold that between them all, kept or not:
+ * at a phone's 12 MiB, after the 37 test diagrams, only the last 9 runs were handed over, 8.45 MiB of
+ * the 16 MiB the host may store, and plain TikZ's was let go before it could be (D37).
  */
 const queueHandOver = (id: number, epoch: number, saving: Saving, budget: number): void => {
 	toHandOver.push({ id, epoch, saving });
-	let held = toHandOver.reduce((n, next) => n + next.saving.run.bytes, 0);
-	while (toHandOver.length > 1 && held > budget) held -= toHandOver.shift()!.saving.run.bytes;
+	let extra = 0;
+	for (const next of toHandOver) if (!saved.holds(next.saving.run)) extra += next.saving.run.bytes;
+	for (let at = 0; extra > budget && at < toHandOver.length - 1;) {
+		const next = toHandOver[at]!;
+		if (saved.holds(next.saving.run)) {
+			at++;
+			continue;
+		}
+		toHandOver.splice(at, 1);
+		extra -= next.saving.run.bytes;
+	}
 	if (!handingOver) void handOverAll();
 };
 
