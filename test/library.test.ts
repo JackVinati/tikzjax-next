@@ -487,3 +487,53 @@ describe('the job file a saved run stands for', () => {
 		expect(called).toBe(1);
 	});
 });
+
+/*
+ * A saved run written out as bytes names the files of the worker's own rather than copying them, and
+ * a run read back finds the bytes of a closed one only if asked (engine-src/stored-run.ts, change 14).
+ */
+describe('the files of a saved run, as bytes', () => {
+	const NAME_AT = 0;
+	const name = (memory: ArrayBuffer, filename: string) => {
+		new Uint8Array(memory).set(new TextEncoder().encode(filename.padEnd(32, ' ')), NAME_AT);
+		return 32;
+	};
+
+	it('are the bundled file TeX was handed, or dvi2html’s metrics for a font, and nothing else', () => {
+		const sty = new Uint8Array([1, 2, 3]);
+		library.setBundledFiles(new Map([['pgf.sty', sty]]), (bytes: Uint8Array) => bytes);
+		const memory = new ArrayBuffer(1 << 16);
+		library.setMemory(memory);
+		library.reset(name(memory, 'first.tex'), NAME_AT);
+		library.reset(name(memory, 'pgf.sty'), NAME_AT);
+		library.reset(name(memory, 'cmr10.tfm'), NAME_AT);
+		const [, pgf, cmr] = library.captureHostState().files;
+		expect(library.storedOriginOf('pgf.sty', pgf!.content!)).toBe('bundled');
+		expect(library.storedOriginOf('pgf.sty', sty.slice())).toBeUndefined();
+		expect(library.storedOriginOf('cmr10.tfm', cmr!.content!)).toBe('metrics');
+		expect(library.storedOriginOf('cmr10.tfm', new Uint8Array(cmr!.content!.length))).toBeUndefined();
+		expect(library.storedOriginOf('first.tex', new Uint8Array(0))).toBeUndefined();
+		expect(library.storedContentOf('pgf.sty', 'bundled')).toBe(sty);
+		expect(library.storedContentOf('cmr10.tfm', 'metrics')).toEqual(cmr!.content);
+		expect(library.storedContentOf('nosuch.sty', 'bundled')).toBeUndefined();
+	});
+
+	it('say which TeX closed, and a run that resumes shares those whole', () => {
+		library.setBundledFiles(new Map([['pgf.sty', new Uint8Array([1])]]), (bytes: Uint8Array) => bytes);
+		const memory = new ArrayBuffer(1 << 16);
+		library.setMemory(memory);
+		library.reset(name(memory, 'first.tex'), NAME_AT);
+		const pgf = library.reset(name(memory, 'pgf.sty'), NAME_AT);
+		const open = library.reset(name(memory, 'pgf.sty'), NAME_AT);
+		library.close(pgf);
+		const state = library.captureHostState();
+		expect(state.files[pgf]?.closed).toBe(true);
+		expect(state.files[open]?.closed).toBeUndefined();
+		library.deleteEverything();
+		library.setMemory(memory);
+		library.restoreHostState(state, {});
+		const again = library.captureHostState();
+		expect(again.files[pgf]).toBe(state.files[pgf]);
+		expect(again.files[open]).not.toBe(state.files[open]);
+	});
+});

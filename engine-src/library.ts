@@ -46,9 +46,14 @@
  * 13. A font's metrics, from dvi2html's table or the bundle, are what TeX gets when it opens a .tfm
  *     to READ. A .tfm opened to write starts empty, as any other file does: it was handed the
  *     bundled bytes, which every later run reads the font from, and wrote into them (D35).
+ * 14. Which files of a saved run's table are the worker's own, a bundled file or a font's metrics,
+ *     and which TeX has closed, so that a run written out as bytes names the first rather than
+ *     copying them, and a run read back finds the bytes of a closed one only if asked (./stored-run,
+ *     D36).
  */
 
 import { tfmData } from '@drgrice1/dvi2html';
+import type { ContentOrigin } from './stored-run';
 
 export const pages = 2500;
 
@@ -66,6 +71,11 @@ export interface TexFile {
 	stdout?: boolean;
 	/** Opened for writing, so the file exists from now on in this run (getfilesize). */
 	written?: boolean;
+	/**
+	 * Closed by TeX, which never reads or writes it again: a file opened again is a new entry
+	 * (change 14). A saved run written out as bytes keeps no bytes of a file it read and closed.
+	 */
+	closed?: boolean;
 }
 
 /** Files written during this run, plus per-run copies of bundled files. Cleared between runs. */
@@ -415,10 +425,16 @@ export interface HostState {
 /**
  * A copy of a file's entry that a later run can go on from. The bytes of a file TeX is writing are
  * copied, because the run that goes on writes into them; the bytes of a file it reads are shared,
- * because nothing writes them.
+ * because nothing writes them. The entry of a file TeX read and closed is shared whole, as nothing
+ * changes it again, and so is not read either: a run read back from storage finds the bytes of such
+ * a file only when something asks for them (./stored-run, change 14).
  */
 const copyOfFile = (f: TexFile): TexFile =>
-	f.written && f.content ? { ...f, content: f.content.slice(0, Math.max(f.position ?? 0, 0)) } : { ...f };
+	f.written && f.content
+		? { ...f, content: f.content.slice(0, Math.max(f.position ?? 0, 0)) }
+		: f.closed === true
+			? f
+			: { ...f };
 
 /**
  * This run's host state, as \tikzjaxsnapshot found it. Without the text of the job's own file, the
@@ -445,6 +461,25 @@ export const captureHostState = (): HostState => ({
 /** The bytes a captured host state holds of its own: the files TeX was writing. */
 export const hostStateBytes = (state: HostState): number =>
 	state.files.reduce((n, f) => n + (f.written && f.content ? f.content.length : 0), 0);
+
+/**
+ * Whether a file of a captured host state is this worker's own, for a saved run written out as bytes
+ * (change 14, ./stored-run): a file of the bundle, which openSync hands TeX as the very array it keeps
+ * inflated, or dvi2html's metrics for a font, which it hands as a copy of the same bytes every time.
+ * Those are named in the stored bytes, and put back from the worker's own when they are read
+ * (storedContentOf). Two functions rather than an object: this module is the engine's imports.
+ */
+export const storedOriginOf = (name: string, content: Uint8Array): ContentOrigin | undefined => {
+	if (inflatedCache.get(name) === content) return 'bundled';
+	const metrics = builtinMetrics(name);
+	if (metrics === undefined || metrics.length !== content.length) return undefined;
+	for (let i = 0; i < metrics.length; i++) if (metrics[i] !== content[i]) return undefined;
+	return 'metrics';
+};
+
+/** The bytes of `name` from `origin` in this worker, or undefined where it has none. */
+export const storedContentOf = (name: string, origin: ContentOrigin): Uint8Array | undefined =>
+	origin === 'bundled' ? resolveBundled(name) : builtinMetrics(name);
 
 /**
  * Put back a captured host state, for a run that starts from the memory saved with it. `inputs`
@@ -650,7 +685,9 @@ export const getfilesize = (length: number, pointer: number): number => {
 };
 
 export const close = (descriptor: number) => {
-	void files[descriptor];
+	// Noted, for a saved run written out as bytes (change 14); nothing else reads it.
+	const file = files[descriptor];
+	if (file !== undefined) file.closed = true;
 };
 
 /**

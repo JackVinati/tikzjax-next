@@ -543,6 +543,9 @@ export class WorkerHost implements TexHost {
 			return;
 		}
 
+		// A run the worker saved, handed over to keep across the engine's stops, which nothing keeps yet.
+		if (message.type === 'saved-run') return;
+
 		// A reply for a job we abandoned; ids make that unambiguous rather than a guess.
 		const job = engine.current;
 		if (job === null || message.id !== job.id) return;

@@ -25,7 +25,9 @@
  *    its glyph map to fall back to the face's own codepoint for a character the map lacks
  *    (scripts/dvi2html-patch.mjs), without which ä, ö, ü, \spadesuit, Ł and ł lose the whole diagram;
  *  - a first pass is saved where TeX stands once its \begin{document} is done, and a later one with
- *    the same input up to there starts from it, within a budget the host sends (./snapshot, D32).
+ *    the same input up to there starts from it, within a budget the host sends (./snapshot, D32);
+ *  - a run it saved is handed to the host as bytes, which keeps it across the engine's stops and sends
+ *    it back with a later diagram for a worker that holds none (./stored-run, D36).
  */
 
 // `buffer/` with the trailing slash, which is the specifier that CANNOT resolve to Node's builtin:
@@ -42,6 +44,7 @@ import * as library from './library';
 import { describeConvertError } from './convert-error';
 import { buildInput, routeKey, routeOf } from './document';
 import { gunzipExactly } from './inflate';
+import { decodeSavedRun, encodeSavedRun, type ContentSources } from './stored-run';
 import { compileProbeAsync, probeJit } from './jit';
 import { checkCoreDump, packedLength, startingMemory, unpackCoreDump, type CoreDump } from './core-dump';
 import { restoreSpans, writtenSpans, type RunMarks, type Span } from './reset';
@@ -70,7 +73,10 @@ import type {
 	OkMessage,
 	RenderOptions,
 	RenderTimings,
+	SavedRunMessage,
 	SnapshotState,
+	StoredOutcome,
+	StoredRun,
 	TexErrorKind,
 	WorkerRequest,
 } from './protocol';
@@ -287,6 +293,11 @@ type PassPlan =
 			/** What the render has said on the terminal and failed to find by the snapshot point. */
 			log: readonly string[];
 			missing: readonly string[];
+			/**
+			 * The run, once it is saved, kept or not, with what TeX took to reach it and what saving
+			 * it took: for the host, which keeps it across the engine's stops (D36).
+			 */
+			saved?: Saving | undefined;
 	  };
 
 const decoder = new TextDecoder();
@@ -301,20 +312,21 @@ const decoder = new TextDecoder();
  * allocate its copy on a phone short of memory must not cost the diagram (the caller's try).
  *
  * Says whether the run was kept, or saved and not kept, as no room could be made for it within the
- * budget (./snapshot SnapshotCache), or whether there was nothing to save.
+ * budget (./snapshot SnapshotCache), with the run either way, which the host may keep (D36); or
+ * undefined, when there was nothing to save.
  */
 const saveRun = (
 	plan: Extract<PassPlan, { kind: 'save' }>,
 	memory: Uint8Array,
 	exports: WebAssembly.Exports,
-): 'kept' | 'not kept' | 'nothing' => {
+): { outcome: 'kept' | 'not kept'; run: SavedRun } | undefined => {
 	const dump = coreDump;
 	const read = library.jobFileRead();
-	if (dump === null || read === undefined) return 'nothing';
+	if (dump === null || read === undefined) return undefined;
 	const prefix = decoder.decode(plan.input.subarray(0, read));
-	if (!plan.text.startsWith(prefix)) return 'nothing';
+	if (!plan.text.startsWith(prefix)) return undefined;
 	const spans = saveSpans(memory, CORE_LAYOUT, marksOf(exports), library.hostWrites());
-	if (spans === undefined) return 'nothing';
+	if (spans === undefined) return undefined;
 	const host = library.captureHostState();
 	const log = [...plan.log];
 	const missing = [...plan.missing];
@@ -327,7 +339,7 @@ const saveRun = (
 	);
 	const bytes =
 		stretches.reduce((n, s) => n + s.bytes.length, 0) + library.hostStateBytes(host) + logBytes(log);
-	const kept = saved.set({
+	const run: SavedRun = {
 		prefix,
 		logging: plan.logging,
 		route: plan.route ?? routeKey(prefix, plan.logging),
@@ -337,8 +349,187 @@ const saveRun = (
 		log,
 		missing,
 		bytes,
-	});
-	return kept ? 'kept' : 'not kept';
+	};
+	return { outcome: saved.set(run) ? 'kept' : 'not kept', run };
+};
+
+// --- runs handed to the host --------------------------------------------------------------------
+
+/** Which files of a saved run are this worker's own, named rather than copied in its bytes. */
+const storedContent: ContentSources = {
+	originOf: library.storedOriginOf,
+	contentOf: library.storedContentOf,
+};
+
+/**
+ * A run the host sent with a render (protocol.ts StoredRun), as the worker holds one, or undefined
+ * when its bytes do not inflate to what the host said, or do not read back as a run of this
+ * engine's (./stored-run): the render then goes on as if none had been sent, and the host deletes it.
+ * Gzipped bytes carry a CRC-32 of what they hold, which the platform's inflate and pako both check,
+ * so the run's own checksum is checked on bytes kept uncompressed only.
+ */
+const readStored = async (stored: StoredRun): Promise<SavedRun | undefined> => {
+	try {
+		const bytes = stored.compressed
+			? (await gunzipExactly(new Uint8Array(stored.data), stored.rawBytes)).bytes
+			: new Uint8Array(stored.data);
+		return decodeSavedRun(bytes, ENGINE_ID, CORE_LAYOUT.globalsEnd, storedContent, !stored.compressed);
+	} catch {
+		return undefined;
+	}
+};
+
+/**
+ * Handing a run over costs the worker's own time: writing it out, a few milliseconds, and gzipping
+ * it, which the platform does on this thread, over 200 ms for circuitikz's 8.9 MiB on the desktop
+ * (D36). Spent right after the reply, it held up the next diagram by as much. So it waits until no
+ * render has been under way for HANDOVER_QUIET_MS, as when the host has nothing more for this engine,
+ * and gzips a slice at a time, each in a task of its own once the worker is idle again: a render
+ * posted meanwhile starts first, and waits at most for the slice under way.
+ */
+const HANDOVER_QUIET_MS = 100;
+const HANDOVER_SLICE = 256 * 1024;
+
+/** Renders under way, and when the last one replied, for whenIdle. */
+let rendering = 0;
+let quietSince = 0;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => self.setTimeout(resolve, ms));
+
+/** Resolves in a task of its own once no render is under way and none has been for HANDOVER_QUIET_MS. */
+const whenIdle = async (): Promise<void> => {
+	for (;;) {
+		await sleep(
+			rendering > 0
+				? HANDOVER_QUIET_MS
+				: Math.max(0, quietSince + HANDOVER_QUIET_MS - performance.now()),
+		);
+		if (rendering === 0 && performance.now() - quietSince >= HANDOVER_QUIET_MS) return;
+	}
+};
+
+/** The platform's own gzip, where it has one: Safari and iOS 16.4, Chrome 80. */
+const hasNativeGzip = (): boolean => typeof CompressionStream === 'function';
+
+/**
+ * `bytes` gzipped by the platform, CompressionStream, a slice at a time, each when the worker is idle
+ * (whenIdle). The time spent in it is added to `spent.ms`.
+ */
+const gzipWhenIdle = async (bytes: Uint8Array, spent: { ms: number }): Promise<Uint8Array> => {
+	const stream = new CompressionStream('gzip');
+	const writer = stream.writable.getWriter();
+	const reader = stream.readable.getReader();
+	const chunks: Uint8Array[] = [];
+	let length = 0;
+	const drained = (async () => {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) return;
+			chunks.push(value);
+			length += value.length;
+		}
+	})();
+	// A failure is the caller's, through the writes and `drained` below.
+	drained.catch(() => undefined);
+	try {
+		for (let at = 0; at < bytes.length; at += HANDOVER_SLICE) {
+			await whenIdle();
+			const t = performance.now();
+			await writer.write(bytes.subarray(at, at + HANDOVER_SLICE) as Uint8Array<ArrayBuffer>);
+			spent.ms += performance.now() - t;
+		}
+		await whenIdle();
+		const t = performance.now();
+		await writer.close();
+		await drained;
+		spent.ms += performance.now() - t;
+	} catch (error) {
+		reader.cancel().catch(() => undefined);
+		throw error;
+	}
+	const out = new Uint8Array(length);
+	let at = 0;
+	for (const chunk of chunks) {
+		out.set(chunk, at);
+		at += chunk.length;
+	}
+	return out;
+};
+
+/** A run saved by a render, with what TeX took to reach it and what saving it took (PassPlan). */
+interface Saving {
+	run: SavedRun;
+	preambleMs: number;
+	saveMs: number;
+}
+
+/** Runs saved and not yet handed over, oldest first, and whether they are being. */
+const toHandOver: { id: number; saving: Saving }[] = [];
+let handingOver = false;
+
+/**
+ * Hand the host `saving`, once the worker is idle (whenIdle). The runs waiting hold at most `budget`
+ * bytes between them, what the worker may hold of saved runs, the newest always: in a note of many
+ * preambles the worker is idle only at the end, and a run waiting is memory, which a run the worker
+ * no longer keeps would otherwise give back. The oldest is not handed over.
+ */
+const queueHandOver = (id: number, saving: Saving, budget: number): void => {
+	toHandOver.push({ id, saving });
+	let held = toHandOver.reduce((n, next) => n + next.saving.run.bytes, 0);
+	while (toHandOver.length > 1 && held > budget) held -= toHandOver.shift()!.saving.run.bytes;
+	if (!handingOver) void handOverAll();
+};
+
+const handOverAll = async (): Promise<void> => {
+	handingOver = true;
+	try {
+		for (let next = toHandOver.shift(); next !== undefined; next = toHandOver.shift()) {
+			await whenIdle();
+			await handOver(next.id, next.saving);
+		}
+	} finally {
+		handingOver = false;
+	}
+};
+
+/**
+ * Hand the host a run this worker saved, as bytes (./stored-run), gzipped where the platform has its
+ * own gzip, to keep across the engine's stops. Nothing is sent when it fails: the run is then kept
+ * only while this engine runs, as before D36.
+ */
+const handOver = async (id: number, saving: Saving): Promise<void> => {
+	const spent = { ms: 0 };
+	try {
+		const t = performance.now();
+		const raw = encodeSavedRun(saving.run, ENGINE_ID, storedContent);
+		spent.ms += performance.now() - t;
+		let data = raw;
+		let compressed = false;
+		if (hasNativeGzip()) {
+			try {
+				data = await gzipWhenIdle(raw, spent);
+				compressed = true;
+			} catch {
+				// Kept as it is: the host counts what it stores by the bytes it is given.
+			}
+		}
+		const message: SavedRunMessage = {
+			type: 'saved-run',
+			id,
+			run: {
+				route: saving.run.route,
+				data: data.buffer as ArrayBuffer,
+				compressed,
+				rawBytes: raw.length,
+			},
+			preambleMs: Math.round(saving.preambleMs),
+			saveMs: Math.round(saving.saveMs),
+			encodeMs: Math.round(spent.ms),
+		};
+		post(message, [message.run.data]);
+	} catch {
+		// Nothing handed over: the run stays this engine's alone.
+	}
 };
 
 // --- transcript analysis --------------------------------------------------------------------------
@@ -668,12 +859,13 @@ const runPass = async (job: string, spent: RenderTimings, plan?: PassPlan): Prom
 			const t = performance.now();
 			try {
 				// A run saved is the save's time, not TeX's, whether it was kept or not.
-				const outcome = saveRun(plan, new Uint8Array(memory.buffer), exports);
-				if (outcome !== 'nothing') {
+				const result = saveRun(plan, new Uint8Array(memory.buffer), exports);
+				if (result !== undefined) {
 					saving = performance.now() - t;
 					spent.saveMs = (spent.saveMs ?? 0) + saving;
+					plan.saved = { run: result.run, preambleMs: t - reset, saveMs: saving };
 				}
-				if (outcome === 'not kept') spent.saveNotKept = true;
+				if (result?.outcome === 'not kept') spent.saveNotKept = true;
 			} catch {
 				// Whatever it was, nothing is kept and TeX goes on as if no save had been asked for:
 				// a save must never cost the diagram (library.ts snapshotPoint).
@@ -752,6 +944,8 @@ const rounded = (spent: RenderTimings): RenderTimings => ({
 	svgMs: Math.round(spent.svgMs),
 	passes: spent.passes,
 	...(spent.resumed === true ? { resumed: true } : {}),
+	...(spent.restored === true ? { restored: true } : {}),
+	...(spent.restoreMs !== undefined ? { restoreMs: Math.round(spent.restoreMs) } : {}),
 	...(spent.saveMs !== undefined ? { saveMs: Math.round(spent.saveMs) } : {}),
 	...(spent.saveNotKept === true ? { saveNotKept: true } : {}),
 	...(spent.saveFailed === true ? { saveFailed: true } : {}),
@@ -776,12 +970,20 @@ const readIfWritten = (name: string): Uint8Array | undefined => {
 	}
 };
 
+/** A render's reply, and the run it saved for the host to keep, when the host keeps them. */
+interface Rendered {
+	reply: OkMessage | ErrorMessage;
+	handOver?: Saving | undefined;
+}
+
 async function render(
 	id: number,
 	source: string,
 	options: RenderOptions,
 	budget: number,
-): Promise<OkMessage | ErrorMessage> {
+	stored: StoredRun | undefined,
+	persist: boolean,
+): Promise<Rendered> {
 	const started = performance.now();
 	const log: string[] = [];
 	const missing: string[] = [];
@@ -818,7 +1020,30 @@ async function render(
 	saved.setBudget(budget);
 	saved.tick();
 	let firstPlan: PassPlan | undefined;
-	const resumable = budget > 0 ? saved.find(text, logging) : undefined;
+	let resumable = budget > 0 ? saved.find(text, logging) : undefined;
+
+	// A run the host kept of an earlier engine's, sent for a diagram whose run this worker does not
+	// hold (D36): read back and kept as if saved here, where there is room, so that the diagrams after
+	// it start from it too, and resumed from either way. One that does not read back, or stands for
+	// other text, leaves the render as if none had been sent.
+	let storedOutcome: StoredOutcome | undefined;
+	if (stored !== undefined) {
+		if (budget <= 0 || resumable !== undefined) storedOutcome = 'unneeded';
+		else {
+			const restoring = performance.now();
+			const run = await readStored(stored);
+			spent.restoreMs = performance.now() - restoring;
+			if (run === undefined) storedOutcome = 'corrupt';
+			else if (run.logging !== logging || !text.startsWith(run.prefix)) storedOutcome = 'mismatch';
+			else {
+				storedOutcome = 'used';
+				spent.restored = true;
+				saved.set(run);
+				resumable = saved.find(text, logging) ?? run;
+			}
+		}
+	}
+
 	if (resumable !== undefined) {
 		// What the saved run had said and missed by then, as this run would have.
 		for (const line of resumable.log) emit(line);
@@ -891,6 +1116,11 @@ async function render(
 
 	const durationMs = Math.round(performance.now() - started);
 	const timings = rounded(spent);
+	// The run this render saved, for the host to keep across the engine's stops (D36): only one the
+	// host named, which it can find again for a later diagram, and only when it keeps them.
+	const saving =
+		persist && firstPlan?.kind === 'save' && firstPlan.route !== undefined ? firstPlan.saved : undefined;
+	const done = (reply: OkMessage | ErrorMessage): Rendered => ({ reply, handOver: saving });
 	const gotSvg = reported.svg.includes('<svg');
 	let transcript = readTranscript(log.slice(0, firstEnd));
 
@@ -932,7 +1162,7 @@ async function render(
 	// Output decides success; the transcript decides what to say about it. Under \nonstopmode a
 	// mistyped macro usually yields BOTH a diagram and an error, and the user needs both.
 	if (reported.convertError !== undefined) {
-		return {
+		return done({
 			type: 'error',
 			id,
 			kind: 'missing-file',
@@ -945,13 +1175,14 @@ async function render(
 			durationMs,
 			timings,
 			snapshots: snapshotState(),
-		};
+			stored: storedOutcome,
+		});
 	}
 
 	if (!reported.wroteDvi || !gotSvg) {
 		// Only ever reached with a failed FIRST pass — a failed second one is discarded above — so
 		// `transcript` here is that pass's own, not a later run's.
-		return {
+		return done({
 			type: 'error',
 			id,
 			...(reported.overflowed
@@ -965,7 +1196,8 @@ async function render(
 			durationMs,
 			timings,
 			snapshots: snapshotState(),
-		};
+			stored: storedOutcome,
+		});
 	}
 	// The characters ./unicode declared, written back over the boxes TeX set for them. When the
 	// SVG's groups do not pair up, which a raw special in the diagram can do, that is what the card
@@ -974,7 +1206,7 @@ async function render(
 	try {
 		svg = restoreUnicode(reported.svg, unicode);
 	} catch (error) {
-		return {
+		return done({
 			type: 'error',
 			id,
 			kind: 'tex-error',
@@ -985,9 +1217,10 @@ async function render(
 			durationMs,
 			timings,
 			snapshots: snapshotState(),
-		};
+			stored: storedOutcome,
+		});
 	}
-	return {
+	return done({
 		type: 'ok',
 		id,
 		svg,
@@ -996,10 +1229,11 @@ async function render(
 		durationMs,
 		timings,
 		snapshots: snapshotState(),
+		stored: storedOutcome,
 		firstError: diagnostics.firstError,
 		line: diagnostics.line,
 		bodyLine,
-	};
+	});
 }
 
 // --- message loop ----------------------------------------------------------------------------------
@@ -1008,11 +1242,13 @@ async function render(
 // `close()` and `postMessage()` in scope for every file in the project, including the plugin,
 // where they are exactly the wrong things to have available.
 declare const self: {
-	postMessage(message: unknown): void;
+	postMessage(message: unknown, transfer?: Transferable[]): void;
+	setTimeout(handler: () => void, timeout: number): number;
 	onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null;
 };
 
-const post = (message: unknown) => self.postMessage(message);
+const post = (message: unknown, transfer?: Transferable[]) =>
+	transfer === undefined ? self.postMessage(message) : self.postMessage(message, transfer);
 
 /** The start, once the payload has arrived. */
 let booted: Promise<unknown> | null = null;
@@ -1041,9 +1277,24 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 		return;
 	}
 	if (request.type === 'render') {
-		void render(request.id, request.source, request.options, request.snapshots ?? 0).then(
-			post,
+		rendering++;
+		void render(
+			request.id,
+			request.source,
+			request.options,
+			request.snapshots ?? 0,
+			request.stored,
+			request.persist === true,
+		).then(
+			({ reply, handOver: saving }) => {
+				rendering--;
+				quietSince = performance.now();
+				post(reply);
+				if (saving !== undefined) queueHandOver(request.id, saving, request.snapshots ?? 0);
+			},
 			(error: unknown) => {
+				rendering--;
+				quietSince = performance.now();
 				post({
 					type: 'error',
 					id: request.id,

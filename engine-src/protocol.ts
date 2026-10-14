@@ -66,6 +66,48 @@ export interface RenderRequest {
 	 * the start draws.
 	 */
 	snapshots?: number | undefined;
+	/**
+	 * A run the host kept of an earlier engine's (./stored-run, internal/DECISIONS.md D36), for this
+	 * render's first pass to start from when the worker holds no run for it. Its `data` is
+	 * transferred, not copied. Ignored when `snapshots` is 0.
+	 */
+	stored?: StoredRun | undefined;
+	/**
+	 * The host keeps the runs a worker saves: once the render has replied, the worker hands over the
+	 * run it saved, if it saved one the host can name (SavedRunMessage). Absent is false.
+	 */
+	persist?: boolean | undefined;
+}
+
+/** A saved run as the host keeps it, in IndexedDB, across the engine's stops (./stored-run, D36). */
+export interface StoredRun {
+	/** The name the host gives the diagrams that start from it (./document routeOf). */
+	route: string;
+	/** Its bytes, gzipped when `compressed`. */
+	data: ArrayBuffer;
+	compressed: boolean;
+	/** How many bytes `data` holds once inflated. */
+	rawBytes: number;
+}
+
+/**
+ * A run the worker saved for a render, written out as bytes for the host to keep, posted once that
+ * render has replied, so that writing it out never holds up its diagram. `data` is transferred.
+ */
+export interface SavedRunMessage {
+	type: 'saved-run';
+	/** The render that saved it. */
+	id: number;
+	run: StoredRun;
+	/**
+	 * TeX's time, in that render's first pass, from its start to where it was saved: what a diagram
+	 * that starts from the run does not spend.
+	 */
+	preambleMs: number;
+	/** What saving it took in that render, which a diagram that starts from the run does not pay either. */
+	saveMs: number;
+	/** What writing it out as bytes and compressing them took, after the reply. */
+	encodeMs: number;
 }
 
 export interface PingRequest {
@@ -178,6 +220,13 @@ export interface RenderTimings {
 	 * of its \begin{document}, and TeX compiled only what comes after (engine-src/snapshot.ts).
 	 */
 	resumed?: boolean | undefined;
+	/**
+	 * The run it resumed from was one the host had kept of an earlier engine and sent with the render
+	 * (RenderRequest.stored), which the worker inflated, checked and read back in `restoreMs`.
+	 */
+	restored?: boolean | undefined;
+	/** What putting back a run the host sent took, whether or not the render could start from it. */
+	restoreMs?: number | undefined;
 	/** The first pass was saved for later diagrams with the same preamble, which took this long. */
 	saveMs?: number | undefined;
 	/**
@@ -210,6 +259,8 @@ export interface OkMessage {
 	timings?: RenderTimings | undefined;
 	/** Absent from a worker before 0.2.1-beta.3, which saves nothing. */
 	snapshots?: SnapshotState | undefined;
+	/** What became of a run the host sent with the render (StoredOutcome); absent when it sent none. */
+	stored?: StoredOutcome | undefined;
 	/**
 	 * TeX reported an error but recovered and still produced a diagram.
 	 *
@@ -252,9 +303,18 @@ export interface ErrorMessage {
 	timings?: RenderTimings | undefined;
 	/** As OkMessage's. */
 	snapshots?: SnapshotState | undefined;
+	/** As OkMessage's. */
+	stored?: StoredOutcome | undefined;
 }
 
-export type WorkerResponse = ReadyMessage | LogMessage | OkMessage | ErrorMessage;
+/**
+ * What became of a run the host sent with a render: the render started from it; the worker held a
+ * run for it already; its bytes did not read back as a run of this engine's (./stored-run), which the
+ * host then deletes; or it stands for text this diagram does not start with, under the same name.
+ */
+export type StoredOutcome = 'used' | 'unneeded' | 'corrupt' | 'mismatch';
+
+export type WorkerResponse = ReadyMessage | LogMessage | OkMessage | ErrorMessage | SavedRunMessage;
 
 export interface EngineInventory {
 	engineId: string;
