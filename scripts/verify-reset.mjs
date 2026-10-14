@@ -390,9 +390,12 @@ if (totals.reused === 0) {
 	const reply = await send(basic);
 	faultyMarks = false;
 	const next = await send(basic);
-	const drawn = reply.type === 'ok' && reply.svg === basic.reference;
+	// As smoke drew it where smoke has run, and as the run after it draws it in any case.
+	const asDrawn = (r) =>
+		r.type === 'ok' && r.svg.includes('<svg') && (basic.reference === null || r.svg === basic.reference);
+	const drawn = asDrawn(reply) && reply.svg === next.svg;
 	const renewed = runs.length === 2 && runs[1].memory !== runs[0].memory && runs[1].equal;
-	const ok = drawn && renewed && next.type === 'ok' && next.svg === basic.reference;
+	const ok = drawn && renewed && asDrawn(next);
 	if (!ok) failures++;
 	console.log(
 		`${ok ? '\x1b[32mOK  \x1b[0m' : '\x1b[31mFAIL\x1b[0m'}  a reset whose bookkeeping fails costs a new ` +
