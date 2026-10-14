@@ -6,6 +6,7 @@
  */
 import type { RenderOptions } from './protocol';
 import { needsTs1Shim, TS1_SHIM } from './ts1-shim';
+import { bridgeUnicode } from './unicode';
 
 const DOCUMENT_START = /\\begin\s*\{document\}/;
 
@@ -19,6 +20,8 @@ export interface TexInput {
 	 * by two, and the error card used to show the wrong line of the block by exactly that much.
 	 */
 	bodyLine: number;
+	/** The characters ./unicode declared, which the worker puts back into the SVG TeX's output becomes. */
+	unicode: readonly number[];
 }
 
 /**
@@ -44,7 +47,7 @@ export const MISSING_PACKAGE =
 	'{This engine does not have the file, so LaTeX goes on without it, as when Return is pressed here.}' +
 	'\\global\\let\\@currpath\\@empty\\global\\let\\@currname\\@empty\\gdef\\@currext{tex}}\\makeatother';
 
-export const buildInput = (source: string, options: RenderOptions, bridgePreamble = ''): TexInput => {
+export const buildInput = (source: string, options: RenderOptions): TexInput => {
 	const packages = Object.entries(options.texPackages ?? {})
 		.map(([name, opts]) => `\\usepackage${opts ? `[${opts}]` : ''}{${name}}`)
 		.join('');
@@ -56,17 +59,26 @@ export const buildInput = (source: string, options: RenderOptions, bridgePreambl
 	// user gave, so that a preamble file redefining one of the same commands still has the last word.
 	const shim = needsTs1Shim(`${given}\n${source}`) ? TS1_SHIM : '';
 
+	// Every character the engine cannot draw, from the block or a preamble, declared as a box the
+	// worker writes the character back over (./unicode). Ahead of everything the user gave, so that
+	// a preamble declaring one of the same characters itself still has the last word.
+	const unicode = bridgeUnicode(`${given}\n${source}`);
+
 	// \nonstopmode is why a bad diagram produces a transcript and, usually, a drawing. Without it
 	// TeX stops at the interactive `? ` prompt on the first error: upstream's engine then suspended
 	// its asyncify'd wasm for good, and this one, which reads the end of its terminal input there,
 	// stops the run with "Emergency stop" and draws nothing. Upstream #18 #23 #27 #39 #51 #82 #85
 	// #89, roughly 22 reporters, are all downstream of this one token.
-	const preamble = `\\nonstopmode${MISSING_PACKAGE}${shim}${bridgePreamble}${given}`;
+	const preamble = `\\nonstopmode${MISSING_PACKAGE}${shim}${unicode.preamble}${given}`;
 
 	const wrap = options.wrap ?? 'auto';
 	const needsWrap = wrap === 'always' || (wrap === 'auto' && !DOCUMENT_START.test(source));
 
 	const head = needsWrap ? `${preamble}\\begin{document}\n` : `${preamble}\n`;
 	const tail = needsWrap ? '\n\\end{document}\n' : '\n';
-	return { text: `${head}${source}${tail}`, bodyLine: head.split('\n').length };
+	return {
+		text: `${head}${source}${tail}`,
+		bodyLine: head.split('\n').length,
+		unicode: unicode.codepoints,
+	};
 };

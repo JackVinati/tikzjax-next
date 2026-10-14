@@ -77,15 +77,16 @@ library.setMissingFileSink((name) => missed.push(name));
 
 /**
  * The body of run-tex.js's texify(), with the network removed, and with TeX's input assembled by
- * the worker's own buildInput: \nonstopmode, the preamble, and the TS1 shim for a fixture that
- * needs it. A reference built from any other input would not be one verify-worker could match.
+ * the worker's own buildInput: \nonstopmode, the preamble, and the TS1 shim and the Unicode bridge
+ * for a fixture that needs them. A reference built from any other input would not be one
+ * verify-worker could match.
  */
 async function texify(source, dataset = {}) {
 	transcript = [];
 	transcriptFile = [];
 	missed = [];
 
-	const input = library.buildInput(source, dataset).text;
+	const { text: input, unicode } = library.buildInput(source, dataset);
 
 	library.setShowConsole();
 	library.writeFileSync('input.tex', Buffer.from(input));
@@ -132,7 +133,9 @@ async function texify(source, dataset = {}) {
 		sink,
 	);
 
-	return { svg: html, log: transcript.slice() };
+	// As the worker does, the characters the Unicode bridge declared are written back over the
+	// boxes TeX set for them, so a fixture with Unicode in it has a reference too.
+	return { svg: library.restoreUnicode(html, unicode), log: transcript.slice() };
 }
 
 const wanted = process.argv.slice(2);

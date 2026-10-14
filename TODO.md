@@ -167,7 +167,8 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] `°` `×` `→` `±` `µ`, siunitx's units and list bullets (0.1.5): TS1, which the converter cannot draw, so the worker redefines 23 TS1 text commands to math-font glyphs when a block can use them (`engine-src/ts1-shim.ts`)
 - [x] `Ł` and `ł` (0.1.5): dvi2html's glyph map had no entry for 302 characters its fonts have metrics for, among them the stroke LaTeX builds them with (character 32 of the roman, bold, slanted, italic and sans text fonts) and `£` in the italics, and failed with "Cannot read properties of undefined (reading 'toString')". Patched in the bundler to fall back to the codepoint BaKoMa's faces put every character at (`scripts/dvi2html-patch.mjs`, D11); the upstream fix belongs in its `tools/glyphs.js` or `src/html.ts`, and goes in the same PR as the TFM fix
 - [x] `£` `€` `©` `®` `ª` `º`, `\pounds`, `\copyright` and `\$` outside math (0.1.5): TS1 with no math stand-in, so the shim builds these seven commands from the Computer Modern text fonts, mostly as older LaTeX releases did: `£` and `$` are character 36 of cmu/cmti and cmr, `©` and `®` a letter in cmsy's large circle, `€` LaTeX's own `\tc@fake@euro`, `ª` `º` a raised underlined a and o, lowercase in small caps as TS1 sets them (`test/fixtures/tex/ts1-currency.tex`, `ts1-small-caps.tex`)
-- [ ] **open** — the rest of TS1 still fails, `¥` `¢` `‰` `½` `№` and `\textcircled` among it; pre-flight warns about the typed ones. Real TS1 needs tcrm metrics in the converter and a cm-super face
+- [x] Greek, Cyrillic, CJK, Arabic, Hebrew, IPA and emoji in labels (0.2.1, PR #2, D20): TeX sets a box one em wide for each character the engine cannot typeset, declared to LaTeX's UTF-8 input, and the worker writes the character over it in sans-serif (`engine-src/unicode.ts`). Names in those scripts work as they did in 0.2.0. Typed `¥` `¢` `‰` `½` `№` are drawn the same way
+- [ ] **open** — the rest of TS1 still fails as commands, `\textyen`, `\textperthousand` and `\textcircled` among them. Real TS1 needs tcrm metrics in the converter and a cm-super face
 - [ ] **open** — add the glyph map fix to the prepared dvi2html PR (the TFM fix) and send it, and retire `scripts/dvi2html-patch.mjs` once a release carries both; its exactly-one guards will fail the build to say so
 
 ## 9 · Release gate
@@ -184,7 +185,7 @@ The manual matrix in DESIGN.md §10.4, in full. The ones that catch the most:
 
 Submitted to the community plugin browser on 2026-09-01 through Obsidian's developer portal. The automated review runs on every version and pulls a failing one from search within a day, so each release is held to it: 0.1.3 passed with zero errors and a byte-for-byte reproducible `main.js`.
 
-Open contributions: PR #2 (Unicode labels through an SVG bridge) — changes requested, see the review on the PR. To add to that review after 0.1.5: letters with a dieresis are native now and must not be bridged; the bridge has to skip both `isNativeUnicode()` (`src/source/native-unicode.ts`) and `isTs1Symbol()` (`engine-src/ts1-shim.ts`) code points; and the worker's input is assembled in `engine-src/document.ts` now, which is where a bridge would hook in.
+Open contributions: none.
 
 ---
 
@@ -197,9 +198,9 @@ Full reasoning in `internal/BACKLOG.md`. The short version:
   `@drgrice1/dvi2html` has a fixed font table covering Computer Modern only, and it is not
   extensible from outside — which is `\mathfrak` and `\mathscr` (#55 #84). siunitx's unit symbols
   (#113) were the third, and render since 0.1.5, drawn from the math fonts instead. The `patterns` driver gap (#59) is a missing pattern definition in the DVI, chemfig's
-  `\schemestart` (#25 #54) loses its bonds before any JavaScript runs, Unicode in TeX syntax (as
-  opposed to bridged label text) still needs a Unicode engine, and LuaTeX-only packages (#20) stay
-  LuaTeX-only.
+  `\schemestart` (#25 #54) loses its bonds before any JavaScript runs, and LuaTeX-only packages
+  (#20) stay LuaTeX-only. CJK (#19) and the other scripts the engine has no fonts for are drawn in
+  sans-serif over boxes TeX sets for them, since 0.2.1 (D20).
 - **13 issues close as answered or out of scope** — including Obsidian Publish (#37 #47: Publish
   runs no community plugins; finalize-to-attachment is the answer, and is better for visitors than
   a WASM TeX per page view) and the inline `$tikz:…$` renderer (#112).

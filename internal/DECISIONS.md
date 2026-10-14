@@ -1091,6 +1091,80 @@ stays.
 
 ---
 
+## D20 — What the engine cannot typeset is drawn over a box TeX sets for it
+
+**Amends D8 and the backlog, which leave Greek, Cyrillic and CJK to a Unicode engine, and builds on
+D16's `\ifincsname`. It came as pull request #2.**
+
+The engine's fonts are Computer Modern, and its LaTeX has a definition for few characters beyond
+Latin. Every other one TeX leaves out with "Unicode character … not set up for use with LaTeX", and
+`¥` `¢` `‰` `½` `№`, which LaTeX sets in TS1, lose the whole diagram in the SVG converter. A Unicode
+engine, or fonts and metrics for each script, are far off. The pull request draws them another way:
+TeX sets each such character as a box one em wide, between two raw-SVG specials that mark it with
+the character and the font's quad, and the worker writes the character over the box as a `<text>`
+in the platform's `sans-serif`, centred in the space TeX set aside (`engine-src/unicode.ts`). TeX
+keeps the layout: a node is as wide, and an arrow ends where it would, as for any text of that
+width.
+
+As written, the bridge replaced each run of such characters in the block's source with a call to a
+macro that set the boxes. On 0.2.0 that broke what the engine already did. With `\ifincsname`, a
+UTF-8 character in LaTeX is a macro that gives its own bytes where LaTeX makes a name of it (D16), so
+on 0.2.0 a node, coordinate, style or colour named in Chinese or Greek, a `\label` key and its
+`\ref`, `\csname 开始\endcsname`, `\def\开始` and `\edef` all work. Rebased onto 0.2.0 with nothing
+else changed, the bridge put its boxes inside those names. Of 34 cases that 0.2.0's worker draws
+without a TeX error, names, labels and symbols in Chinese, Greek, accented Latin and TS1 among them,
+it changed 24: 18 failed with "Missing \endcsname inserted", one drew with that error,
+`\detokenize{开始}` printed the macro, two `\ifx` tests between equal texts came out unequal, a
+preamble's own `\DeclareUnicodeCharacter` was ignored, and the TS1 symbols left Computer Modern.
+
+So the bridge leaves the source alone, and declares each character it draws to LaTeX's UTF-8 input,
+`\DeclareUnicodeCharacter{5F00}{\tikzjaxUnicodeBridge{24320}}`, which changes only what the
+character typesets. All 34 cases come out byte for byte as on 0.2.0. Of the 46 in which 0.2.0 left
+characters out with an error or lost the whole diagram, 43 draw them, and in the other 3, where the
+characters stand outside the picture or in `\nullfont`, the diagram is drawn without them and
+without an error. Declaring reaches what replacing could not: a character in a preamble file or in a
+macro's body, `\verb`, pgfplots' tick labels.
+
+It declares what nothing else draws: not ASCII, not what `scan:native` measured native, and not what
+the TS1 shim draws (0.1.5). The scan measures the bare engine, which cannot draw the shim's symbols,
+so without that exception ° × ± µ £ € © and the rest came out of Computer Modern again, each in a
+sans-serif em. The declarations go on the input's first line after the shim, ahead of everything the
+user gave, so a preamble that declares a character of its own still wins, and a hundred to a line:
+TeX reads a line into a buffer that a line of 250 KB fits and one of 300 KB overflows, and 6,000
+declarations on one line came to 348 KB. A block with none of these characters gets nothing, so its
+input, its DVI and its SVG are what they were; the 37 fixtures that were there give the same DVI,
+transcript and SVG (D13).
+
+Each character is a marker of its own. The worker joins the ones TeX set side by side, on one
+baseline in one font and size, into one `<text>`, and across a gap of up to half an em, a space, so
+that a phrase in Arabic or Hebrew is one string the browser orders right to left; drawn a word at a
+time in TeX's order, its words came out reversed. The marker goes with the box: the sanitizer's
+allowlist (0.1.5) has no `data-*` attributes and would report every character as removed active
+content. A box that drew no glyph, set in `\nullfont` or outside the picture where dvi2html writes
+HTML, is dropped, as TeX drops a character it has no font for, where the pull request lost the whole
+diagram. An SVG whose groups no longer pair up, which a raw special can cause, is an error with TeX's
+log, of the kind whose card shows its message; it was sent as an empty output, whose card says the
+block is probably empty.
+
+What it costs, measured in Node 22.19 on the Windows desktop of D14 through the worker, the shortest
+TeX time of three runs, against the same nodes holding as many `M`s: 1,000 different CJK characters
+in 20 nodes, 140 ms against 85; 3,000 in 60 nodes, 352 against 204; 6,000 in 120 nodes, 683 against
+370; 250 nodes of the same two characters, 742 against 725. Finding the characters in 147 KB of
+source takes 0.8 ms, and writing back the flowchart fixture's 21 markers 0.04 ms.
+
+`unicode-bridge-probe`, the flowchart of the report the pull request began with, and
+`unicode-names`, names in Chinese and Greek beside labels in Chinese and Cyrillic, are in the golden
+corpus with the boxes and markers as TeX and dvi2html leave them. smoke writes the text back as the
+worker does, so verify-worker compares the shipped worker with them byte for byte, and its fixtures
+in `test/fixtures/worker` check the runs that come back, on one pass and two, and the error. Chrome's
+XML parser accepts every SVG the bridge wrote in those cases, and the plugin's pipeline keeps every
+restored text with nothing to report. What the bridge cannot do is in the README: the text is not
+Computer Modern and does not wrap, bold and italic are lost, a separate combining accent is drawn
+beside its letter, and text outside the picture is not drawn. ENGINE_ID moves, so every cached
+diagram compiles once more.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

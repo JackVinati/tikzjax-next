@@ -74,10 +74,16 @@ What the second pass *does* fix is `\label`/`\ref`: a picture node reading `\ref
 one pass and `1` on two. It ships behind `%!tikz twopass`, and it is free on a block that cannot
 benefit, because the worker only runs the second pass when the first left something readable behind.
 
+**8. #19 / #36 / #53 render in labels, without a rebuilt engine.** The row says the CJK half is
+impossible on an 8-bit engine. It is, for TeX to typeset; but TeX can set a box where each
+character goes, and the worker writes the character over it in the platform's sans-serif font
+(`engine-src/unicode.ts`, internal/DECISIONS.md D20). Greek, Cyrillic, IPA, Arabic, Hebrew and
+emoji go the same way, and since 0.2.0's `\ifincsname` names in any script work too. What a
+rebuild would still add is those scripts in Computer Modern's design, and text that wraps.
+
 **What has not changed:** everything resting on the DVI being wrong before any JavaScript runs
 (#25, #54 — a contributor opened `input.dvi` in TeXShop and the bonds were already absent), on
-LuaTeX (#20), on Unicode being used as TeX syntax rather than bridged label text, or on Obsidian
-Publish running no community plugins (#37, #47).
+LuaTeX (#20), or on Obsidian Publish running no community plugins (#37, #47).
 
 Sorted by category, then severity (critical → high → medium → low).
 
@@ -116,7 +122,7 @@ Sorted by category, then severity (critical → high → medium → low).
 | #17 #34 #40 #41 #56 #88 #92 #99 | Missing pure-LaTeX packages: bayesnet, tikz-timing, quantikz, amsthm, ytableau, stanli, venndiagram, tkz-tab | packages-tex | medium | L | needs-tex-rebuild | Ordinary `.sty` / `.code.tex` files absent from the bundle's 212-file manifest. None need new primitives; some (venndiagram, tkz-tab) drag in xkeyval/xstring and need checking against the e-TeX-only engine. | **E1** — names added to `tex_files.json` + rebuild. **P8**'s BYO-packages mechanism makes them user-installable in the interim. |
 | #28 #79 | `\usepgfplotslibrary{…}` libraries missing (fillbetween, groupplots, colormaps, statistics…) | packages-tex | medium | S | needs-tex-rebuild | pgfplots **1.16 is bundled**, but none of the ~15 `tikzlibrarypgfplots.*.code.tex` files are. `\usepgfplotslibrary` is a plain `\input`. | **Spike S1** (parallel, 3-5 d) — add ~15 files from a TeX Live carrying pgfplots 1.16. No WASM, no format, no font work, ~100 KB. The only near-term progress on "reliable pgfplots". |
 | #55 #113 | `mathrsfs` / `\mathscr`: package loads but the font is missing so nothing draws | packages-tex | medium | L | needs-tex-rebuild | Needs the `rsfs10` TFM in dvi2html **and** a matching `@font-face` in styles.css. A contributor added the package and confirmed the glyphs are still absent. | **E1** — font pipeline (the #60/#61 recipe). **P0** documents `\usepackage[mathscr]{euscript}` as the working substitute today. |
-| #19 #36 #53 | Non-Latin text: misc Unicode, Cyrillic, IPA | packages-tex | medium | XL | worker-patch | 8-bit e-TeX cannot shape Unicode itself. Literal label text is bridged through measurable DVI proxy boxes and restored as platform-font SVG text; Unicode in control-sequence names or structural arguments remains unsupported. | **Implemented** — worker bridge covers CJK, Cyrillic, IPA and emoji in labels without an engine rebuild. A future Unicode engine would remove the platform-font and one-em measurement compromises. |
+| #19 #36 #53 | Non-Latin text: misc Unicode, Cyrillic, IPA | packages-tex | medium | XL | needs-tex-rebuild | 8-bit e-TeX with OT1/T1 only. UTF-8 *input* decodes (`utf8.def` is in the dump) but there is no T2A/tipa encoding, no TFM and no webfont. | **E1** — add `fontenc` T2A + cm-super/lh + tipa to `tex_files` and `fonts.css`. **The CJK half of #19 is impossible** on an 8-bit engine. **P2** pre-flight warns on the characters above Latin-1 that the engine cannot typeset, as measured by `npm run scan:native`. |
 | #30 | `siunitx` / `\si` / `\pu` unavailable (and its absence hangs the renderer) | packages-tex | medium | L | needs-tex-rebuild | siunitx v3 is an expl3 package; the format dump was built with "Skipping expl3-dependent extensions" and LaTeX2e `<2020-02-02>`. | **E1** — needs a rebuilt `core.dump` with the pdfTeX primitives. **P4** turns the hang into `Undefined control sequence \si` + a capability hint. |
 | #86 | `forest` (and every modern package) blocked: `Package expl3 Error: Required primitives not found` | packages-tex | medium | XL | needs-tex-rebuild | Plain e-TeX 3.14159265-2.6 with no `\expanded` / `\pdfstrcmp` / `\pdffilesize`. Transitively blocks forest, xparse, siunitx v3, mathtools, tcolorbox. | **E1** — `drgrice1/web2js` already applies `expanded.ch`, `strcmp.ch`, `filesize.ch`, `creationdate.ch`. Documented as a named limitation in **P0**. |
 | #22 | Cannot set `\charge` within chemfig | packages-tex | medium | L | needs-tex-rebuild | `\listfiles` confirms chemfig 1.4 (2019/04/18) — deliberately pinned as the last version not requiring `\expanded`. `\charge` does not exist in 1.4. | **E1** — unpin chemfig after the primitives land. Already solved in a community fork. |

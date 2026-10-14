@@ -1,0 +1,11 @@
+\tikzset{强调/.style={draw, thick}}
+\colorlet{深红}{red!70!black}
+\begin{tikzpicture}
+  \node[强调] (开始) at (0,0) {开始};
+  \node[强调, text=深红] (Ωμέγα) at (3,0) {Ωμέγα};
+  \coordinate (中点) at (1.5,-1);
+  \draw[->] (开始.east) -- (Ωμέγα.west);
+  \draw (开始) -- (中点) -- (Ωμέγα);
+  \foreach \name/\x in {甲/0, 乙/3} \node[draw] (\name) at (\x,-2) {\name};
+  \draw (甲) -- node[below] {Привет мир} (乙);
+\end{tikzpicture}

@@ -314,8 +314,10 @@ if (names.includes('broken')) {
 	);
 }
 
-// Smoke and verify-fork exercise the bare engine, so these literal Unicode fixtures live apart
-// from that corpus. A worker with the bridge reverted must fail this check.
+// What the bridge writes back, checked as text rather than as bytes, on one pass and on two. The
+// fixtures in test/fixtures/tex with Unicode in them are compared above, with smoke, which puts the
+// same text back; these are for what that comparison cannot say: which runs come back, how they are
+// placed, and an error. A worker with the bridge reverted must fail this check.
 const window = new Window();
 for (const twoPass of [false, true]) {
 	const reply = await send({
@@ -356,7 +358,12 @@ const broken = await send({
 	source: readFileSync(join(root, 'test', 'fixtures', 'worker', 'unicode-broken-marker.tex'), 'utf8'),
 	options: { captureLog: true },
 });
-if (broken.type !== 'error' || !broken.message.includes('unbalanced') || !broken.log?.length) {
+if (
+	broken.type !== 'error' ||
+	broken.kind !== 'tex-error' ||
+	!broken.message.includes('<g>') ||
+	!broken.log?.length
+) {
 	failures++;
 	console.error('FAIL  Broken Unicode markers must return an error with the TeX log.');
 } else console.log('OK    Broken Unicode markers report an error with the TeX log.');

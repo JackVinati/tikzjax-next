@@ -3,6 +3,20 @@
 What changed in each release, newest first. The release workflow puts a version's section at the
 top of its notes on GitHub, and will not publish a version that has none.
 
+## 0.2.1 — unreleased
+
+- Labels in Chinese, Greek, Cyrillic, Arabic, Hebrew, Thai, Devanagari, IPA and emoji are drawn.
+  The engine has no fonts for them, so TeX sets each character as a box one em wide, and the
+  plugin writes the character over it in your system's sans-serif font; nodes and arrows are
+  placed around it as around any other text. Until now TeX left each one out with "Unicode
+  character … not set up for use with LaTeX". `¥` `¢` `‰` `½` `№` typed in a label, which made the
+  whole diagram fail, are drawn the same way. Names in these scripts, of nodes, coordinates,
+  styles, colours and `\label`s, work as they did in 0.2.0. The README lists what the text drawn
+  this way cannot do. From pull request #2.
+- After updating, every cached diagram is compiled once more, the next time it is shown: the
+  engine's id is part of the cache key, and the change above moved it. A diagram with none of
+  these characters in its text comes out the same, byte for byte.
+
 ## 0.2.0 — 2026-10-13
 
 - After updating, every cached diagram is compiled once more, the next time it is shown: the

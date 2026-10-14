@@ -1,8 +1,3 @@
-\expandafter\long\expandafter\def\csname tikzjaxUnicodeBridge\endcsname#1#2{%
-  \special{dvisvgm:raw <g data-tikzjax-unicode="#1">}%
-  #2%
-  \special{dvisvgm:raw </g>}%
-}
 \begin{tikzpicture}[
   node distance=8mm,
   startstop/.style={rectangle, rounded corners, fill=blue!20, draw},
@@ -10,17 +5,17 @@
   decision/.style={diamond, aspect=2, draw, fill=green!20},
   arrow/.style={-{Stealth[length=3mm]}, thick}]
 
-\node[startstop] (start) {\csname tikzjaxUnicodeBridge\endcsname{0}{\hbox to1em{M\hss}\hbox to1em{M\hss}}};
-\node[process, below=of start] (read) {\csname tikzjaxUnicodeBridge\endcsname{1}{\hbox to1em{M\hss}\hbox to1em{M\hss}\hbox to1em{M\hss}\hbox to1em{M\hss}}};
-\node[decision, below=of read] (cond) {\csname tikzjaxUnicodeBridge\endcsname{2}{\hbox to1em{M\hss}\hbox to1em{M\hss}\hbox to1em{M\hss}\hbox to1em{M\hss}\hbox to1em{M\hss}}};
-\node[process, below left=12mm and 8mm of cond] (yes) {\csname tikzjaxUnicodeBridge\endcsname{3}{\hbox to1em{M\hss}\hbox to1em{M\hss}\hbox to1em{M\hss}\hbox to1em{M\hss}}};
-\node[process, below right=12mm and 8mm of cond] (no) {\csname tikzjaxUnicodeBridge\endcsname{4}{\hbox to1em{M\hss}\hbox to1em{M\hss}}};
-\node[startstop, below=20mm of cond] (end) {\csname tikzjaxUnicodeBridge\endcsname{5}{\hbox to1em{M\hss}\hbox to1em{M\hss}}};
+\node[startstop] (start) {开始};
+\node[process, below=of start] (read) {读取数据};
+\node[decision, below=of read] (cond) {数据有效吗};
+\node[process, below left=12mm and 8mm of cond] (yes) {处理数据};
+\node[process, below right=12mm and 8mm of cond] (no) {报错};
+\node[startstop, below=20mm of cond] (end) {结束};
 
 \draw[arrow] (start) -- (read);
 \draw[arrow] (read) -- (cond);
-\draw[arrow] (cond) -| node[above,pos=0.75] {\csname tikzjaxUnicodeBridge\endcsname{6}{\hbox to1em{M\hss}}} (yes);
-\draw[arrow] (cond) -| node[above,pos=0.75] {\csname tikzjaxUnicodeBridge\endcsname{7}{\hbox to1em{M\hss}}} (no);
+\draw[arrow] (cond) -| node[above,pos=0.75] {是} (yes);
+\draw[arrow] (cond) -| node[above,pos=0.75] {否} (no);
 \draw[arrow] (yes) |- (end);
 \draw[arrow] (no)  |- (end);
 \end{tikzpicture}
