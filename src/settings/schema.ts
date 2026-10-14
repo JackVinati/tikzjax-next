@@ -35,9 +35,11 @@ export interface TikzSettings {
 
 	// --- what the plugin has told this vault, not in the settings tab -------------------------------
 	/**
-	 * The notice that TeX runs without the JIT, which makes it about twenty times slower, has been
-	 * shown (internal/DECISIONS.md D33). It is shown once, on an iPhone or iPad, the first time an
-	 * engine starts without one; false shows it again.
+	 * The notice that TeX seems to run without the JIT, which makes it about twenty times slower, has
+	 * been shown (internal/DECISIONS.md D33). It is shown once, on an iPhone or iPad, when two engine
+	 * starts of a session have found no JIT; false shows it again. Synced with the rest of data.json:
+	 * once one device has shown it, another in Lockdown Mode does not, though its diagnostics view
+	 * still says so, and a data.json Sync brings back from before it was shown can show it again.
 	 */
 	jitNoticeShown: boolean;
 	/**

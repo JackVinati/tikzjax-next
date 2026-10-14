@@ -1,4 +1,3 @@
-import type { BootTimings } from '../../engine-src/protocol';
 import type { Device } from '../platform/device';
 import { outOfStep, versionPair } from '../platform/version';
 import { README_LOCKDOWN, README_OUT_OF_STEP, STRINGS } from './strings';
@@ -23,19 +22,28 @@ export function withReadme(
 }
 
 /**
- * The notice that TeX runs without the JIT, for an engine that has just started: only on iOS and
- * iPadOS, where Lockdown Mode is the usual cause and can be told what to do about, only when the
- * engine's probe found the JIT off, and only if it has not been shown before. Elsewhere, and on
- * Android above all, the diagnostics view says what the probe found and nothing interrupts anyone:
- * nothing there turns the JIT off that a user would know of, and a slow phone is the device the
- * probe is likeliest to take for one without a JIT.
+ * How many engine starts of a session must have found the JIT off, and none on, before the notice
+ * says so. One probe is one moment: a phone in Low Power Mode, hot, or busy launching the app can be
+ * slow enough for that moment to read as one without a JIT, where a second start, after the engine's
+ * idle stop or a return from the background, is another (internal/DECISIONS.md D33).
+ */
+export const JIT_OFF_STARTS = 2;
+
+/**
+ * The notice that TeX seems to run without the JIT, for an engine that has just started: only on
+ * iOS and iPadOS, where Lockdown Mode is the likely cause and can be told what to do about; only
+ * when JIT_OFF_STARTS of this session's engine starts found the JIT off, and none on, as `starts`
+ * counts them; and only if it has not been shown before. Elsewhere,
+ * and on Android above all, the diagnostics view says what the probe found and nothing interrupts
+ * anyone: nothing there turns the JIT off that a user would know of, and a slow phone is the device
+ * the probe is likeliest to take for one without a JIT.
  */
 export function noJitNotice(
-	boot: BootTimings | null,
+	starts: { readonly on: number; readonly off: number },
 	os: Device['os'],
 	shown: boolean,
 ): DocumentFragment | null {
-	if (shown || os !== 'iOS' || boot?.jit?.on !== false) return null;
+	if (shown || os !== 'iOS' || starts.on > 0 || starts.off < JIT_OFF_STARTS) return null;
 	return createFragment((message) =>
 		withReadme(message, STRINGS.jitNotice, STRINGS.readMore, README_LOCKDOWN),
 	);

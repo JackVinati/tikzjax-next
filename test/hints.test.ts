@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { explain, type TexFailure } from '../src/engine/hints';
+import { explain, NO_WEBASSEMBLY, type TexFailure } from '../src/engine/hints';
 import type { EngineCapabilities, TexErrorKind } from '../src/types';
 
 const caps = (over: Partial<EngineCapabilities> = {}): EngineCapabilities => ({
@@ -371,6 +371,27 @@ describe('the remaining kinds', () => {
 
 		expect(d.kind).toBe('engine-unavailable');
 		expect(d.hint).toMatch(/Reload Obsidian/);
+	});
+
+	/*
+	 * Lockdown Mode on some versions of iOS takes WebAssembly away, and the engine's start fails at its
+	 * first use of it: in the host, which then starts no worker, or in a worker, as WebKit and V8 say
+	 * it. Telling that phone to close its other apps would send someone after the wrong thing.
+	 */
+	it('explains a start without WebAssembly as that, with what Lockdown Mode has to do with it', () => {
+		for (const message of [
+			NO_WEBASSEMBLY,
+			"ReferenceError: Can't find variable: WebAssembly",
+			'Uncaught ReferenceError: WebAssembly is not defined',
+		]) {
+			const d = explain(failure({ kind: 'engine-unavailable', message }), caps());
+			expect(d.kind, message).toBe('engine-unavailable');
+			expect(d.message, message).toBe(
+				'The TeX engine could not start: this device runs no WebAssembly.',
+			);
+			expect(d.hint, message).toMatch(/Lockdown Mode turns it off on some versions of iOS/);
+			expect(d.hint, message).not.toMatch(/close other apps/);
+		}
 	});
 
 	it('returns something useful for a kind it does not know', () => {

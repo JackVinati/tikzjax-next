@@ -10,6 +10,7 @@ import type {
 	WorkerResponse,
 } from '../../engine-src/protocol';
 import { isQueueError } from '../queue/queue';
+import { NO_WEBASSEMBLY } from './hints';
 import { pickEngine } from './route';
 import {
 	InterruptedError,
@@ -459,6 +460,11 @@ export class WorkerHost implements TexHost {
 	}
 
 	private spawn(): Engine {
+		// The engine is WebAssembly. Where the platform has none, as Lockdown Mode leaves some versions
+		// of iOS, no worker is started to fail on it, nor sent the payload: the start fails at once,
+		// and the card says why (engine/hints.ts).
+		if (typeof WebAssembly !== 'object')
+			throw new TexError('engine-unavailable', [], undefined, undefined, NO_WEBASSEMBLY);
 		let blobUrl: string | null = null;
 		let worker: Worker | undefined;
 		try {

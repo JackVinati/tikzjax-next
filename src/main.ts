@@ -58,6 +58,8 @@ export default class TikzjaxNextPlugin extends Plugin {
 	private readonly records: RenderRecord[] = [];
 	/** The "Render all diagrams in this note" runs under way, each counting its own blocks. */
 	private readonly tallies = new Set<BlockTally>();
+	/** How many engine starts this session found the JIT on, and how many off (warnIfNoJit). */
+	private readonly jitStarts = { on: 0, off: 0 };
 
 	get engineInventory(): EngineInventory | null {
 		return this.host?.engineInventory ?? null;
@@ -290,12 +292,14 @@ export default class TikzjaxNextPlugin extends Plugin {
 	}
 
 	/**
-	 * Say, once, on an iPhone or iPad, that TeX runs without the JIT there, which Lockdown Mode is the
-	 * usual cause of (engine-src/jit.ts, internal/DECISIONS.md D33). Until it is tapped, since it is
-	 * shown once; the diagnostics view says it whenever it is opened.
+	 * Say, once, on an iPhone or iPad, that TeX seems to run without the JIT there, which Lockdown Mode
+	 * is the likely cause of (engine-src/jit.ts, internal/DECISIONS.md D33), once two of this
+	 * session's engine starts have found it off and none on. Until it is tapped, since it is shown
+	 * once; the diagnostics view says it whenever it is opened.
 	 */
 	private warnIfNoJit(boot: BootTimings | null): void {
-		const message = noJitNotice(boot, device().os, this.settings.jitNoticeShown);
+		if (boot?.jit !== undefined) this.jitStarts[boot.jit.on ? 'on' : 'off']++;
+		const message = noJitNotice(this.jitStarts, device().os, this.settings.jitNoticeShown);
 		if (message === null) return;
 		new Notice(message, 0);
 		this.settings.jitNoticeShown = true;

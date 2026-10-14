@@ -33,7 +33,13 @@ function snapshot(over: Partial<DiagnosticsSnapshot> = {}): DiagnosticsSnapshot 
 			obsidian: '1.7.2',
 			platform: 'phone',
 			os: 'iOS',
-			webView: { decompressionStream: false, fromBase64: false, cores: 6, memoryGiB: null },
+			webView: {
+				webAssembly: true,
+				decompressionStream: false,
+				fromBase64: false,
+				cores: 6,
+				memoryGiB: null,
+			},
 			engineId: '5e861510239768c57ca2965eb2329bd2bafc1370df4821cd8d3b7088ce60efde',
 			outputRevision: '5e861510239768c57ca2965eb2329bd2bafc1370df4821cd8d3b7088ce60efde',
 		},
@@ -103,7 +109,7 @@ describe('the text the diagnostics view copies', () => {
 		expect(text).toContain('Obsidian: 1.7.2');
 		expect(text).toContain('Platform: phone, iOS');
 		expect(text).toContain(
-			'WebView: DecompressionStream no, Uint8Array.fromBase64 no, 6 cores, deviceMemory unknown',
+			'WebView: WebAssembly yes, DecompressionStream no, Uint8Array.fromBase64 no, 6 cores, deviceMemory unknown',
 		);
 		expect(text).toContain('Engine: 5e861510239768c57ca2965eb2329bd2bafc1370df4821cd8d3b7088ce60efde');
 		expect(text).toContain(
@@ -245,6 +251,14 @@ describe('the text the diagnostics view copies', () => {
 		expect(started({ on: true })).toContain('\nJIT: on (probably)\n');
 		expect(started(undefined)).toContain('\nJIT: not measured yet\n');
 		expect(text).toContain('\nJIT: not measured yet\n');
+		// With no WebAssembly no engine starts to measure it, and the copy says why.
+		const base = snapshot();
+		const noWasm = diagnosticsText({
+			...base,
+			about: { ...base.about, webView: { ...base.about.webView, webAssembly: false } },
+		});
+		expect(noWasm).toContain('\nJIT: no WebAssembly\n');
+		expect(noWasm).toContain('WebView: WebAssembly no, ');
 	});
 
 	it('has the cache and the queue in it', () => {

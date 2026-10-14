@@ -291,8 +291,18 @@ export class DebugView extends ItemView {
 	 * and on an iPhone or iPad without one, why that is likely and what to do about it.
 	 */
 	private jit(section: HTMLElement, report: EngineReport, about: About): void {
+		const facts = section.createDiv({ cls: 'tikzjax-debug-facts' });
+		// No WebAssembly, no engine to probe: Lockdown Mode does that on some versions of iOS.
+		if (!about.webView.webAssembly) {
+			this.fact(facts, STRINGS.jitFact, STRINGS.jitNoWebAssembly);
+			if (about.os === 'iOS') {
+				const hint = section.createDiv({ cls: 'tikzjax-debug-warning' });
+				withReadme(hint, STRINGS.noWebAssemblyHint, STRINGS.jitHintLink, README_LOCKDOWN);
+			}
+			return;
+		}
 		const on = jitOf(report);
-		this.fact(section.createDiv({ cls: 'tikzjax-debug-facts' }), STRINGS.jitFact, STRINGS.jitState(on));
+		this.fact(facts, STRINGS.jitFact, STRINGS.jitState(on));
 		if (on === false && about.os === 'iOS') {
 			const hint = section.createDiv({ cls: 'tikzjax-debug-warning' });
 			withReadme(hint, STRINGS.jitHint, STRINGS.jitHintLink, README_LOCKDOWN);

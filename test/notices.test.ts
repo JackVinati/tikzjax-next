@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { BootTimings } from '../engine-src/protocol';
 import { installObsidianDom } from './stubs/obsidian-dom';
-import { noJitNotice, outOfStepNotice } from '../src/ui/notices';
+import { JIT_OFF_STARTS, noJitNotice, outOfStepNotice } from '../src/ui/notices';
 import { README_LOCKDOWN, README_OUT_OF_STEP } from '../src/ui/strings';
 
 beforeAll(() => {
@@ -10,50 +9,47 @@ beforeAll(() => {
 });
 
 /*
- * What the plugin tells someone once, unasked, about their device: that TeX runs without the JIT on
+ * What the plugin tells someone once, unasked, about their device: that TeX seems to run without the JIT on
  * their iPhone or iPad, which makes every diagram about twenty times slower (internal/DECISIONS.md
  * D33), and that the main.js the device runs is not the version its manifest.json says, which is
  * what Obsidian Sync Standard leaves behind (D34). main.ts shows what these return and keeps in
  * data.json that it did.
  */
 
-const boot = (jit: BootTimings['jit']): BootTimings => ({
-	decodeMs: 3,
-	inflateMs: 30,
-	compileMs: 1,
-	totalMs: 47,
-	nativeInflate: true,
-	nativeBase64: true,
-	jit,
-});
-
-const OFF = boot({ on: false, fastestMs: 3, attempts: 4, spentMs: 12 });
-const ON = boot({ on: true, fastestMs: 0, attempts: 1, spentMs: 1 });
-
 describe('the notice that TeX runs without the JIT', () => {
-	it('is shown on an iPhone or iPad whose engine found the JIT off, with what to do and a link', () => {
-		const message = noJitNotice(OFF, 'iOS', false);
-		expect(message?.textContent).toContain('TeX runs without the JIT compiler on this device');
-		expect(message?.textContent).toContain('Lockdown Mode is the usual cause.');
+	const offTwice = { on: 0, off: 2 };
+
+	it('is shown on an iPhone or iPad whose engine found the JIT off twice, with what to do and a link', () => {
+		const message = noJitNotice(offTwice, 'iOS', false);
+		expect(message?.textContent).toContain('TeX seems to run without the JIT compiler on this device');
+		expect(message?.textContent).toContain('If Lockdown Mode is on, it is the likely cause');
 		expect(message?.textContent).toContain(
 			'Settings → Privacy & Security → Lockdown Mode → Configure Web Browsing',
 		);
 		expect(message?.querySelector('a')?.getAttribute('href')).toBe(README_LOCKDOWN);
 	});
 
-	it('is shown once', () => {
-		expect(noJitNotice(OFF, 'iOS', true)).toBeNull();
+	it('waits for a second start to find it off: one probe is one moment, which a busy phone can make slow', () => {
+		expect(JIT_OFF_STARTS).toBe(2);
+		expect(noJitNotice({ on: 0, off: 1 }, 'iOS', false)).toBeNull();
+		expect(noJitNotice({ on: 0, off: 3 }, 'iOS', false)).not.toBeNull();
 	});
 
-	it('is not shown when the JIT is on, or nobody measured it', () => {
-		expect(noJitNotice(ON, 'iOS', false)).toBeNull();
-		expect(noJitNotice(boot(undefined), 'iOS', false)).toBeNull();
-		expect(noJitNotice(null, 'iOS', false)).toBeNull();
+	it('is not shown once a start this session found the JIT on', () => {
+		expect(noJitNotice({ on: 1, off: 2 }, 'iOS', false)).toBeNull();
+	});
+
+	it('is shown once', () => {
+		expect(noJitNotice(offTwice, 'iOS', true)).toBeNull();
+	});
+
+	it('is not shown when nobody measured it', () => {
+		expect(noJitNotice({ on: 0, off: 0 }, 'iOS', false)).toBeNull();
 	});
 
 	it('is not shown anywhere but iOS and iPadOS, where Lockdown Mode is not the cause', () => {
 		for (const os of ['Android', 'macOS', 'Windows', 'Linux', 'unknown'] as const)
-			expect(noJitNotice(OFF, os, false), os).toBeNull();
+			expect(noJitNotice(offTwice, os, false), os).toBeNull();
 	});
 });
 

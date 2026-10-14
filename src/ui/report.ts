@@ -154,7 +154,9 @@ export function diagnosticsText(s: DiagnosticsSnapshot): string {
 		STRINGS.reportObsidian(about.obsidian),
 		STRINGS.reportPlatform(about.platform, about.os),
 		STRINGS.reportWebView(about.webView),
-		STRINGS.reportJit(jitOf(engine)),
+		STRINGS.reportJit(
+			about.webView.webAssembly ? STRINGS.jitState(jitOf(engine)) : STRINGS.jitNoWebAssembly,
+		),
 		STRINGS.reportEngine(about.engineId),
 		STRINGS.reportOutputRevision(about.outputRevision),
 		'',

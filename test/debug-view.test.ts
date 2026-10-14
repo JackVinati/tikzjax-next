@@ -41,7 +41,13 @@ function source(
 			obsidian: '1.7.2',
 			platform: 'desktop',
 			os: 'Windows',
-			webView: { decompressionStream: true, fromBase64: false, cores: 8, memoryGiB: 8 },
+			webView: {
+				webAssembly: true,
+				decompressionStream: true,
+				fromBase64: false,
+				cores: 8,
+				memoryGiB: 8,
+			},
 			engineId: 'e'.repeat(64),
 			outputRevision: 'r'.repeat(64),
 			built: '0.2.1',
@@ -264,11 +270,12 @@ describe('the JIT in the diagnostics view', () => {
 		);
 	});
 
-	it('says, on an iPhone or iPad without it, that Lockdown Mode is the usual cause and how to exclude Obsidian', async () => {
+	it('says, on an iPhone or iPad without it, that Lockdown Mode is the likely cause if it is on, and how to exclude Obsidian', async () => {
 		const view = await opened(source([], startedOnce(OFF), { platform: 'phone', os: 'iOS' }));
 		expect(factsOf(view)['JIT']).toBe('off (probably)');
 		const [hint] = warningsOf(view);
-		expect(hint?.textContent).toContain('TeX runs without the JIT compiler on this device');
+		expect(hint?.textContent).toContain('TeX seems to run without the JIT compiler on this device');
+		expect(hint?.textContent).toContain('If Lockdown Mode is on, it is the likely cause');
 		expect(hint?.textContent).toContain(
 			'Settings → Privacy & Security → Lockdown Mode → Configure Web Browsing',
 		);
@@ -283,6 +290,29 @@ describe('the JIT in the diagnostics view', () => {
 			expect(factsOf(view)['JIT'], os).toBe('off (probably)');
 			expect(warningsOf(view), os).toEqual([]);
 		}
+	});
+
+	/*
+	 * Lockdown Mode takes WebAssembly away altogether on some versions of iOS, and then no engine
+	 * starts, so none is there to probe: the view said "not measured yet" and nothing of Lockdown Mode.
+	 */
+	it('says, on an iPhone or iPad with no WebAssembly, that the engine cannot start, and what Lockdown Mode does', async () => {
+		const noWasm = {
+			webAssembly: false,
+			decompressionStream: true,
+			fromBase64: false,
+			cores: 6,
+			memoryGiB: null,
+		};
+		const view = await opened(source([], NO_STARTS, { platform: 'phone', os: 'iOS', webView: noWasm }));
+		expect(factsOf(view)['JIT']).toBe('no WebAssembly');
+		const [hint] = warningsOf(view);
+		expect(hint?.textContent).toContain('This device runs no WebAssembly, which the TeX engine is');
+		expect(hint?.textContent).toContain('Lockdown Mode turns WebAssembly off on some versions of iOS');
+		expect(hint?.querySelector('a')?.getAttribute('href')).toBe(README_LOCKDOWN);
+		const elsewhere = await opened(source([], NO_STARTS, { os: 'Android', webView: noWasm }));
+		expect(factsOf(elsewhere)['JIT']).toBe('no WebAssembly');
+		expect(warningsOf(elsewhere)).toEqual([]);
 	});
 });
 

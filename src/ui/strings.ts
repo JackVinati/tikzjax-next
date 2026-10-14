@@ -128,18 +128,30 @@ export const STRINGS = {
 	// the latest engine to start found, and, on an iPhone or iPad without one, what to do about it.
 	jitFact: 'JIT',
 	jitState,
-	/** Shown in the view on iOS and iPadOS when the JIT is off, before the link to the README. */
+	/**
+	 * Shown in the view on iOS and iPadOS when the JIT seems off, before the link to the README. A
+	 * guess from one short loop, so worded as one, and Lockdown Mode as a cause only if it is on.
+	 */
 	jitHint:
-		'TeX runs without the JIT compiler on this device, which makes diagrams about twenty times ' +
-		'slower. Lockdown Mode is the usual cause. It can stay on with Obsidian excluded: Settings → ' +
-		'Privacy & Security → Lockdown Mode → Configure Web Browsing, then restart Obsidian.',
+		'TeX seems to run without the JIT compiler on this device, which makes diagrams about twenty ' +
+		'times slower. If Lockdown Mode is on, it is the likely cause, and it can stay on with Obsidian ' +
+		'excluded: Settings → Privacy & Security → Lockdown Mode → Configure Web Browsing, then restart ' +
+		'Obsidian.',
 	jitHintLink: 'Lockdown Mode in the README',
-	/** Shown once, the first time an engine starts without the JIT on iOS or iPadOS. */
+	/** The JIT line where the WebView has no WebAssembly, so that the engine cannot start at all. */
+	jitNoWebAssembly: 'no WebAssembly',
+	/** Shown in the view on iOS and iPadOS when there is no WebAssembly, before the link to the README. */
+	noWebAssemblyHint:
+		'This device runs no WebAssembly, which the TeX engine is, so it cannot start. Lockdown Mode ' +
+		'turns WebAssembly off on some versions of iOS: it can stay on with Obsidian excluded, under ' +
+		'Settings → Privacy & Security → Lockdown Mode → Configure Web Browsing, then restart Obsidian, ' +
+		'though on some versions that does not bring WebAssembly back.',
+	/** Shown once, when two engine starts of a session on iOS or iPadOS found the JIT off. */
 	jitNotice:
-		'TikZJax Next: TeX runs without the JIT compiler on this device, which makes diagrams about ' +
-		'twenty times slower. Lockdown Mode is the usual cause. It can stay on with Obsidian excluded: ' +
-		'Settings → Privacy & Security → Lockdown Mode → Configure Web Browsing, then restart Obsidian. ' +
-		'This notice is shown once; "Open TikZ diagnostics" says it again.',
+		'TikZJax Next: TeX seems to run without the JIT compiler on this device, which makes diagrams ' +
+		'about twenty times slower. If Lockdown Mode is on, it is the likely cause, and it can stay on ' +
+		'with Obsidian excluded: Settings → Privacy & Security → Lockdown Mode → Configure Web Browsing, ' +
+		'then restart Obsidian. This notice is shown once; "Open TikZ diagnostics" says it again.',
 	readMore: 'Read more',
 
 	// main.js and manifest.json of different versions (src/platform/version.ts, D34).
@@ -159,11 +171,13 @@ export const STRINGS = {
 	reportPlugin: (manifest: string, built: string | null) =>
 		`Plugin: ${manifest}, main.js ${built ?? 'unknown'}` +
 		(built !== null && built !== manifest ? ', out of step: reinstall the plugin on this device' : ''),
-	reportJit: (on: boolean | null) => `JIT: ${jitState(on)}`,
+	/** The JIT line as it is copied: what the probe found, or that there is no WebAssembly to run. */
+	reportJit: (state: string) => `JIT: ${state}`,
 	reportObsidian: (version: string) => `Obsidian: ${version}`,
 	reportPlatform: (platform: string, os: string) => `Platform: ${platform}, ${os}`,
 	reportWebView: (features: WebViewFeatures) =>
-		`WebView: DecompressionStream ${yesNo(features.decompressionStream)}, ` +
+		`WebView: WebAssembly ${yesNo(features.webAssembly)}, ` +
+		`DecompressionStream ${yesNo(features.decompressionStream)}, ` +
 		`Uint8Array.fromBase64 ${yesNo(features.fromBase64)}, ` +
 		`${features.cores === null ? 'cores unknown' : `${features.cores} cores`}, ` +
 		`deviceMemory ${features.memoryGiB === null ? 'unknown' : `${features.memoryGiB} GiB`}`,

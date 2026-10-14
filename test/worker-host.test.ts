@@ -11,6 +11,7 @@ vi.mock('virtual:engine', () => ({
 }));
 
 import { buildInput, routeOf } from '../engine-src/document';
+import { NO_WEBASSEMBLY } from '../src/engine/hints';
 import { pickEngine } from '../src/engine/route';
 import { WorkerHost } from '../src/engine/worker-host';
 import { QueueError } from '../src/queue/queue';
@@ -382,6 +383,29 @@ describe('a worker that crashes', () => {
 		expect((a.result.error as TexError).kind).toBe('engine-unavailable');
 		expect(b.result.status).toBe('pending');
 		expect(FakeWorker.spawned).toHaveLength(2);
+	});
+});
+
+describe('a platform with no WebAssembly', () => {
+	/*
+	 * As Lockdown Mode leaves some versions of iOS. The engine is WebAssembly, so no worker is started
+	 * to fail on it, nor sent the payload, and the job fails with what the card explains
+	 * (engine/hints.ts).
+	 */
+	it('starts no worker, and fails the job saying there is no WebAssembly', async () => {
+		const real = globalThis.WebAssembly;
+		(globalThis as { WebAssembly?: unknown }).WebAssembly = undefined;
+		try {
+			const host = new WorkerHost();
+			const a = render(host, 'a');
+			await tick();
+			expect(FakeWorker.spawned).toHaveLength(0);
+			expect((a.result.error as TexError).kind).toBe('engine-unavailable');
+			expect((a.result.error as TexError).message).toBe(NO_WEBASSEMBLY);
+			await expect(host.ready()).rejects.toThrow(NO_WEBASSEMBLY);
+		} finally {
+			globalThis.WebAssembly = real;
+		}
 	});
 });
 

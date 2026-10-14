@@ -116,6 +116,12 @@ const EXPL3_PACKAGES: ReadonlySet<string> = new Set([
 	'unicode-math',
 ]);
 
+/** What the host says when the platform has no WebAssembly, and starts no worker (engine/worker-host.ts). */
+export const NO_WEBASSEMBLY = 'This device runs no WebAssembly.';
+
+/** A start that failed for want of WebAssembly: the host's words, WebKit's and V8's. */
+const MISSING_WEBASSEMBLY = /runs no WebAssembly|Can't find variable: WebAssembly|WebAssembly is not defined/;
+
 const CONTROL_SEQUENCE = /\\[a-zA-Z@]+/g;
 
 /**
@@ -473,7 +479,19 @@ export function explain(error: TexFailure, caps: EngineCapabilities): Diagnostic
 				hint: 'An export waits only so long, in all, for diagrams that are not cached yet. Run "Render all diagrams in this note" first, or open the note and let its diagrams render, then export again: cached diagrams go into the PDF at once.',
 			};
 
+		// The engine is WebAssembly, and a start that found none fails at its first use of it: the host
+		// says so before it starts a worker (NO_WEBASSEMBLY, above), and a worker says
+		// "Can't find variable: WebAssembly" in WebKit, "WebAssembly is not defined" in V8. Lockdown
+		// Mode does that on some versions of iOS, where on others it only takes the JIT away (D33), and
+		// telling such a phone to close its other apps would send someone after the wrong thing.
 		case 'engine-unavailable':
+			if (MISSING_WEBASSEMBLY.test(error.message))
+				return {
+					kind: 'engine-unavailable',
+					message: 'The TeX engine could not start: this device runs no WebAssembly.',
+					line: error.line,
+					hint: 'The engine is WebAssembly. On an iPhone or iPad, Lockdown Mode turns it off on some versions of iOS: it can stay on with Obsidian excluded, under Settings → Privacy & Security → Lockdown Mode → Configure Web Browsing, then restart Obsidian, though on some versions that does not bring WebAssembly back. The README has more under Lockdown Mode.',
+				};
 			return {
 				kind: 'engine-unavailable',
 				message: 'The TeX engine could not start.',

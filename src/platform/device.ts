@@ -20,6 +20,11 @@ export interface Device {
 
 /** What the WebView has, by feature check rather than by name. */
 export interface WebViewFeatures {
+	/**
+	 * `WebAssembly`, which the engine is. Every WebView the plugin runs in has it, but where Lockdown
+	 * Mode takes it away, as on some versions of iOS (internal/DECISIONS.md D33).
+	 */
+	webAssembly: boolean;
 	/** `DecompressionStream`: native gzip. Safari 16.4 and Chrome 80 on. */
 	decompressionStream: boolean;
 	/** `Uint8Array.fromBase64`: native base64. */
@@ -58,6 +63,7 @@ export function webViewFeatures(): WebViewFeatures {
 		deviceMemory?: number;
 	};
 	return {
+		webAssembly: typeof WebAssembly === 'object',
 		decompressionStream:
 			typeof (window as { DecompressionStream?: unknown }).DecompressionStream === 'function',
 		fromBase64: typeof (Uint8Array as { fromBase64?: unknown }).fromBase64 === 'function',
