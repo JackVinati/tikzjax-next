@@ -38,9 +38,11 @@
  * 11. A line longer than what is left of TeX's buffer throws LineTooLong, where it threw the
  *     RangeError of a view that refused it, so that the worker tells it from a run cut off by the
  *     engine's stack (D29).
- * 12. The engine's \tikzjaxsnapshot, which the format runs at the end of every \begin{document},
- *     calls a hook here with TeX's memory as it stands there, for a run to be saved where it is
- *     (D32). With no hook it is \ignorespaces.
+ * 12. A run can be saved where the engine's \tikzjaxsnapshot stands, once its \begin{document} is
+ *     done, and later runs started from there: the host calls a hook with TeX's memory as it is,
+ *     copies its own table of files, and puts that back for a run that starts from the saved memory
+ *     (worker.ts, ./snapshot, D32). It also notes whether TeX learnt anything about the job's own
+ *     file other than by reading it line by line, which a saved run could not stand for.
  */
 
 import { tfmData } from '@drgrice1/dvi2html';
@@ -48,7 +50,7 @@ import { tfmData } from '@drgrice1/dvi2html';
 export const pages = 2500;
 
 /** One TeX input file: bytes, plus the read/write cursors TeX drives. */
-interface TexFile {
+export interface TexFile {
 	filename: string;
 	content?: Uint8Array;
 	position?: number;
@@ -179,6 +181,7 @@ export const deleteEverything = () => {
 	showConsole = false;
 	consoleBuffer = '';
 	snapshotHook = null;
+	jobFile = null;
 	// inflatedCache is NOT cleared (change 3): the pgf tree costs ~100 ms to re-inflate and is
 	// identical on every run.
 };
@@ -206,6 +209,9 @@ const JOB_LOCAL = /\.(aux|log|dvi|toc|out|nav|snm)$/;
 
 const openSync = (filename: string, mode: 'r' | 'w'): number => {
 	let buffer: Uint8Array | undefined;
+	// The job's own file opened again (change 12): a reader that is not TeX's main input, which can
+	// read past the line TeX's main input has reached.
+	if (filename === jobFile && jobFileOpens++ > 0) jobFileLearnt = true;
 
 	if (filesystem[filename]) {
 		buffer = filesystem[filename];
@@ -332,8 +338,9 @@ export const setInput = (input: string, cb?: () => void) => {
 /**
  * Called by \tikzjaxsnapshot (engine-build/changes/snapshot.ch), which the format runs at the end of
  * every \begin{document}, with TeX's memory as it stands there and the engine's flag for a resumed
- * run set in it. Whoever set the hook may copy the memory during the call, and TeX goes on when it
- * returns. With no hook the command is \ignorespaces.
+ * run set in it. Whoever set the hook may copy the memory, and this host's own state with
+ * captureHostState, during the call, and TeX goes on when it returns. With no hook the command is
+ * \ignorespaces.
  */
 let snapshotHook: (() => void) | null = null;
 
@@ -351,6 +358,88 @@ export const snapshotPoint = () => {
 		// counts its own failures, and this keeps anything it did not catch from unwinding TeX,
 		// where a RangeError would read as the engine's stack running out (worker.ts runPass).
 	}
+};
+
+/** The job's own input file, watched while a run that may be saved reads its preamble. */
+let jobFile: string | null = null;
+let jobFileOpens = 0;
+/** TeX asked for the watched file's size, or opened it a second time: see watchJobFile. */
+let jobFileLearnt = false;
+
+/**
+ * Watch `name`, the job's own input file, until the end of the run; null stops.
+ *
+ * A saved run stands for the input up to the end of the line TeX had read when it was saved, and
+ * holds for a later input that starts with the same text. That is so only while TeX knows of the
+ * file what its main input read, a line at a time. \filesize of the job's file is the size of all
+ * of it, body included, and a second \openin or \input of it can read past that line: a run that
+ * did either before it was saved would carry what the first diagram's body says into a later one
+ * (internal/DECISIONS.md D32), so jobFileRead then says nothing can be saved.
+ */
+export const watchJobFile = (name: string | null) => {
+	jobFile = name;
+	jobFileOpens = 0;
+	jobFileLearnt = false;
+};
+
+/**
+ * How far TeX's main input has read the watched file, in bytes, through the newline that ends the
+ * line it read last: what a run saved now stands for. Undefined when TeX learnt more of the file
+ * than that (watchJobFile), has not opened it, or has read it to its end.
+ */
+export const jobFileRead = (): number | undefined => {
+	if (jobFile === null || jobFileLearnt) return undefined;
+	const main = files.find((f) => f.filename === jobFile && !f.written);
+	const content = main?.content;
+	const at = main?.position2;
+	if (main?.eof || content === undefined || at === undefined || at >= content.length || content[at] !== 10)
+		return undefined;
+	return at + 1;
+};
+
+/** What this host keeps of a run outside TeX's memory: the files TeX has open, and the terminal. */
+export interface HostState {
+	files: readonly TexFile[];
+	filesystem: Readonly<Record<string, Uint8Array>>;
+	inputBuffer: string | null;
+	consoleBuffer: string;
+}
+
+/**
+ * A copy of a file's entry that a later run can go on from. The bytes of a file TeX is writing are
+ * copied, because the run that goes on writes into them; the bytes of a file it reads are shared,
+ * because nothing writes them.
+ */
+const copyOfFile = (f: TexFile): TexFile =>
+	f.written && f.content ? { ...f, content: f.content.slice(0, Math.max(f.position ?? 0, 0)) } : { ...f };
+
+/** This run's host state, as \tikzjaxsnapshot found it. */
+export const captureHostState = (): HostState => ({
+	files: files.map(copyOfFile),
+	filesystem: { ...filesystem },
+	inputBuffer,
+	consoleBuffer,
+});
+
+/** The bytes a captured host state holds of its own: the files TeX was writing. */
+export const hostStateBytes = (state: HostState): number =>
+	state.files.reduce((n, f) => n + (f.written && f.content ? f.content.length : 0), 0);
+
+/**
+ * Put back a captured host state, for a run that starts from the memory saved with it. `inputs`
+ * replaces the text of files TeX is reading, by name: the job's file, whose text past the saved line
+ * is the new diagram's. Each file's entry keeps the place TeX had reached in it.
+ */
+export const restoreHostState = (state: HostState, inputs: Readonly<Record<string, Uint8Array>>) => {
+	files = state.files.map((f) => {
+		const copy = copyOfFile(f);
+		const replaced = inputs[f.filename];
+		if (replaced !== undefined && !f.written && f.content !== undefined) copy.content = replaced;
+		return copy;
+	});
+	filesystem = { ...state.filesystem, ...inputs };
+	inputBuffer = state.inputBuffer;
+	consoleBuffer = state.consoleBuffer;
 };
 
 /** What jumpOut throws. Its own class, so that a trap in the engine is never taken for one. */
@@ -528,6 +617,8 @@ export const getfilesize = (length: number, pointer: number): number => {
 	if (filename.startsWith('{')) filename = filename.replace(/^\{/, '').replace(/\}.*/, '');
 	filename = filename.replace(/ +$/g, '').replace(/^\*/, '');
 	if (filename === 'TeXformats:TEX.POOL') filename = 'tex.pool';
+	// The size of the job's own file is the size of all of it (change 12).
+	if (filename === jobFile) jobFileLearnt = true;
 
 	const bytes = filesystem[filename] ?? builtinMetrics(filename) ?? resolveBundled(filename);
 	if (bytes) return bytes.length;

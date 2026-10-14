@@ -53,10 +53,15 @@ const DUMP_GAP = 4096;
  * whole dump went into main.js gzipped, and every boot inflated all 156.25 MiB of it, half a
  * second on the desktop and the worker's largest allocation, to keep 22.3 MiB of it.
  *
- * Each run starts at a byte that is not zero and ends after the last one that is, so the dump is
- * `size` zeros with the runs written over them, and nothing is lost.
+ * Each run takes in its stretch of bytes that are not zero, from a multiple of `align` at or before
+ * its first one to a multiple of `align` at or after the end of its last one, or the end of the dump,
+ * and runs that then touch are one: the dump is `size` zeros with the runs written over them, and
+ * nothing is lost. With `align` 8, the runs' lengths are whole words, so each run's bytes lie in the
+ * worker's one buffer of them at the alignment they have in TeX's memory, and the worker can compare
+ * the memory with the dump a word at a time where it saves a run (engine-src/snapshot.ts,
+ * internal/DECISIONS.md D32).
  */
-export function packCoreDump(dump, gap = DUMP_GAP) {
+export function packCoreDump(dump, gap = DUMP_GAP, align = 8) {
 	const runs = [];
 	const n = dump.length;
 	let i = 0;
@@ -65,7 +70,7 @@ export function packCoreDump(dump, gap = DUMP_GAP) {
 		while (i < n && dump[i] === 0) i++;
 		if (i === n) break;
 
-		const start = i;
+		const start = i - (i % align);
 		let end;
 		for (;;) {
 			while (i < n && dump[i] !== 0) i++;
@@ -74,8 +79,17 @@ export function packCoreDump(dump, gap = DUMP_GAP) {
 			// The end of the dump, or a gap long enough to end the run on.
 			if (i === n || i - end >= gap) break;
 		}
-		runs.push(start, end - start);
-		total += end - start;
+		end = Math.min(n, end + ((align - (end % align)) % align));
+		const last = runs.length - 2;
+		if (last >= 0 && runs[last] + runs[last + 1] >= start) {
+			total += end - (runs[last] + runs[last + 1]);
+			runs[last + 1] = end - runs[last];
+		} else {
+			runs.push(start, end - start);
+			total += end - start;
+		}
+		// The next run starts past this one's end, which alignment may have moved forward.
+		i = Math.max(i, end);
 	}
 
 	const bytes = new Uint8Array(total);

@@ -23,7 +23,9 @@
  *  - TeX can be run TWICE, opt-in per block, so a second run can read the first run's .aux;
  *  - dvi2html is bundled with its TFM reader patched to read the last character of every font, and
  *    its glyph map to fall back to the face's own codepoint for a character the map lacks
- *    (scripts/dvi2html-patch.mjs), without which ä, ö, ü, \spadesuit, Ł and ł lose the whole diagram.
+ *    (scripts/dvi2html-patch.mjs), without which ä, ö, ü, \spadesuit, Ł and ł lose the whole diagram;
+ *  - a first pass is saved where TeX stands once its \begin{document} is done, and a later one with
+ *    the same input up to there starts from it, within a budget the host sends (./snapshot, D32).
  */
 
 // `buffer/` with the trailing slash, which is the specifier that CANNOT resolve to Node's builtin:
@@ -38,10 +40,20 @@ import { ungzip } from 'pako';
 import { dvi2html } from '@drgrice1/dvi2html';
 import * as library from './library';
 import { describeConvertError } from './convert-error';
-import { buildInput } from './document';
+import { buildInput, routeOf } from './document';
 import { gunzipExactly } from './inflate';
 import { checkCoreDump, packedLength, startingMemory, unpackCoreDump, type CoreDump } from './core-dump';
-import { restoreSpans, writtenSpans, type Span } from './reset';
+import { restoreSpans, writtenSpans, type RunMarks, type Span } from './reset';
+import {
+	diffAgainstDump,
+	logBytes,
+	saveSpans,
+	SnapshotCache,
+	stretchSpans,
+	unionSpans,
+	writeStretches,
+	type SavedRun,
+} from './snapshot';
 import {
 	CORE_DUMP_RUNS,
 	CORE_DUMP_SIZE,
@@ -57,6 +69,7 @@ import type {
 	OkMessage,
 	RenderOptions,
 	RenderTimings,
+	SnapshotState,
 	TexErrorKind,
 	WorkerRequest,
 } from './protocol';
@@ -198,35 +211,116 @@ const memoryForRun = (dump: CoreDump): { memory: WebAssembly.Memory; fresh: bool
 	return { memory: startingMemory(dump, library.pages), fresh: true };
 };
 
+/** The engine's marks of how far the string pool and the stack have gone in this run so far. */
+const marksOf = (exports: WebAssembly.Exports): RunMarks => {
+	const mark = (name: string): number => {
+		const read = exports[name];
+		return typeof read === 'function' ? (read as () => number)() : -1;
+	};
+	return {
+		poolPtrHigh: mark('getPoolPtrHigh'),
+		strPtrHigh: mark('getStrPtrHigh'),
+		stackLow: mark('getStackLow'),
+	};
+};
+
 /**
  * Keep `memory` for the next run, with where this run can have written: TeX's counters read from
- * it, the engine's marks of how far the string pool and the stack went, and what the host wrote.
- * Nothing is kept when they do not add up (./reset writtenSpans), and the next run takes a new one.
+ * it, the engine's marks of how far the string pool and the stack went, and what the host wrote,
+ * and `resumed`, where a saved run was written into it before the run began (./snapshot), whose
+ * bytes the next run must not find either. Nothing is kept when they do not add up (./reset
+ * writtenSpans), and the next run takes a new one.
  *
  * It never throws. It runs after TeX has ended, in the same try as drawing the DVI, and an error out
  * of it there would read as a run that wrote nothing: a fault in the reset's bookkeeping must cost
  * the next run a new Memory, never this run's diagram.
  */
-const keep = (memory: WebAssembly.Memory, exports: WebAssembly.Exports): void => {
+const keep = (memory: WebAssembly.Memory, exports: WebAssembly.Exports, resumed: readonly Span[]): void => {
 	try {
-		const mark = (name: string): number => {
-			const read = exports[name];
-			return typeof read === 'function' ? (read as () => number)() : -1;
-		};
 		const spans = writtenSpans(
 			new Uint8Array(memory.buffer),
 			CORE_LAYOUT,
-			{
-				poolPtrHigh: mark('getPoolPtrHigh'),
-				strPtrHigh: mark('getStrPtrHigh'),
-				stackLow: mark('getStackLow'),
-			},
+			marksOf(exports),
 			library.hostWrites(),
 		);
-		kept = spans === undefined ? null : { memory, spans };
+		kept = spans === undefined ? null : { memory, spans: unionSpans(spans, resumed) };
 	} catch {
 		kept = null;
 	}
+};
+
+// --- saved runs ----------------------------------------------------------------------------------
+
+/**
+ * Runs saved at the end of a first pass's \begin{document}, for later diagrams with the same input
+ * up to there (./snapshot, internal/DECISIONS.md D32), within the budget the host sends with each
+ * render: none until it sends one, and none again once it sends 0.
+ */
+const saved = new SnapshotCache(0);
+
+/** Saves that failed in this worker's life and kept nothing (the save's try, in runPass). */
+let saveFailures = 0;
+
+/** What a first pass does about saved runs: start from one, or save itself where TeX stands. */
+type PassPlan =
+	| { kind: 'resume'; run: SavedRun; input: Uint8Array }
+	| {
+			kind: 'save';
+			input: Uint8Array;
+			text: string;
+			logging: boolean;
+			route: string;
+			/** What the render has said on the terminal and failed to find by the snapshot point. */
+			log: readonly string[];
+			missing: readonly string[];
+	  };
+
+const decoder = new TextDecoder();
+
+/**
+ * Save a first pass where it stands, at \tikzjaxsnapshot: TeX's globals where they differ from the
+ * dump, the host's files, and what the render had said by then. Not when TeX learnt more of the
+ * job's file than the lines it read (library.ts jobFileRead), so that a saved run stands for exactly
+ * the text it is saved under, nor when the reset cannot account for the memory.
+ *
+ * Any failure keeps nothing and lets TeX go on as if no save had been asked for: a save that cannot
+ * allocate its copy on a phone short of memory must not cost the diagram (the caller's try).
+ */
+const saveRun = (
+	plan: Extract<PassPlan, { kind: 'save' }>,
+	memory: Uint8Array,
+	exports: WebAssembly.Exports,
+): boolean => {
+	const dump = coreDump;
+	const read = library.jobFileRead();
+	if (dump === null || read === undefined) return false;
+	const prefix = decoder.decode(plan.input.subarray(0, read));
+	if (!plan.text.startsWith(prefix)) return false;
+	const spans = saveSpans(memory, CORE_LAYOUT, marksOf(exports), library.hostWrites());
+	if (spans === undefined) return false;
+	const host = library.captureHostState();
+	const log = [...plan.log];
+	const missing = [...plan.missing];
+	// Compared with the dump here, while TeX waits. Copying what is compared, to compare it once the
+	// diagram's reply was posted, took the first diagram after a start 10 ms less in Chromium and
+	// nothing in WebKit, for a copy of 26.5 MiB at every save (internal/DECISIONS.md D32).
+	const stretches = diffAgainstDump(
+		spans.map(([a, b]) => ({ offset: a, bytes: memory.subarray(a, b) })),
+		dump,
+	);
+	const bytes =
+		stretches.reduce((n, s) => n + s.bytes.length, 0) + library.hostStateBytes(host) + logBytes(log);
+	return saved.set({
+		prefix,
+		logging: plan.logging,
+		route: plan.route,
+		stretches,
+		spans: stretchSpans(stretches),
+		host,
+		log,
+		missing,
+		bytes,
+	});
 };
 
 // --- transcript analysis --------------------------------------------------------------------------
@@ -518,20 +612,56 @@ interface PassResult {
  * `<job>.dvi`. Everything the run leaves behind stays there for the caller to harvest or discard.
  * What each step took is added to `spent`.
  */
-const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> => {
+const runPass = async (job: string, spent: RenderTimings, plan?: PassPlan): Promise<PassResult> => {
 	const started = performance.now();
 	const dump = coreDump;
 	const module = texModule;
 	if (dump === null || module === null) throw new Error('the engine has not started');
 	// The worker's own Memory, the dump written back over what the run before wrote, or a new one
 	// with the dump's non-zero runs written into it. Upstream copied the whole dump into a new
-	// 156.25 MiB Memory for every run.
+	// 156.25 MiB Memory for every run. A pass that resumes gets the saved run's stretches over the
+	// dump, and the reset before the next run puts those back too.
 	const { memory, fresh } = memoryForRun(dump);
+	const resumed = plan?.kind === 'resume' ? plan.run.spans : [];
+	if (plan?.kind === 'resume') writeStretches(new Uint8Array(memory.buffer), plan.run.stretches);
 	const reset = performance.now();
 	let keeping = 0;
 
 	library.setMemory(memory.buffer);
-	library.setInput(`${job}.tex\n\\end\n`);
+	if (plan?.kind === 'resume') {
+		// The files as the saved run left them, the job's own with this diagram's text, which is the
+		// same up to where TeX had read it: what the run was saved under.
+		library.restoreHostState(plan.run.host, { [`${job}.tex`]: plan.input });
+		spent.resumed = true;
+	} else library.setInput(`${job}.tex\n\\end\n`);
+
+	// The instance's exports, once it has them, for the save's reading of the engine's marks.
+	let exports: WebAssembly.Exports | null = null;
+	/** Time spent in the save at the snapshot point, which is not TeX's. */
+	let saving = 0;
+	if (plan?.kind === 'save') {
+		library.watchJobFile(`${job}.tex`);
+		let tried = false;
+		library.setSnapshotHook(() => {
+			// The first time only: the format runs it at the end of \begin{document}, which a run
+			// reaches once.
+			if (tried || exports === null) return;
+			tried = true;
+			const t = performance.now();
+			try {
+				// A run saved is the save's time, not TeX's; one that was not kept stays TeX's.
+				if (saveRun(plan, new Uint8Array(memory.buffer), exports)) {
+					saving = performance.now() - t;
+					spent.saveMs = (spent.saveMs ?? 0) + saving;
+				}
+			} catch {
+				// Whatever it was, nothing is kept and TeX goes on as if no save had been asked for:
+				// a save must never cost the diagram (library.ts snapshotPoint).
+				saveFailures++;
+				spent.saveFailed = true;
+			}
+		});
+	}
 
 	let svg = '';
 	let wroteDvi = false;
@@ -547,12 +677,13 @@ const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> =
 			library,
 			env: { memory },
 		});
+		exports = instance.exports;
 		const ended = await library.executeAsync(instance.exports);
 		texDone = performance.now();
 		// Only a run TeX ended itself leaves counters to trust; one that jumped out of TeX leaves a new
 		// Memory to the next, as does one that never gets here: a trap, or the stack overflowing.
 		if (ended === 'end') {
-			keep(memory, instance.exports);
+			keep(memory, instance.exports, resumed);
 			keeping = performance.now() - texDone;
 		}
 
@@ -579,12 +710,15 @@ const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> =
 		if (wroteDvi) convertError = error instanceof Error ? error.message : String(error);
 		else if (texDone === undefined && error instanceof library.LineTooLong) lineTooLong = error.bufSize;
 		else if (texDone === undefined && error instanceof RangeError) overflowed = true;
+	} finally {
+		library.setSnapshotHook(null);
+		library.watchJobFile(null);
 	}
 
 	const done = performance.now();
 	spent.resetMs += reset - started + keeping;
 	spent.newMemory = (spent.newMemory ?? 0) + (fresh ? 1 : 0);
-	spent.texMs += (texDone ?? done) - reset;
+	spent.texMs += (texDone ?? done) - reset - saving;
 	spent.svgMs += drawing === undefined ? 0 : done - drawing;
 	spent.passes += 1;
 	return { svg, wroteDvi, convertError, overflowed, lineTooLong };
@@ -597,6 +731,16 @@ const rounded = (spent: RenderTimings): RenderTimings => ({
 	texMs: Math.round(spent.texMs),
 	svgMs: Math.round(spent.svgMs),
 	passes: spent.passes,
+	...(spent.resumed === true ? { resumed: true } : {}),
+	...(spent.saveMs !== undefined ? { saveMs: Math.round(spent.saveMs) } : {}),
+	...(spent.saveFailed === true ? { saveFailed: true } : {}),
+});
+
+/** What the worker holds of saved runs now, for the host. */
+const snapshotState = (): SnapshotState => ({
+	held: saved.routes(),
+	bytes: saved.bytes,
+	failures: saveFailures,
 });
 
 /** A file the run wrote, or undefined if it never wrote one. */
@@ -611,7 +755,12 @@ const readIfWritten = (name: string): Uint8Array | undefined => {
 	}
 };
 
-async function render(id: number, source: string, options: RenderOptions): Promise<OkMessage | ErrorMessage> {
+async function render(
+	id: number,
+	source: string,
+	options: RenderOptions,
+	budget: number,
+): Promise<OkMessage | ErrorMessage> {
 	const started = performance.now();
 	const log: string[] = [];
 	const missing: string[] = [];
@@ -639,6 +788,29 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	/** Where the time went, over both passes when there are two. */
 	const spent: RenderTimings = { resetMs: 0, newMemory: 0, texMs: 0, svgMs: 0, passes: 0 };
 
+	// The first pass starts from a run an earlier diagram saved with the same input up to the end of
+	// its \begin{document}, or saves itself there for later ones (./snapshot). A saved run stands for
+	// that text and for whether the log is kept, since a run that kept none has none to say again;
+	// everything else a run depends on is fixed for the worker's life: the engine, its files, its
+	// clock and the first pass's job name. Only the first pass: a second reads at \begin{document}
+	// the .aux the first wrote.
+	saved.setBudget(budget);
+	saved.tick();
+	let firstPlan: PassPlan | undefined;
+	const resumable = budget > 0 ? saved.find(text, logging) : undefined;
+	if (resumable !== undefined) {
+		// What the saved run had said and missed by then, as this run would have.
+		for (const line of resumable.log) emit(line);
+		for (const name of resumable.missing) if (!missing.includes(name)) missing.push(name);
+		saved.pin(resumable);
+		firstPlan = { kind: 'resume', run: resumable, input };
+	} else if (budget > 0 && saved.wants()) {
+		// Saved at a preamble's first diagram, not its second: waiting for a second sighting spared the
+		// first its save and cost a third of the resumes in a run of every fixture twice (D32).
+		const route = routeOf(text, logging);
+		if (route !== undefined) firstPlan = { kind: 'save', input, text, logging, route, log, missing };
+	}
+
 	/** Where the first pass's transcript ends, so its diagnosis can never be read out of pass two. */
 	let firstEnd: number;
 	/** The pass whose diagram is being reported. Pass one unless pass two bettered it. */
@@ -649,7 +821,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	let firstTranscriptFile: Uint8Array | undefined;
 	try {
 		library.writeFileSync(`${FIRST_JOB}.tex`, input);
-		const first = await runPass(FIRST_JOB, spent);
+		const first = await runPass(FIRST_JOB, spent, firstPlan);
 		firstEnd = log.length;
 		reported = first;
 		if (logging) firstTranscriptFile = readIfWritten(`${FIRST_JOB}.log`);
@@ -688,6 +860,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 			}
 		}
 	} finally {
+		if (resumable !== undefined) saved.unpin(resumable);
 		// Still exactly once, and still at the end however many passes ran. The inflated
 		// bundled-file cache survives it by design (library.ts change 3).
 		library.deleteEverything();
@@ -748,6 +921,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 			missing,
 			durationMs,
 			timings,
+			snapshots: snapshotState(),
 		};
 	}
 
@@ -767,6 +941,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 			missing,
 			durationMs,
 			timings,
+			snapshots: snapshotState(),
 		};
 	}
 	// The characters ./unicode declared, written back over the boxes TeX set for them. When the
@@ -786,6 +961,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 			missing,
 			durationMs,
 			timings,
+			snapshots: snapshotState(),
 		};
 	}
 	return {
@@ -796,6 +972,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 		missing,
 		durationMs,
 		timings,
+		snapshots: snapshotState(),
 		firstError: diagnostics.firstError,
 		line: diagnostics.line,
 		bodyLine,
@@ -841,16 +1018,19 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 		return;
 	}
 	if (request.type === 'render') {
-		void render(request.id, request.source, request.options).then(post, (error: unknown) => {
-			post({
-				type: 'error',
-				id: request.id,
-				kind: 'engine-unavailable',
-				message: error instanceof Error ? error.message : String(error),
-				log: [],
-				missing: [],
-				durationMs: 0,
-			} satisfies ErrorMessage);
-		});
+		void render(request.id, request.source, request.options, request.snapshots ?? 0).then(
+			post,
+			(error: unknown) => {
+				post({
+					type: 'error',
+					id: request.id,
+					kind: 'engine-unavailable',
+					message: error instanceof Error ? error.message : String(error),
+					log: [],
+					missing: [],
+					durationMs: 0,
+				} satisfies ErrorMessage);
+			},
+		);
 	}
 };

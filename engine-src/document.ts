@@ -82,3 +82,50 @@ export const buildInput = (source: string, options: RenderOptions): TexInput => 
 		unicode: unicode.codepoints,
 	};
 };
+
+/**
+ * Where a run of `text` is likely to be saved: just past the line of its first `\begin{document}`
+ * that is not in a comment, which is how far TeX has read when its \begin{document} is done
+ * (engine-src/snapshot.ts). For a block the worker wraps, that is exactly where, the end of the
+ * worker's own `\begin{document}` line. For a block with its own it is a guess, which a
+ * `\begin{document}` inside a macro, a verbatim or a file the block writes can make wrong: the
+ * worker saves a run under what TeX had really read, and this only names it for the host, which
+ * sends a diagram to the engine that holds its name. A wrong guess costs a diagram the engine it
+ * could have resumed in, never a wrong drawing.
+ */
+export const predictedPoint = (text: string): number | undefined => {
+	const pattern = new RegExp(DOCUMENT_START.source, 'g');
+	for (let m = pattern.exec(text); m !== null; m = pattern.exec(text)) {
+		const lineStart = text.lastIndexOf('\n', m.index) + 1;
+		if (text.slice(lineStart, m.index).includes('%')) continue;
+		const lineEnd = text.indexOf('\n', m.index + m[0].length);
+		return lineEnd < 0 ? undefined : lineEnd + 1;
+	}
+	return undefined;
+};
+
+/**
+ * A short name for a saved run: a 53-bit hash of the text it stands for and of whether the log was
+ * kept, in hexadecimal (cyrb53). The worker names each run it holds by the text of the render that
+ * saved it, the host each diagram by the text it will be given, both with routeOf, and the host
+ * sends a diagram to the engine that holds its name (src/engine/worker-host.ts). Two texts that
+ * share a name are told apart where it matters, in the worker, which compares the text itself.
+ */
+export const routeKey = (prefix: string, logging: boolean): string => {
+	let h1 = 0xdeadbeef ^ (logging ? 1 : 0);
+	let h2 = 0x41c6ce57 ^ (logging ? 1 : 0);
+	for (let i = 0; i < prefix.length; i++) {
+		const c = prefix.charCodeAt(i);
+		h1 = Math.imul(h1 ^ c, 2654435761);
+		h2 = Math.imul(h2 ^ c, 1597334677);
+	}
+	h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+	h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+	return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
+};
+
+/** The name of the run a render of `text` would save or resume from, if it has one (routeKey). */
+export const routeOf = (text: string, logging: boolean): string | undefined => {
+	const at = predictedPoint(text);
+	return at === undefined ? undefined : routeKey(text.slice(0, at), logging);
+};

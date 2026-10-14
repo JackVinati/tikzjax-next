@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildInput, MISSING_PACKAGE } from '../engine-src/document';
+import { buildInput, MISSING_PACKAGE, predictedPoint, routeKey, routeOf } from '../engine-src/document';
 import type { RenderOptions } from '../engine-src/protocol';
 
 /*
@@ -85,5 +85,49 @@ describe('buildInput', () => {
 		expect(expectBodyAt(source, { addToPreamble: 'a\nb' })).toBe(4);
 		const { text, bodyLine } = buildInput(source, { addToPreamble: 'a\nb' });
 		expect(text.split('\n')[bodyLine - 3]).toMatch(/}}a$/);
+	});
+});
+
+/*
+ * The worker saves a first pass at the end of its \begin{document} and names the run by where that
+ * is likely to be in its input; the host names each diagram the same way and sends it to the engine
+ * that holds its name (engine-src/snapshot.ts, src/engine/route.ts, internal/DECISIONS.md D32).
+ */
+describe('where a run is likely to be saved, and its name', () => {
+	it("is the end of the worker's own \\begin{document} line for a block it wraps", () => {
+		for (const options of [
+			{},
+			{ texPackages: { pgfplots: '' }, addToPreamble: 'a\nb\n' },
+		] as RenderOptions[]) {
+			const { text } = buildInput(SOURCE, options);
+			const at = predictedPoint(text)!;
+			expect(text.slice(0, at).endsWith('\\begin{document}\n')).toBe(true);
+			expect(text.slice(at).startsWith(SOURCE)).toBe(true);
+		}
+	});
+
+	it('is the end of the line of the first \\begin{document} not in a comment, with what follows on it', () => {
+		const own = `% \\begin{document} in a comment\n\\newcommand\\x{X}\n\\begin{document} \\x\n${SOURCE}\n\\end{document}`;
+		const { text } = buildInput(own, {});
+		const at = predictedPoint(text)!;
+		expect(text.slice(0, at).endsWith('\\begin{document} \\x\n')).toBe(true);
+		expect(predictedPoint('\\begin{document}')).toBeUndefined();
+		expect(predictedPoint('\\begin{tikzpicture}\\end{tikzpicture}\n')).toBeUndefined();
+	});
+
+	it('is named the same for the same text and logging, and apart otherwise', () => {
+		const a = buildInput(SOURCE, { texPackages: { pgfplots: '' } }).text;
+		const b = buildInput('\\begin{tikzpicture}\\draw (0,0) -- (1,1);\\end{tikzpicture}', {
+			texPackages: { pgfplots: '' },
+		}).text;
+		const c = buildInput(SOURCE, { texPackages: { circuitikz: '' } }).text;
+		expect(routeOf(a, true)).toBe(routeOf(b, true));
+		expect(routeOf(a, true)).not.toBe(routeOf(c, true));
+		expect(routeOf(a, true)).not.toBe(routeOf(a, false));
+		expect(routeOf(a, true)).toBe(routeKey(a.slice(0, predictedPoint(a)), true));
+		expect(routeKey('x', true)).toMatch(/^[0-9a-f]{1,14}$/);
+		// 10,000 preambles a character apart, and no two names alike.
+		const names = new Set(Array.from({ length: 10_000 }, (_, i) => routeKey(`\\def\\a{${i}}\n`, true)));
+		expect(names.size).toBe(10_000);
 	});
 });

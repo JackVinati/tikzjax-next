@@ -17,10 +17,14 @@ export declare const RESET_NAMES: readonly string[];
 /** engine-build/out/memory-layout.json as the worker reads it. */
 export declare function readMemoryLayout(root: string): import('../engine-src/reset').MemoryLayout;
 
-/** `runs` is an offset and a length for each run, flat; `bytes` the runs' bytes back to back. */
+/**
+ * `runs` is an offset and a length for each run, flat, each on `align` bytes (8 unless given); `bytes`
+ * the runs' bytes back to back.
+ */
 export declare function packCoreDump(
 	dump: Uint8Array,
 	gap?: number,
+	align?: number,
 ): { size: number; runs: number[]; bytes: Uint8Array };
 
 /** The committed dump as the worker string carries it: packed, and `gz` the gzip of its bytes. */

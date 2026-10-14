@@ -143,9 +143,11 @@ export async function importEngineForNode(root, name) {
 		stdin: {
 			contents: [
 				"export * from './engine-src/library.ts';",
-				"export { buildInput } from './engine-src/document.ts';",
+				"export { buildInput, routeOf } from './engine-src/document.ts';",
 				"export { restoreUnicode } from './engine-src/unicode.ts';",
 				"export { writtenSpans, restoreSpans } from './engine-src/reset.ts';",
+				"export { unpackCoreDump } from './engine-src/core-dump.ts';",
+				"export { saveSpans, diffAgainstDump, writeStretches } from './engine-src/snapshot.ts';",
 				"export { dvi2html } from '@drgrice1/dvi2html';",
 			].join('\n'),
 			resolveDir: root,

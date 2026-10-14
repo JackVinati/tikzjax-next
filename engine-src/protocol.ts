@@ -57,6 +57,15 @@ export interface RenderRequest {
 	id: number;
 	source: string;
 	options: RenderOptions;
+	/**
+	 * What the worker may hold of saved runs, in bytes: TeX as a first pass stood at the end of its
+	 * \begin{document}, which a later diagram with the same input up to there starts from
+	 * (internal/DECISIONS.md D32). The host sends the platform's budget, or 0 when they are turned
+	 * off, and the worker then neither saves nor resumes and lets every saved run go. Absent is 0.
+	 * Not one of the RenderOptions, which are what TeX draws: a run resumed draws what a run from
+	 * the start draws.
+	 */
+	snapshots?: number | undefined;
 }
 
 export interface PingRequest {
@@ -146,6 +155,25 @@ export interface RenderTimings {
 	svgMs: number;
 	/** How many times TeX ran: 2 when a second pass was taken (RenderOptions.twoPass). */
 	passes: number;
+	/**
+	 * The first pass started from a run saved by an earlier diagram with the same input up to the end
+	 * of its \begin{document}, and TeX compiled only what comes after (engine-src/snapshot.ts).
+	 */
+	resumed?: boolean | undefined;
+	/** The first pass was saved for later diagrams with the same preamble, which took this long. */
+	saveMs?: number | undefined;
+	/** Saving the first pass failed, and nothing was kept; the diagram is drawn as without it. */
+	saveFailed?: boolean | undefined;
+}
+
+/** What a worker holds of saved runs once it has replied, for the host to route by and to report. */
+export interface SnapshotState {
+	/** The name of each run it holds (engine-src/document.ts routeKey). */
+	held: string[];
+	/** What they hold between them, in bytes. */
+	bytes: number;
+	/** Saves that failed in this worker's life, and kept nothing. */
+	failures: number;
 }
 
 export interface OkMessage {
@@ -157,6 +185,8 @@ export interface OkMessage {
 	missing: string[];
 	durationMs: number;
 	timings?: RenderTimings | undefined;
+	/** Absent from a worker before 0.2.1-beta.3, which saves nothing. */
+	snapshots?: SnapshotState | undefined;
 	/**
 	 * TeX reported an error but recovered and still produced a diagram.
 	 *
@@ -197,6 +227,8 @@ export interface ErrorMessage {
 	durationMs: number;
 	/** Absent when TeX never ran: a worker that failed to boot, a ping. */
 	timings?: RenderTimings | undefined;
+	/** As OkMessage's. */
+	snapshots?: SnapshotState | undefined;
 }
 
 export type WorkerResponse = ReadyMessage | LogMessage | OkMessage | ErrorMessage;

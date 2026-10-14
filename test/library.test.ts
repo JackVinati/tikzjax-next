@@ -316,10 +316,101 @@ describe('the host calls TeX makes per line and per character', () => {
 });
 
 /*
- * \tikzjaxsnapshot, which the format runs at the end of every \begin{document}, calls the host
- * (engine-build/changes/snapshot.ch, internal/DECISIONS.md D32).
+ * A run is saved where \tikzjaxsnapshot stands, at the end of its \begin{document}, for later inputs
+ * that start with the same text up to the line TeX has read (engine-src/snapshot.ts, D32). That holds
+ * only while TeX knows of the job's own file what its main input read, a line at a time.
  */
-describe('the snapshot point', () => {
+describe('the job file a saved run stands for', () => {
+	const NAME = 0;
+	const BUFFER = 4096;
+	const FIRST = 64;
+	const LAST = 68;
+
+	/** A memory with `input.tex` holding `text`, opened by TeX's main input as the job file. */
+	const start = (text: string) => {
+		const memory = new ArrayBuffer(1 << 16);
+		library.setMemory(memory);
+		new Uint8Array(memory).set(new TextEncoder().encode('input.tex'), NAME);
+		library.writeFileSync('input.tex', new TextEncoder().encode(text));
+		library.watchJobFile('input.tex');
+		const descriptor = library.reset(9, NAME);
+		const line = () => {
+			new DataView(memory).setUint32(FIRST, 0, true);
+			return library.inputln(descriptor, 1, BUFFER, FIRST, LAST, 0, 1024);
+		};
+		return { memory, line };
+	};
+
+	it('is the text through the newline of the line TeX read last', () => {
+		const { line } = start('a\nbb\nccc\n');
+		line();
+		expect(library.jobFileRead()).toBe(2);
+		line();
+		expect(library.jobFileRead()).toBe(5);
+	});
+
+	it('is nothing once TeX has asked the size of the job file, or opened it again', () => {
+		const sized = start('a\nbb\n');
+		sized.line();
+		// Another file's size, or another file opened, says nothing of the job's.
+		new Uint8Array(sized.memory).set(new TextEncoder().encode('other.tex'), 100);
+		library.getfilesize(9, 100);
+		expect(library.jobFileRead()).toBe(2);
+		library.getfilesize(9, NAME);
+		expect(library.jobFileRead()).toBeUndefined();
+
+		library.deleteEverything();
+		const opened = start('a\nbb\n');
+		opened.line();
+		library.reset(9, NAME);
+		expect(library.jobFileRead()).toBeUndefined();
+	});
+
+	it('is nothing at the end of the file, at a last line with no newline, or with no file watched', () => {
+		const ended = start('a\n');
+		ended.line();
+		ended.line();
+		expect(library.jobFileRead()).toBeUndefined();
+
+		library.deleteEverything();
+		const open = start('a\nb');
+		open.line();
+		open.line();
+		expect(library.jobFileRead()).toBeUndefined();
+
+		library.deleteEverything();
+		const unwatched = start('a\nb\n');
+		unwatched.line();
+		library.watchJobFile(null);
+		expect(library.jobFileRead()).toBeUndefined();
+	});
+
+	it('goes on, in a run that resumes, with the new text and the files as they were', () => {
+		const { memory, line } = start('pre\nbody one\n');
+		line();
+		new Uint8Array(memory).set(new TextEncoder().encode('input.log'), 200);
+		const log = library.rewrite(9, 200);
+		for (const c of 'so far') library.printChar(log, c.charCodeAt(0));
+		const state = library.captureHostState();
+		expect(library.hostStateBytes(state)).toBe('so far'.length);
+		// The run that saved goes on writing; what was saved does not change.
+		for (const c of ', and on') library.printChar(log, c.charCodeAt(0));
+		library.deleteEverything();
+
+		library.setMemory(memory);
+		library.restoreHostState(state, { 'input.tex': new TextEncoder().encode('pre\nbody two\n') });
+		expect(new TextDecoder().decode(library.readFileSync('input.log'))).toBe('so far');
+		new DataView(memory).setUint32(FIRST, 0, true);
+		const main = state.files.findIndex((f) => f.filename === 'input.tex');
+		expect(library.inputln(main, 1, BUFFER, FIRST, LAST, 0, 1024)).toBe(true);
+		const last = new DataView(memory).getUint32(LAST, true);
+		expect(new TextDecoder().decode(new Uint8Array(memory, BUFFER, last))).toBe('body two');
+		// And a second resume starts from the state as saved, not as the first left it.
+		for (const c of '!') library.printChar(log, c.charCodeAt(0));
+		library.restoreHostState(state, { 'input.tex': new TextEncoder().encode('pre\nbody three\n') });
+		expect(new TextDecoder().decode(library.readFileSync('input.log'))).toBe('so far');
+	});
+
 	it('calls the hook at the snapshot point, and nothing the hook throws reaches TeX', () => {
 		expect(() => library.snapshotPoint()).not.toThrow();
 		let called = 0;
