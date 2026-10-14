@@ -2,7 +2,14 @@ import { ItemView, Notice, type WorkspaceLeaf } from 'obsidian';
 import type { EngineInventory } from '../../engine-src/protocol';
 import type { EngineReport } from '../engine/worker-host';
 import type { CompileTimings } from '../types';
-import { diagnosticsText, engineLife, timingSteps, type About, type RenderRecord } from './report';
+import {
+	diagnosticsText,
+	engineLife,
+	renderName,
+	timingSteps,
+	type About,
+	type RenderRecord,
+} from './report';
 import { STRINGS } from './strings';
 
 export type { RenderRecord } from './report';
@@ -204,7 +211,7 @@ export class DebugView extends ItemView {
 			this.fact(dl, 'expl3', inventory.capabilities.expl3 ? 'available' : 'unavailable');
 			for (const [name, version] of Object.entries(inventory.packages)) this.fact(dl, name, version);
 		} else {
-			engine.createDiv({ text: 'Not started. It boots with the first diagram.' });
+			engine.createDiv({ text: 'Not started. It starts with the first diagram that is not cached.' });
 		}
 		this.starts(engine, this.source.engine());
 
@@ -228,13 +235,17 @@ export class DebugView extends ItemView {
 			return;
 		}
 
-		for (const record of records.slice().reverse()) {
+		// Newest first, each named as the copied text names it.
+		for (let i = records.length - 1; i >= 0; i--) {
+			const record = records[i];
+			if (record === undefined) continue;
 			const row = recent.createDiv({ cls: `tikzjax-debug-row is-${record.state}` });
 			row.createSpan({ cls: 'tikzjax-debug-state', text: record.state });
 			row.createSpan({ cls: 'tikzjax-debug-source', text: record.sourcePreview });
 			row.createSpan({
 				cls: 'tikzjax-debug-meta',
 				text: [
+					renderName(record, i),
 					record.tier ? `from ${record.tier}` : null,
 					record.durationMs === undefined ? null : `${record.durationMs} ms`,
 				]

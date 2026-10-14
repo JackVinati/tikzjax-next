@@ -1165,7 +1165,7 @@ note (fonts, inserting it, the measurement that reframes it). It also said nothi
 engine started, which on a phone is after every 30 s idle and every time the app goes to the
 background.
 
-- **Per diagram** (`CompileTimings`): `waited` from seen to asked, `mount` from the end of the
+- **Per diagram** (`CompileTimings`): `waited` from seen to asked, `drawing` from the end of the
   pipeline to drawn, and `seen to drawn`. "Seen" is the viewport gate letting the block through, or
   the cache missing for a block that skips the gate (an export, `lazy=off`, one the gate gave up
   on), or the press of Retry or "Render diagram". A block is reported when it comes to rest, as

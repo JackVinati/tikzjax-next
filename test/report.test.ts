@@ -120,7 +120,7 @@ describe('the text the diagnostics view copies', () => {
 		const lines = renders.split('\n').slice(1, 4);
 		expect(lines).toEqual([
 			'#3 cccccccc, 1 s ago: ok · waited 0 ms · queue 3 ms · engine start 221 ms · memory reset 5 ms · ' +
-				'TeX 63 ms · DVI to SVG 9 ms · SVG pipeline 7 ms · mount 31 ms · seen to drawn 339 ms',
+				'TeX 63 ms · DVI to SVG 9 ms · SVG pipeline 7 ms · drawing 31 ms · seen to drawn 339 ms',
 			'#2 bbbbbbbb, 6 s ago: error (tex-error)',
 			'#1 aaaaaaaa, 9 s ago: cached from l2',
 		]);

@@ -64,7 +64,7 @@ export const STRINGS = {
 		passes > 1 ? `TeX ${ms} ms, ${passes} passes` : `TeX ${ms} ms`,
 	timingSvg: (ms: number) => `DVI to SVG ${ms} ms`,
 	timingPost: (ms: number) => `SVG pipeline ${ms} ms`,
-	timingMount: (ms: number) => `mount ${ms} ms`,
+	timingMount: (ms: number) => `drawing ${ms} ms`,
 	timingTotal: (ms: number) => `seen to drawn ${ms} ms`,
 
 	// The diagnostics view: the engines this session.

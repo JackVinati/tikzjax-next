@@ -97,7 +97,7 @@ describe('the timings of a diagram in the diagnostics view', () => {
 			'TeX 63 ms',
 			'DVI to SVG 9 ms',
 			'SVG pipeline 7 ms',
-			'mount 25 ms',
+			'drawing 25 ms',
 			'seen to drawn 1290 ms',
 		]);
 	});
@@ -138,6 +138,19 @@ describe('the timings of a diagram in the diagnostics view', () => {
 		]);
 		expect(timingsOf(found[0])[0]).toBe('queue 2 ms');
 		expect(timingsOf(found[1])[0]).toBe('queue 1 ms');
+	});
+});
+
+describe('the rows of the diagnostics view', () => {
+	it('are named as the copied text names them, so a line of a report can be found on the screen', async () => {
+		const found = await rows([
+			record({ key: 'aaaaaaaa-old', state: 'cached', tier: 'l2' }),
+			record({ key: 'bbbbbbbb-new', durationMs: 42 }),
+		]);
+		const meta = (row: HTMLElement | undefined): string =>
+			row?.querySelector('.tikzjax-debug-meta')?.textContent ?? '';
+		expect(meta(found[0])).toBe('#2 bbbbbbbb · 42 ms');
+		expect(meta(found[1])).toBe('#1 aaaaaaaa · from l2');
 	});
 });
 

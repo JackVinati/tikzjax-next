@@ -83,6 +83,15 @@ export function timingSteps(timings: CompileTimings): string[] {
 	return steps.filter((step): step is string => step !== null);
 }
 
+/**
+ * What a render is called in the view and in the copied text: its place in the list, oldest first,
+ * and the first eight characters of its cache key, so a line of a report can be matched to a row on
+ * the screen.
+ */
+export function renderName(record: RenderRecord, index: number): string {
+	return `#${index + 1} ${record.key.slice(0, 8)}`;
+}
+
 /** One engine's life, as a line: how long it took to start, and how it ended. */
 export function engineLife(life: EngineReport['lives'][number]): string {
 	const start = life.startMs === null ? STRINGS.engineNeverStarted : STRINGS.engineStartedIn(life.startMs);
@@ -134,9 +143,7 @@ export function diagnosticsText(s: DiagnosticsSnapshot): string {
 			.filter(Boolean)
 			.join(' ');
 		const steps = record.timings ? timingSteps(record.timings) : [];
-		lines.push(
-			[`#${i + 1} ${record.key.slice(0, 8)}, ${STRINGS.reportAgo(ago)}: ${what}`, ...steps].join(' · '),
-		);
+		lines.push([`${renderName(record, i)}, ${STRINGS.reportAgo(ago)}: ${what}`, ...steps].join(' · '));
 	}
 	return `${lines.join('\n')}\n`;
 }
