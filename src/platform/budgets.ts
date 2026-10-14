@@ -68,6 +68,13 @@ const DESKTOP: Budgets = {
 	 * core dump back. Long enough that reading through a note does not pay a boot per diagram.
 	 */
 	idleTeardownMs: 5 * 60_000,
+	/**
+	 * What an engine may hold of runs saved at the end of a diagram's \begin{document}, for later
+	 * diagrams with the same preamble (internal/DECISIONS.md D32). A run is 0.6 MiB for TikZ alone and
+	 * up to 8.8 MiB over the fixtures (circuitikz; pgfplots 6.5), so this holds the largest three
+	 * preambles of the fixtures at once beside TikZ's, next to the 156.25 MiB memory each engine keeps.
+	 */
+	snapshotBytes: 32 * 1024 * 1024,
 };
 
 const MOBILE: Budgets = {
@@ -97,6 +104,11 @@ const MOBILE: Budgets = {
 	 * while backgrounded is the difference between surviving and being jetsam-killed.
 	 */
 	idleTeardownMs: 30_000,
+	/**
+	 * Well under the desktop's until a phone has been measured with the snapshot on: TikZ's run and
+	 * one large package preamble, or two of the size of siunitx's (internal/DECISIONS.md D32).
+	 */
+	snapshotBytes: 12 * 1024 * 1024,
 };
 
 export function budgetsFor(isMobile: boolean): Budgets {

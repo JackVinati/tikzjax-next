@@ -277,4 +277,9 @@ export interface Budgets {
 	l1Bytes: number;
 	l2Bytes: number;
 	idleTeardownMs: number;
+	/**
+	 * What each engine may hold of runs saved at the end of a diagram's \begin{document}, which later
+	 * diagrams with the same preamble start from (internal/DECISIONS.md D32).
+	 */
+	snapshotBytes: number;
 }

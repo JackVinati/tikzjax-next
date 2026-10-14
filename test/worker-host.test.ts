@@ -997,3 +997,40 @@ describe('a pool whose second worker fails to start', () => {
 		expect(host.report().poolSize).toBe(2);
 	});
 });
+
+describe('saved preambles', () => {
+	/**
+	 * Each engine keeps the runs it saved at the end of a diagram's \begin{document}, within the
+	 * budget the host sends it with every job (internal/DECISIONS.md D32).
+	 */
+	const withPackage = (key: string, pkg: string) => ({
+		key,
+		source: '\\draw (0,0) -- (1,1);',
+		options: { texPackages: { [pkg]: '' }, captureLog: true },
+		timeoutMs: 1000,
+	});
+	const send = (host: WorkerHost, key: string, pkg: string) =>
+		track(host.render(withPackage(key, pkg), new AbortController().signal));
+	const lastRender = (w: FakeWorker) => {
+		const renders = w.posted.filter((m) => m.type === 'render');
+		return renders[renders.length - 1];
+	};
+
+	it('are what the budget the host reads for each job says, and nothing without one', async () => {
+		let budget = 32 * 1048576;
+		const host = new WorkerHost({ snapshotBudget: () => budget });
+		send(host, 'a', 'pgfplots');
+		worker(0).boot();
+		expect(lastRender(worker(0))).toMatchObject({ snapshots: 32 * 1048576 });
+		worker(0).reply(worker(0).renders[0] ?? -1);
+		await tick();
+		budget = 0;
+		send(host, 'b', 'pgfplots');
+		expect(lastRender(worker(0))).toMatchObject({ snapshots: 0 });
+
+		const plain = new WorkerHost();
+		send(plain, 'c', 'pgfplots');
+		worker(1).boot();
+		expect(lastRender(worker(1))).toMatchObject({ snapshots: 0 });
+	});
+});

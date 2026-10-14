@@ -93,6 +93,9 @@ export default class TikzjaxNextPlugin extends Plugin {
 			timers,
 			poolSize: engines,
 			onSize: (size) => this.queue?.setConcurrency(size),
+			// Saved preambles (internal/DECISIONS.md D32), read for each diagram, so that turning them
+			// off in data.json applies to the next one, also when the change arrives through Sync.
+			snapshotBudget: () => (this.settings.preambleSnapshots ? this.budgets.snapshotBytes : 0),
 		});
 		this.preamble = new PreambleService(this.app, sha256Hex);
 		this.cache = new DiagramCache({

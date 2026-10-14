@@ -113,6 +113,13 @@ export interface WorkerHostOptions {
 	 * allowance, behind someone else's diagram.
 	 */
 	onSize?: ((engines: number) => void) | undefined;
+	/**
+	 * What each engine may hold of runs saved at the end of a diagram's \begin{document}, in bytes,
+	 * read for each job: the platform's budget, or 0 when saved preambles are turned off, and the
+	 * engine then neither saves nor resumes and lets what it holds go (internal/DECISIONS.md D32).
+	 * Omitted: 0.
+	 */
+	snapshotBudget?: (() => number) | undefined;
 }
 
 /** One render, from `render()` until it settles. */
@@ -195,6 +202,7 @@ export class WorkerHost implements TexHost {
 	private readonly now: () => number;
 	private poolSize: number;
 	private readonly onSize: ((engines: number) => void) | undefined;
+	private readonly snapshotBudget: () => number;
 
 	/**
 	 * A worker failed to start since the workers last stopped together (idle, or `kill()`), so no
@@ -230,6 +238,7 @@ export class WorkerHost implements TexHost {
 		this.now = options.now ?? (() => performance.now());
 		this.poolSize = sizeOf(options.poolSize ?? 1);
 		this.onSize = options.onSize;
+		this.snapshotBudget = options.snapshotBudget ?? (() => 0);
 		this.told = this.poolSize;
 	}
 
@@ -409,6 +418,7 @@ export class WorkerHost implements TexHost {
 			id: job.id,
 			source: job.source,
 			options: job.options,
+			snapshots: this.snapshotBudget(),
 		} satisfies WorkerRequest);
 		try {
 			job.onRunning?.();

@@ -37,3 +37,10 @@ describe('engineCount', () => {
 		expect(engineCount(DESKTOP, true, { memoryGiB: null, cores: null })).toBe(2);
 	});
 });
+
+describe('saved preambles', () => {
+	it('may hold 32 MiB an engine on a computer, and 12 on a phone or a tablet', () => {
+		expect(budgetsFor(false).snapshotBytes).toBe(32 * 1024 * 1024);
+		expect(budgetsFor(true).snapshotBytes).toBe(12 * 1024 * 1024);
+	});
+});
