@@ -1172,9 +1172,14 @@ background.
   before, because "Render all diagrams in this note" counts it then, and again once it is drawn.
 - **Per engine** (`WorkerHost.report`): the starts this session, each start's time from created to
   ready, and why each engine stopped: idle, background, timeout, restart, error or unload.
-- **Copy** puts the whole view on the clipboard as plain text (`src/ui/report.ts`), from inside the
-  click, as WebKit wants; where the clipboard is missing or refuses, the text is shown selected, to
-  copy by hand. It carries the plugin version, Obsidian's `apiVersion`, desktop, phone or tablet and
+- **Copy** puts the view on the clipboard as plain text (`src/ui/report.ts`), less what it shows of
+  the diagrams. It copies as Obsidian does, read in its 1.14.4 bundle: with the asynchronous
+  clipboard only where the Permissions API is there too, which an older iOS WebKit lacks, and
+  otherwise with the text selected in a textarea and the document's copy command; both start inside
+  the click, as WebKit wants. Where neither copies, or the clipboard has not answered after 1.5 s,
+  the text is shown, to copy by hand, and selected where the WebView lets a page select it, which iOS
+  may not outside the click. None of it has run on a phone yet; `TODO.md` §9 has the check. It
+  carries the plugin version, Obsidian's `apiVersion`, desktop, phone or tablet and
   the OS family from `Platform`, ENGINE_ID and OUTPUT_REVISION, the engine starts, the cache and
   queue figures, and the recent renders with their steps. It never carries a diagram's source, an
   error card's text (which quotes the source and names preamble files by path), the transcript or a

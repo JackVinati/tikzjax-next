@@ -9,6 +9,12 @@ export type { RenderRecord } from './report';
 
 export const DEBUG_VIEW_TYPE = 'tikzjax-debug';
 
+/**
+ * How long Copy waits for the clipboard to say whether it copied before it shows the text to copy
+ * by hand as well. A clipboard that never answers would otherwise leave the button doing nothing.
+ */
+const WRITE_BACKSTOP_MS = 1500;
+
 export interface DebugSource {
 	records(): readonly RenderRecord[];
 	inventory(): EngineInventory | null;
@@ -31,9 +37,9 @@ export interface DebugSource {
  * only diagnostic the old plugin produced was a broken-image icon, so a bad diagram, a missing
  * package and a wedged engine were indistinguishable to the person who had to report them.
  *
- * Its Copy button puts all of it on the clipboard as plain text (ui/report.ts), so a phone, which
- * has no devtools, can report what it saw, and the same procedure can be repeated release after
- * release.
+ * Its Copy button puts it on the clipboard as plain text (ui/report.ts), without the diagrams' code,
+ * the error messages or the notes, so a phone, which has no devtools, can report what it saw, and
+ * the same procedure can be repeated release after release.
  */
 export class DebugView extends ItemView {
 	private readonly source: DebugSource;
@@ -97,49 +103,82 @@ export class DebugView extends ItemView {
 	}
 
 	/**
-	 * Put the whole view on the clipboard as plain text.
+	 * Put the view on the clipboard as plain text, for a bug report: what ui/report.ts writes, which
+	 * leaves out the diagrams' code, the error messages and the notes.
 	 *
-	 * The text is built and handed to the clipboard inside the click, which is what WebKit asks of a
-	 * page writing to it. Where the clipboard is missing or says no — an older iOS WebKit, a
-	 * WebView that withholds it — the text is shown below the button, selected, to copy by hand.
+	 * As Obsidian copies, read in its 1.14.4 bundle: the asynchronous clipboard only where the
+	 * Permissions API is there too, which an older iOS WebKit lacks, and elsewhere the text selected
+	 * in a textarea and the document's copy command. Both are started inside the click, which is what
+	 * WebKit asks of a page writing to the clipboard. Where neither copies, the textarea stays, with
+	 * the text to copy by hand; so it does when the clipboard has said nothing after
+	 * WRITE_BACKSTOP_MS. The window is the view's own, which in a pop-out is not the main one.
 	 */
 	private copy(): void {
 		const text = diagnosticsText(this.snapshot());
-		const byHand = (): void => this.showByHand(text);
-		let writing: Promise<void>;
-		try {
-			const clipboard = (navigator as { clipboard?: Clipboard }).clipboard;
-			if (typeof clipboard?.writeText !== 'function') {
-				byHand();
-				return;
-			}
-			writing = clipboard.writeText(text);
-		} catch {
-			byHand();
+		const nav = this.contentEl.win.navigator as { clipboard?: Clipboard; permissions?: unknown };
+		const clipboard = nav.clipboard;
+		if (typeof clipboard?.writeText !== 'function' || nav.permissions === undefined) {
+			this.copyByCommand(text);
 			return;
 		}
-		void writing.then(() => {
-			if (this.byHand) this.byHand.hidden = true;
-			new Notice(STRINGS.diagnosticsCopied);
-		}, byHand);
+		let writing: Promise<void>;
+		try {
+			writing = clipboard.writeText(text);
+		} catch {
+			this.copyByCommand(text);
+			return;
+		}
+		let settled = false;
+		const backstop = window.setTimeout(() => {
+			if (!settled) this.showByHand(text);
+		}, WRITE_BACKSTOP_MS);
+		const settle = (): void => {
+			settled = true;
+			window.clearTimeout(backstop);
+		};
+		void writing.then(
+			() => {
+				settle();
+				this.copied();
+			},
+			() => {
+				settle();
+				this.showByHand(text);
+			},
+		);
 	}
 
-	private showByHand(text: string): void {
+	/** Show the text, select it, and copy the selection with the document's copy command. */
+	private copyByCommand(text: string): void {
+		const area = this.showByHand(text);
+		if (area !== null && copySelection(area.doc)) this.copied();
+	}
+
+	private copied(): void {
+		if (this.byHand) this.byHand.hidden = true;
+		new Notice(STRINGS.diagnosticsCopied);
+	}
+
+	/** The text in a textarea under the button, selected where the WebView allows it, to copy by hand. */
+	private showByHand(text: string): HTMLTextAreaElement | null {
 		const box = this.byHand;
-		if (!box) return;
+		if (!box) return null;
 		box.empty();
 		box.hidden = false;
 		box.createDiv({ cls: 'tikzjax-debug-by-hand-hint', text: STRINGS.diagnosticsCopyByHand });
 		const area = box.createEl('textarea', { cls: 'tikzjax-debug-by-hand-text' });
+		area.setAttribute('aria-label', STRINGS.diagnosticsText);
 		area.readOnly = true;
 		area.value = text;
 		area.rows = 12;
 		try {
-			area.focus();
+			area.focus({ preventScroll: true });
+			area.select();
 			area.setSelectionRange(0, text.length);
 		} catch {
 			// Selecting is a convenience: the text is there to select by hand either way.
 		}
+		return area;
 	}
 
 	private async render(): Promise<void> {
@@ -241,3 +280,15 @@ export class DebugView extends ItemView {
 }
 
 const mb = (bytes: number): string => `${(bytes / 1048576).toFixed(1)} MB`;
+
+/** The document's copy command, on what is selected in it: whether it says it copied. */
+function copySelection(doc: Document): boolean {
+	try {
+		// Typed by hand: the DOM's own typing marks the command deprecated, and the store's lint would
+		// count that as a warning, while it is what Obsidian itself falls back to.
+		const command = (doc as unknown as { execCommand?: (command: string) => boolean }).execCommand;
+		return command?.call(doc, 'copy') === true;
+	} catch {
+		return false;
+	}
+}

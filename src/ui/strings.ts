@@ -84,6 +84,7 @@ export const STRINGS = {
 	copyDiagnostics: 'Copy',
 	diagnosticsCopied: 'Diagnostics copied to the clipboard.',
 	diagnosticsCopyByHand: 'This device did not let the plugin copy. Select the text below and copy it.',
+	diagnosticsText: 'Diagnostics as text',
 	reportTitle: 'TikZJax Next diagnostics',
 	reportPlugin: (version: string) => `Plugin: ${version}`,
 	reportObsidian: (version: string) => `Obsidian: ${version}`,

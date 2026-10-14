@@ -16,7 +16,8 @@ beforeAll(() => {
  * says where the time went: waiting to be asked for, waiting in the queue, waiting for the engine to
  * start if this diagram did, setting up TeX's memory, TeX, drawing the DVI as SVG, the SVG pipeline
  * after it, drawing it in the note, and the whole wait. It says how often the engine started, and
- * its Copy button puts all of it on the clipboard as text.
+ * its Copy button puts it on the clipboard as text, without the diagrams' code, the error messages
+ * or the notes.
  */
 
 const NO_STARTS: EngineReport = { starts: 0, lives: [], lastStop: null, poolSize: 2 };
@@ -167,12 +168,28 @@ describe('the Copy button', () => {
 
 	afterEach(() => {
 		Reflect.deleteProperty(navigator, 'clipboard');
+		Reflect.deleteProperty(navigator, 'permissions');
+		Reflect.deleteProperty(document, 'execCommand');
+		vi.useRealTimers();
 	});
+
+	/** The document's copy command, recording what the view's textarea had selected when it ran. */
+	function copyCommand(copies: boolean): { calls: string[]; selected: string[]; view: DebugView | null } {
+		const recorded = { calls: [] as string[], selected: [] as string[], view: null as DebugView | null };
+		const execCommand = (command: string): boolean => {
+			recorded.calls.push(command);
+			const area = recorded.view?.contentEl.querySelector('textarea');
+			recorded.selected.push(area?.value.slice(area.selectionStart, area.selectionEnd) ?? '');
+			return copies;
+		};
+		Object.defineProperty(document, 'execCommand', { value: execCommand, configurable: true });
+		return recorded;
+	}
 
 	const press = (view: DebugView): void =>
 		[...view.contentEl.querySelectorAll('button')].find((b) => b.textContent === 'Copy')?.click();
 
-	it('puts the whole view on the clipboard as text, from inside the click', async () => {
+	it('puts the view on the clipboard as text, from inside the click', async () => {
 		const writeText = vi.fn(() => Promise.resolve());
 		Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
 		const from = source(RECORDS);
@@ -222,6 +239,54 @@ describe('the Copy button', () => {
 		await vi.waitFor(() =>
 			expect(view.contentEl.querySelector<HTMLElement>('.tikzjax-debug-by-hand')?.hidden).toBe(false),
 		);
+		expect(view.contentEl.querySelector('textarea')?.value).toContain('Plugin: 0.2.1');
+	});
+
+	it('copies with the copy command, from inside the click, where the Permissions API is missing', async () => {
+		// As Obsidian does, read in its 1.14.4 bundle: an older iOS WebKit has the asynchronous
+		// clipboard and not the Permissions API, and only the command is sure to work there.
+		const writeText = vi.fn(() => Promise.resolve());
+		Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+		Object.defineProperty(navigator, 'permissions', { value: undefined, configurable: true });
+		const command = copyCommand(true);
+		const view = await opened(source(RECORDS));
+		command.view = view;
+		const before = shownNotices.length;
+
+		press(view);
+		expect(writeText).not.toHaveBeenCalled();
+		expect(command.calls).toEqual(['copy']);
+		// The whole text was selected when the command ran.
+		expect(command.selected[0]).toContain('TikZJax Next diagnostics');
+		expect(command.selected[0]).toContain('queue 2 ms');
+		expect(shownNotices.length).toBe(before + 1);
+		expect(view.contentEl.querySelector<HTMLElement>('.tikzjax-debug-by-hand')?.hidden).toBe(true);
+	});
+
+	it('leaves the text to copy by hand when the copy command does not copy', async () => {
+		Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+		copyCommand(false);
+		const view = await opened(source(RECORDS));
+
+		press(view);
+		const area = view.contentEl.querySelector('textarea');
+		expect(view.contentEl.querySelector<HTMLElement>('.tikzjax-debug-by-hand')?.hidden).toBe(false);
+		expect(area?.getAttribute('aria-label')).toBe('Diagnostics as text');
+		expect(area?.selectionEnd).toBe(area?.value.length);
+	});
+
+	it('shows the text to copy by hand when the clipboard never answers', async () => {
+		const writeText = vi.fn(() => new Promise<void>(() => undefined));
+		Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+		const view = await opened(source(RECORDS));
+		vi.useFakeTimers();
+
+		press(view);
+		const box = view.contentEl.querySelector<HTMLElement>('.tikzjax-debug-by-hand');
+		vi.advanceTimersByTime(1499);
+		expect(box?.hidden).toBe(true);
+		vi.advanceTimersByTime(1);
+		expect(box?.hidden).toBe(false);
 		expect(view.contentEl.querySelector('textarea')?.value).toContain('Plugin: 0.2.1');
 	});
 

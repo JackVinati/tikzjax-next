@@ -15,8 +15,8 @@ top of its notes on GitHub, and will not publish a version that has none.
   started this session, how long each start took, and why it stopped. A Copy button copies the
   whole view as text, for a bug report: the plugin and Obsidian versions, the kind of device, what
   its WebView supports, the engine, and every step's time, and none of your diagrams' code, error
-  messages or note names. Where the device does not let the plugin copy, the text appears
-  selected, to copy by hand.
+  messages or note names. Where the device does not let the plugin copy, the text is shown, to
+  copy by hand.
 - A diagram that is not cached goes to the engine as soon as it comes into view. Until now each
   one waited first, half a second on a phone and 300 ms on a desktop, also when you had just
   opened the note. Only a diagram in a note you are typing in still waits for you to pause, so that
