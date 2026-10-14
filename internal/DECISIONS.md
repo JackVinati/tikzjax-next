@@ -1330,6 +1330,20 @@ against 237 MB above the process's start with 0.2.0's worker, measured the same 
 Obsidian the backlog is what the viewport gate lets through, so a note scrolled one diagram at a
 time gains less than this.
 
+Measured again on 2026-10-14 with the engine 0.2.1 ships (D27 to D31) and with 0.2.1-beta.1's, in
+the same harness on the same desktop, five fresh browsers each, medians, every SVG byte-identical to
+the golden corpus:
+
+| 37 diagrams at once | one worker | two workers | peak working set, one → two |
+| --- | ---: | ---: | ---: |
+| Chromium 153, 0.2.1's engine | 2,052 ms | 1,102 ms (−46%) | 225 → 327 MiB |
+| WebKit 26.6, 0.2.1's engine | 3,010 ms | 1,601 ms (−47%) | 392 → 583 MiB |
+| Chromium 153, 0.2.1-beta.1 | 3,170 ms | 1,750 ms (−45%) | 291 → 425 MiB |
+| WebKit 26.6, 0.2.1-beta.1 | 4,724 ms | 2,549 ms (−46%) | 494 → 734 MiB |
+
+So a second engine still costs about 100 MiB at the peak in Chromium, the desktop app's engine, and
+about 190 MiB in WebKit, where Obsidian never runs two: on the iPhone and iPad it keeps one.
+
 What the host does (`src/engine/worker-host.ts`, first written as the prototype measured above):
 
 - **A second worker starts only while a job waits that no worker running or starting can take.**
@@ -1628,10 +1642,13 @@ engine's own stack instead of in the WebAssembly memory, so each level of TeX's 
 of that stack in V8. The deepest nesting of `\number` that still renders, verify-worker's
 construction, bisected to one level in the shipped worker: in a Chromium worker 2,344 → 1,622, on
 Node 22.19's main thread 3,798 → 3,132 (Node 24.21 4,615 → 3,194, Node 26.11 4,612 → 3,196). In a
-WebKit worker it stays at 21,281 → 21,280: both engines stop within one level of each other there,
-so what bounds it is not the size of the engine's frames, and JavaScriptCore loses nothing; an
-iPhone's limit has not been measured. A diagram nested past the limit fails as it did past the old
-one, with "TeX nested deeper than the engine's stack allows."; D28 weighs what to do about it.
+WebKit worker it went 21,281 → 21,280, bisected after a ladder of shallower renders; bisected with
+the deep render first, 0.2.1-beta.1's engine stopped at 20,049 and this one did not stop before
+20,050, so what JavaScriptCore allows also depends on what it has compiled by then. JavaScriptCore
+is not indifferent to the engine's code either: D31's marks, which touch nothing in V8's figure,
+later took WebKit's to 19,950 (D31 has how it was measured). An iPhone's limit has not been
+measured. A diagram nested past the limit fails as it did past the old one, with "TeX nested deeper
+than the engine's stack allows."; D28 weighs what to do about it.
 
 **The build.** Two builds of this source from a new image gave the same bytes, and the same as the
 build the study measured. The Engine workflow rebuilds and diffs `engine-build/out` as before.
@@ -1662,7 +1679,8 @@ JavaScript engine's stack gives out long before any limit of TeX's own (D17). D2
 in WebAssembly locals, which takes more of that stack per call in V8: the deepest nesting of
 `\number` that renders, verify-worker's construction, went from 2,344 to 1,622 in a Chromium worker,
 and from 3,798 to 3,132 on Node 22.19's main thread. In a WebKit worker it did not move (21,281 →
-21,280). Obsidian's desktop app runs V8, and so does Android, which has not been measured.
+21,280), though D31's marks later moved it to 19,950. Obsidian's desktop app runs V8, and so does
+Android, which has not been measured.
 
 **What real input needs.** Fifteen deep or large inputs, rendered once each in a Chromium worker and
 in a WebKit worker, by 0.2.1-beta.1's worker and by D27's, on the desktop of D27 (the 0.2.x review
@@ -1688,7 +1706,7 @@ while every other procedure keeps D27's. Built that way, in the same campaign as
 
 It is not taken. It gives back 418 of the 722 levels Chromium lost, for this one path through TeX
 only, and costs JavaScriptCore, the engine of the iPhone this work is for, 5% of TeX's time, where
-WebKit's limit did not move at all. No realistic input was found that needs the levels. The core
+WebKit's limit did not move with D27. No realistic input was found that needs the levels. The core
 dump also grows by 47,799 B gzipped, from the frames those procedures leave on the shadow stack
 while the format is built.
 
@@ -1701,7 +1719,10 @@ about 1,500 in a Chromium worker, the floor the review asked for. The ratio is n
 for the old engine and 0.52 for this one in Node 22.19, so the browser's figure has to be measured
 again when the code generator changes. A change that takes more of the stack than the floor allows
 fails `verify:worker`, in CI and in the Engine workflow, and a smaller one shows in its log. Set to
-3,300, above what the engine reaches, the check fails, as it should.
+3,300, above what the engine reaches, the check fails, as it should. What the floor cannot see is a
+change only JavaScriptCore pays for: D31's marks cost WebKit 6% of its depth and Node nothing
+measurable. So a change to the code generator also needs the depth read in a WebKit worker, before
+and after, as D31 did (CONTRIBUTING.md).
 
 **Three of the inputs are fixtures.** `stress-forest-depth` (80 levels), `stress-nested-groups`
 (4,000) and `stress-plot-coordinates` (2,000 coordinates, drawn as one path without marks, so that
@@ -1709,8 +1730,10 @@ its golden SVG is 47,702 B; the review's plot, with marks, drew 616,245) are in 
 recorded from D27's engine. 0.2.1-beta.1's engine gives the same DVI, transcript and SVG for each.
 smoke, `verify:golden` and `verify:worker` run them like any fixture.
 
-How deep an iPhone's worker lets TeX go is not known: WebKit on Windows stops both engines at the
-same depth, and says nothing about a phone's stack. `TODO.md` has the note to read it with.
+How deep an iPhone's worker lets TeX go is not known. WebKit on Windows stopped D27's engine where
+it stopped 0.2.1-beta.1's, and the engine with D31's marks 6% sooner, which says only that
+JavaScriptCore's limit moves with the engine's code too, not where a phone's stack ends. `TODO.md`
+has the note to read it with.
 
 ---
 
@@ -1915,6 +1938,27 @@ from 236,378 to 238,195 bytes, 69,594 to 69,861 gzipped, and TeX's time does not
 1,811, Node 2,219 and 2,220). Two builds from a new image, `tikzjax-engine:v021-reset`, gave the
 same bytes.
 
+**What the marks cost: 6% of how deep TeX nests in WebKit.** The deepest nesting of `\number` that
+renders, verify-worker's construction, in a Web Worker started as the host starts one, with the
+payload posted to it, bisected to one level, on the desktop of D27 on 2026-10-14:
+
+| | Chromium 153 | WebKit 26.6 |
+|---|---:|---:|
+| 0.2.1-beta.1 | 2,344 | 21,281, or 20,049 |
+| D27, D28, D29, D30 (no marks) | 1,622 | 21,280 |
+| the marks | 1,622 | 19,950 |
+| one Memory, and as 0.2.1 ships | 1,621 | 19,950 |
+
+The two builds either side of the marks differ only in `tex.wasm`. The review of this release read
+every row by bisection from a new browser, and 0.2.1-beta.1, D27's engine and the shipped build also
+after a ladder of 500 to 3,000 and after six fixtures rendered twice; 0.2.1-beta.1 and the shipped
+build were read again for this record, twice each way. Every reading agrees but 0.2.1-beta.1's in
+WebKit, which reached 21,281 after the ladder and only 20,049 when the first diagram it compiled
+was 20,050 deep. On Node 22.19's main thread the shipped worker reaches 3,132, where D27's did
+(`verify:worker`). So the marks cost JavaScriptCore 1,330 levels and V8 none measurable; why has not
+been looked into, and `verify:worker`'s floor, which runs in Node, cannot see it (D28). WebKit still
+lets TeX nest twelve times as deep as Chromium, and an iPhone's limit has not been measured.
+
 **The proof** is `npm run verify:reset`, in CI and in the Engine workflow. It runs the worker that
 ships over every fixture and twelve inputs the fixtures do not reach, in five orders shuffled from
 fixed seeds, a worker each:
@@ -1952,21 +1996,72 @@ and the one entry past `lo_mem_max`, `pool_ptr` and `str_ptr` left out, an entry
 and `test/reset.test.ts` holds the stretches to the committed dump's counters and the writing back
 to the dump.
 
-**What it gains.** The campaign of D29, the content process's peak working set and private commit
-over the round, median (range) of the seven rounds, against D28's commit, before any of D29 to D31:
+**What it gains.** The campaign of D29, the content process's working set and private commit, at
+their peak over the round and at its end, sampled right after the last render with the worker still
+alive; median (range) of the seven rounds, in MiB, for D28's commit, before any of D29 to D31, and
+after each change in turn:
 
-| | peak working set | peak commit | most Memories alive at a reply |
-|---|---:|---:|---|
-| WebKit 26.6, before | 679 MiB (502–782) | 3,139 MiB (2,145–3,440) | 9 to 17 |
-| WebKit 26.6, one Memory | 423 MiB (405–471) | 1,755 MiB (1,533–1,786) | 7 to 8 |
-| Chromium 153, before | 344 MiB (322–346) | 1,099 MiB (943–1,102) | 5 to 6 |
-| Chromium 153, one Memory | 236 MiB (234–239) | 582 MiB (581–585) | 3 |
+| WebKit 26.6 | peak working set | peak commit | working set at the end | commit at the end | most Memories alive at a reply |
+|---|---:|---:|---:|---:|---|
+| before | 679 (502–782) | 3,139 (2,145–3,440) | 306 (231–340) | 1,047 (590–1,366) | 9 to 17 |
+| D29 | 470 (442–602) | 2,236 (1,907–3,140) | 270 (199–339) | 953 (467–1,474) | 8 to 15 |
+| D30 | 445 (408–586) | 2,042 (1,854–3,120) | 221 (188–518) | 616 (458–2,683) | 8 to 16 |
+| the marks | 451 (420–586) | 2,174 (1,880–3,158) | 239 (213–343) | 774 (615–1,546) | 8 to 15 |
+| one Memory | 423 (405–471) | 1,755 (1,533–1,786) | 347 (275–405) | 1,268 (672–1,461) | 7 to 8 |
+
+| Chromium 153 | peak working set | peak commit | working set at the end | commit at the end | most Memories alive at a reply |
+|---|---:|---:|---:|---:|---|
+| before | 344 (322–346) | 1,099 (943–1,102) | 235 (231–299) | 321 (317–786) | 5 to 6 |
+| D29 | 343 (338–346) | 1,233 (1,228–1,236) | 232 (207–255) | 453 (294–610) | 7 |
+| D30 | 350 (331–380) | 1,373 (1,221–1,537) | 265 (197–291) | 753 (284–913) | 7 to 9 |
+| the marks | 331 (325–350) | 1,221 (1,215–1,376) | 262 (193–290) | 750 (280–912) | 7 to 8 |
+| one Memory | 236 (234–239) | 582 (581–585) | 196 (194–199) | 277 (276–279) | 3 |
+
+The reset's own share is the last two rows. In WebKit it is 451 → 423 MiB at the peak and 2,174 →
+1,755 MiB committed; most of the drop from 679 and 3,139 came with D29. In Chromium it is nearly all
+of it, 331 → 236 and 1,221 → 582.
 
 Node 22.19's peak resident memory went 192 → 171 MiB. TeX's time does not change: the paired
 rounds against the commit before put the whole of D29 to D31 at −4.2% in WebKit, −5.5% in
 Chromium and −4.6% in Node, D29's gain. Every reply was byte-identical to the golden corpus.
 `main.js` grows by 4,492 B for the reset and the places of the 23 globals it reads. Nothing has
 been measured on a phone.
+
+**What it does not gain.** The end of a round did not come down in WebKit, the engine of every
+iPhone: across the reset its working set went 239 → 347 MiB and its commit 774 → 1,268 MiB, where
+it was 306 and 1,047 before D29. The ranges are wide and the sample falls wherever the collector
+happens to be, so this is not a proven regression, but the review of this release reproduced it in
+three paired rounds of its own (the 0.2.0 corpus twice each: 257, 235 and 235 MiB against 352, 349
+and 349). Most of it is the new Memories taken after the round's ten runs that jump out of TeX: in
+the five rounds of the trial below, trusting those runs left WebKit at 300 MiB and 659 MiB committed
+at the end of a round, against 337 and 1,232. A kept Memory also stays committed while its worker
+idles, 156.25 MiB a worker, until the idle stop: 30 s on a phone, 5 minutes on a computer, which can
+have two. Nothing has measured that. The end of a round is the figure nearest to what an idle
+iPhone holds, so the iPhone's memory check in `TODO.md` reads the memory once the diagrams have
+settled, not only at the peak.
+
+**0.2.1 against 0.2.1-beta.1**, the figures the CHANGELOG gives: a campaign of seven rounds on
+2026-10-14, on the desktop of D27 and with the harness as D29 ran it, of 0.2.1-beta.1's published
+`main.js` against 0.2.1's (worker `0ccfc5f69326…`), each round a fresh browser or process per build,
+the builds' order rotated, a cold `basic` and then the 37 fixtures of 0.2.0's corpus twice each.
+All 3,570 replies were byte-identical to the golden corpus. TeX is the sum of each fixture's minimum
+over the rounds, and the first `basic` its minimum; the rest are medians (range) of the rounds,
+memory in MiB:
+
+| | WebKit 26.6, beta.1 | WebKit 26.6, 0.2.1 | Chromium 153, beta.1 | Chromium 153, 0.2.1 |
+|---|---:|---:|---:|---:|
+| TeX, 37 fixtures | 4,213 ms | 2,773 ms (−34.2%) | 2,794 ms | 1,828 ms (−34.6%) |
+| the first `basic` after the start | 32 ms | 27 ms | 27 ms | 24 ms |
+| engine start | 147 ms | 58 ms | 162 ms | 51 ms |
+| peak working set | 645 (488–758) | 423 (411–429) | 318 (316–323) | 235 (234–238) |
+| peak commit | 2,954 (2,156–3,178) | 1,754 (1,538–1,791) | 939 (938–944) | 582 (581–586) |
+| working set at the end | 226 (204–398) | 378 (301–410) | 272 (247–298) | 195 (195–199) |
+| commit at the end | 575 (502–1,804) | 1,423 (1,134–1,470) | 625 (466–785) | 277 (276–281) |
+
+Each round against beta.1's: −34.2% in WebKit, −35.3% in Chromium, −27.5% in Node 22.19 (3,028 →
+2,207 ms), medians. Every fixture took at least 28% less in both browsers by its minimum, the least
+`arrows-meta` in WebKit (64 → 46 ms) and `broken` in Chromium (14 → 10 ms). The end of the round
+rose in WebKit against beta.1 too, as above.
 
 **Not taken, for the maintainer to decide: trusting a run that jumped out of TeX.** The round's
 fixtures include five that end in a jump out of TeX, each rendered twice, so each round makes ten

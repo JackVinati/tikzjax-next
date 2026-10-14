@@ -44,24 +44,28 @@ top of its notes on GitHub, and will not publish a version that has none.
   when every diagram shown is cached, and an engine started for a diagram you never scroll to stops
   again once it has had nothing to do for a while, as before.
 - On a computer, two diagrams compile at once when several new ones are waiting, each in a TeX
-  engine of its own. Handed a note of 37 new diagrams at once, two engines drew them all in 45–46%
+  engine of its own. Handed a note of 37 new diagrams at once, two engines drew them all in 46–47%
   less time than one, in WebKit and in Chromium, measured on a Windows desktop with this release's
   engine; a note you scroll through one diagram at a time gains less. The second engine starts only
-  while diagrams wait, takes about 100 MB more at its peak, measured in Node 22 on the same desktop,
-  and stops with the first; if it cannot start, the first carries on alone. Phones and tablets keep
-  one engine, and so does a computer that reports less than 8 GB of memory; Settings → Second engine
-  turns it off.
-- TeX takes about a third less time on every diagram, the first one after Obsidian starts included.
-  Over 37 of the diagrams the plugin is tested with, measured on a Windows desktop, TeX's time went
-  from 4.2 s to 2.8 s in WebKit, the browser engine of the iPhone and iPad, and from 2.8 s to 1.9 s
-  in Chromium, the one Obsidian's desktop app is built on. The engine is now compiled so that TeX
-  keeps the values it works on where the processor reaches them directly, rather than in its memory,
-  and optimised with a newer binaryen; the plugin's `main.js` is 83 KB smaller. Every diagram draws
-  as before, byte for byte, so none is compiled again for this. Nothing has been measured on a phone
-  yet.
-- The faster engine leaves TeX less room to nest in Obsidian on a computer. Measured in Chromium on
-  the same desktop, 1,622 `\number` nested inside each other still draw, where 2,344 did; in WebKit
-  nothing changed, at 21,280. Android runs the same JavaScript engine as the desktop app and has not
+  while diagrams wait, and stops with the first; in that note it took about 100 MiB more at the
+  peak in Chromium, the browser engine of Obsidian's desktop app, measured on the same desktop. If
+  it cannot start, the first carries on alone. Phones and tablets keep one engine, and so does a
+  computer that reports less than 8 GB of memory; Settings → Second engine turns it off.
+- TeX takes about a third less time. Over 37 of the diagrams the plugin is tested with, measured on
+  a Windows desktop against 0.2.1-beta.1, TeX's time went from 4.2 s to 2.8 s in WebKit, the
+  browser engine of the iPhone and iPad, and from 2.8 s to 1.8 s in Chromium, the one Obsidian's
+  desktop app is built on. Each of the 37 took at least 28% less in both, comparing each one's
+  fastest of seven runs, but the first diagram after the engine starts only 11 to 16% less. Most of
+  it is the engine, now compiled so that TeX keeps the values it works on where the processor
+  reaches them directly, rather than in its memory, and optimised with a newer binaryen. The
+  engine's calls into the plugin, for every line and every character TeX reads or prints, no longer
+  make new arrays each time, which on its own took about 4% off. Every diagram draws as before, byte
+  for byte, so none is compiled again for this. `main.js` is 60 KB smaller than 0.2.0's, and 72 KB
+  smaller than 0.2.1-beta.1's. Nothing has been measured on a phone yet.
+- This release's engine leaves TeX less room to nest. Measured on the same desktop, 1,621 `\number`
+  nested inside each other still draw in Chromium, where 0.2.1-beta.1 drew 2,344, and 19,950 in
+  WebKit, where it drew between 20,049 and 21,281, depending on what it had compiled before.
+  Android runs the same JavaScript engine as the desktop app, and neither Android nor an iPhone has
   been measured. Something nested deeper fails with "TeX nested deeper than the engine's stack
   allows.", as it did past the old limit. The deepest real diagrams tried draw as before, a `forest`
   tree 80 levels deep, 4,000 groups inside each other and a plot of 2,000 coordinates among them,
@@ -75,24 +79,29 @@ top of its notes on GitHub, and will not publish a version that has none.
   it starts it, instead of carrying them inside the engine's own code, which every start had to read
   through first, and the engine unpacks them with the system's own decompression where there is
   one, from iOS 16.4 on. With that and the system's base64 decoding hidden from it, as on iOS 14.5
-  to 16.3, the start went from 155 to 114 ms in WebKit on the same desktop. The diagnostics view shows, beside each engine start, how
-  long unpacking and compiling took inside the engine, and whether the system's decompression and
-  base64 decoding were used. Nothing has been measured on a phone yet.
-- TeX takes 4 to 5% less time again, on top of the third above: the engine's calls into the
-  plugin, for every line and every character TeX reads or prints, no longer make new arrays each
-  time. Over the same 37 diagrams on the same desktop, from 2,832 to 2,733 ms in WebKit, from 1,897
-  to 1,809 ms in Chromium and from 2,295 to 2,181 ms in Node.
+  to 16.3, the start went from 155 to 114 ms in WebKit on the same desktop. The diagnostics view
+  shows, beside each engine start, how long unpacking and compiling took inside the engine, and
+  whether the system's decompression and base64 decoding were used. Nothing has been measured on a
+  phone yet.
 - The engine keeps one block of memory for TeX and, before each diagram, puts back only what the
   diagram before it changed. It used to take a new 156 MiB block for every diagram and leave the
-  old ones for WebKit or Chromium to free when they got round to it. Over a run of 85 diagrams on
-  the same desktop, the most memory the page had in use at once went from 679 to 423 MiB in WebKit
-  and from 344 to 236 MiB in Chromium, and the memory it had committed from 3,139 to 1,755 MiB and
-  from 1,099 to 582 MiB. After a diagram TeX gave up on, with an emergency stop or "TeX capacity
-  exceeded", the next one starts from a new block; the diagnostics view says "new memory" for it,
-  and "memory reset" for the others. Every release now checks, after each diagram of the test set in
-  five different orders, that the block TeX is handed is the same as a new one, byte for byte.
-- None of the three changes what a diagram looks like, so nothing cached is compiled again for
-  them.
+  old ones for WebKit or Chromium to free when they got round to it. With this release's other
+  changes to the engine, over a run of 85 diagrams on the same desktop against 0.2.1-beta.1, the
+  most memory the page had in use at once went from 645 to 423 MiB in WebKit and from 318 to 235 MiB
+  in Chromium, and the most it had committed from 2,954 to 1,754 MiB and from 939 to 582 MiB.
+  Measured change by change, the one block alone took WebKit from 451 to 423 MiB and from 2,174 to
+  1,755 MiB committed, most of the rest coming with the calls that no longer make new arrays; in
+  Chromium it did most of it. What the page still held right after the last diagram, with the
+  engine waiting for the next, went down in Chromium, from 272 to 195 MiB, but up in WebKit, from
+  226 to 378 MiB, and from 575 to 1,423 MiB committed: the engine keeps its block while it waits,
+  and the new blocks it takes after a diagram TeX gave up on still wait for the collector. On a
+  phone the engine stops after 30 seconds without a diagram, and that gives it all back. After a
+  diagram TeX gave up on, with an emergency stop or "TeX capacity exceeded", the next one starts
+  from a new block; the diagnostics view says "new memory" for it, and "memory reset" for the
+  others. Every release now checks, after each diagram of the test set in five different orders,
+  that the block TeX is handed is the same as a new one, byte for byte.
+- Neither the faster start nor the one block of memory changes what a diagram looks like, so nothing
+  cached is compiled again for them.
 
 ## 0.2.0 — 2026-10-13
 
