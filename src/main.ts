@@ -7,6 +7,7 @@ import { WorkerHost } from './engine/worker-host';
 import { budgetsFor, engineCount } from './platform/budgets';
 import { ensureFonts } from './platform/context';
 import { device, webViewFeatures } from './platform/device';
+import { BUILT_VERSION } from './platform/version';
 import { DiagramCache } from './cache';
 import { RenderQueue } from './queue/queue';
 import { ViewportGate } from './block/viewport';
@@ -27,7 +28,7 @@ import { sha256Hex } from './cache/sha256';
 import { OUTPUT_REVISION } from './cache/key';
 import { Component, MarkdownRenderer, TFile, type WorkspaceLeaf } from 'obsidian';
 import { TikzSettingTab } from './settings/tab';
-import { noJitNotice } from './ui/notices';
+import { noJitNotice, outOfStepNotice } from './ui/notices';
 import { STRINGS } from './ui/strings';
 
 /** The plugin this one forks from. Both register `tikz`, so both cannot run at once. */
@@ -65,6 +66,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 	override async onload(): Promise<void> {
 		this.settings = migrateSettings(await this.loadData());
 		this.shownSettings = { ...this.settings };
+		this.warnIfOutOfStep();
 
 		if (this.legacyPluginEnabled()) {
 			// Registering anyway would render every diagram in the vault twice. Refusing loudly is
@@ -220,6 +222,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 					about: () => ({
 						...device(),
 						plugin: this.manifest.version,
+						built: BUILT_VERSION,
 						engineId: this.host?.id ?? '',
 						outputRevision: OUTPUT_REVISION,
 					}),
@@ -263,6 +266,25 @@ export default class TikzjaxNextPlugin extends Plugin {
 		this.addSettingTab(new TikzSettingTab(this.app, this));
 		this.registerCommands();
 		this.registerTeardown();
+	}
+
+	/**
+	 * Say, once for each pair of versions, that the main.js this device runs is not the version its
+	 * manifest.json says, and how to put that right (platform/version.ts, internal/DECISIONS.md D34):
+	 * Obsidian Sync Standard copies a new manifest.json and leaves the old main.js, over its 5 MB
+	 * limit. Until it is tapped, since it is shown once; the diagnostics view says it as long as it
+	 * holds.
+	 */
+	private warnIfOutOfStep(): void {
+		const notice = outOfStepNotice(
+			BUILT_VERSION,
+			this.manifest.version,
+			this.settings.outOfStepNoticeShown,
+		);
+		if (notice === null) return;
+		new Notice(notice.message, 0);
+		this.settings.outOfStepNoticeShown = notice.pair;
+		void this.saveData(this.settings);
 	}
 
 	/**

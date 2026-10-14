@@ -38,7 +38,13 @@ export interface RenderRecord {
 
 /** The device and the plugin, as a bug report needs them. */
 export interface About {
+	/** The version manifest.json says, which is the one Obsidian shows. */
 	plugin: string;
+	/**
+	 * The version main.js was built as (src/platform/version.ts): the same, but where Sync left an
+	 * old main.js beside a new manifest.json. Null for a build without it.
+	 */
+	built: string | null;
 	/** Obsidian's `apiVersion`. */
 	obsidian: string;
 	/** `desktop`, `phone` or `tablet`. */
@@ -140,7 +146,7 @@ export function diagnosticsText(s: DiagnosticsSnapshot): string {
 	const { about, engine } = s;
 	const lines = [
 		STRINGS.reportTitle,
-		STRINGS.reportPlugin(about.plugin),
+		STRINGS.reportPlugin(about.plugin, about.built),
 		STRINGS.reportObsidian(about.obsidian),
 		STRINGS.reportPlatform(about.platform, about.os),
 		STRINGS.reportWebView(about.webView),

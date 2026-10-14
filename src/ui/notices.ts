@@ -1,10 +1,12 @@
 import type { BootTimings } from '../../engine-src/protocol';
 import type { Device } from '../platform/device';
-import { README_LOCKDOWN, STRINGS } from './strings';
+import { outOfStep, versionPair } from '../platform/version';
+import { README_LOCKDOWN, README_OUT_OF_STEP, STRINGS } from './strings';
 
 /**
- * What the plugin tells someone unasked, once, about the device rather than a diagram: that TeX
- * runs without the JIT on their iPhone or iPad (internal/DECISIONS.md D33). It decides here, from
+ * The two things the plugin tells someone unasked, once, about the device rather than a diagram:
+ * that TeX runs without the JIT on their iPhone or iPad (internal/DECISIONS.md D33), and that the
+ * main.js this device runs is not the version its manifest.json says (D34). Each decides here, from
  * what it is given, whether there is anything to say, and main.ts shows it and remembers it in
  * data.json.
  */
@@ -37,4 +39,29 @@ export function noJitNotice(
 	return createFragment((message) =>
 		withReadme(message, STRINGS.jitNotice, STRINGS.readMore, README_LOCKDOWN),
 	);
+}
+
+/**
+ * The notice that main.js and manifest.json are of different versions, with the pair it is for, or
+ * null when they are the same, when either is unknown, or when it was last shown for this pair.
+ */
+export function outOfStepNotice(
+	built: string | null,
+	manifest: string,
+	shownFor: string,
+): { message: DocumentFragment; pair: string } | null {
+	if (built === null || !outOfStep(built, manifest)) return null;
+	const pair = versionPair(built, manifest);
+	if (pair === shownFor) return null;
+	return {
+		message: createFragment((message) =>
+			withReadme(
+				message,
+				STRINGS.outOfStepNotice(built, manifest),
+				STRINGS.readMore,
+				README_OUT_OF_STEP,
+			),
+		),
+		pair,
+	};
 }

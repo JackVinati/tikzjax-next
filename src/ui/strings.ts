@@ -30,10 +30,20 @@ const yesNo = (value: boolean): string => (value ? 'yes' : 'no');
 const README = 'https://github.com/JackVinati/tikzjax-next';
 /** "Diagrams are very slow on my iPhone or iPad": Lockdown Mode. */
 export const README_LOCKDOWN = `${README}#lockdown-mode`;
+/** "After an update, another device shows the new version but nothing changed": Sync Standard. */
+export const README_OUT_OF_STEP = `${README}#out-of-step`;
 
 /** What the probe of the JIT found (engine-src/jit.ts), as the diagnostics say it: it is a guess. */
 const jitState = (on: boolean | null): string =>
 	on === null ? 'not measured yet' : on ? 'on (probably)' : 'off (probably)';
+
+/** main.js and manifest.json of different versions, and what to do about it (src/platform/version.ts). */
+const outOfStep = (built: string, manifest: string): string =>
+	`This device runs main.js from version ${built}, while its manifest.json says ${manifest}. ` +
+	`Obsidian Sync Standard leaves the plugin like this: it copies a new manifest.json and not ` +
+	`main.js, which is over its 5 MB limit. Reinstall the plugin on this device: with BRAT, its ` +
+	`"Choose a single plugin to reinstall"; from the community store, uninstall it and install it ` +
+	`again. With Sync Standard, turn off "Installed community plugins" in Sync's settings.`;
 
 export const STRINGS = {
 	rendering: 'Rendering diagram',
@@ -130,13 +140,23 @@ export const STRINGS = {
 		'This notice is shown once; "Open TikZ diagnostics" says it again.',
 	readMore: 'Read more',
 
+	// main.js and manifest.json of different versions (src/platform/version.ts, D34).
+	pluginFact: 'Version',
+	builtFact: 'main.js built as',
+	builtUnknown: 'unknown',
+	outOfStep,
+	outOfStepNotice: (built: string, manifest: string) => `TikZJax Next: ${outOfStep(built, manifest)}`,
+
 	// The diagnostics view's Copy button, and the plain text it copies for a bug report.
 	copyDiagnostics: 'Copy',
 	diagnosticsCopied: 'Diagnostics copied to the clipboard.',
 	diagnosticsCopyByHand: 'This device did not let the plugin copy. Select the text below and copy it.',
 	diagnosticsText: 'Diagnostics as text',
 	reportTitle: 'TikZJax Next diagnostics',
-	reportPlugin: (version: string) => `Plugin: ${version}`,
+	/** manifest.json's version and main.js's, which differ only where Sync left them apart. */
+	reportPlugin: (manifest: string, built: string | null) =>
+		`Plugin: ${manifest}, main.js ${built ?? 'unknown'}` +
+		(built !== null && built !== manifest ? ', out of step: reinstall the plugin on this device' : ''),
 	reportJit: (on: boolean | null) => `JIT: ${jitState(on)}`,
 	reportObsidian: (version: string) => `Obsidian: ${version}`,
 	reportPlatform: (platform: string, os: string) => `Platform: ${platform}, ${os}`,

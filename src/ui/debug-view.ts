@@ -1,6 +1,7 @@
 import { ItemView, Notice, type WorkspaceLeaf } from 'obsidian';
 import type { EngineInventory } from '../../engine-src/protocol';
 import type { EngineReport } from '../engine/worker-host';
+import { outOfStep } from '../platform/version';
 import type { CompileTimings } from '../types';
 import { withReadme } from './notices';
 import {
@@ -12,7 +13,7 @@ import {
 	type About,
 	type RenderRecord,
 } from './report';
-import { README_LOCKDOWN, STRINGS } from './strings';
+import { README_LOCKDOWN, README_OUT_OF_STEP, STRINGS } from './strings';
 
 export type { RenderRecord } from './report';
 
@@ -202,6 +203,9 @@ export class DebugView extends ItemView {
 		}
 		root.empty();
 
+		const about = this.source.about();
+		this.plugin(root, about);
+
 		const inventory = this.source.inventory();
 		const engine = root.createDiv({ cls: 'tikzjax-debug-section' });
 		engine.createEl('h3', { text: 'Engine' });
@@ -216,7 +220,7 @@ export class DebugView extends ItemView {
 			engine.createDiv({ text: 'Not started. It starts with the first diagram that is not cached.' });
 		}
 		const report = this.source.engine();
-		this.jit(engine, report, this.source.about());
+		this.jit(engine, report, about);
 		this.starts(engine, report);
 
 		const cache = root.createDiv({ cls: 'tikzjax-debug-section' });
@@ -258,6 +262,27 @@ export class DebugView extends ItemView {
 			});
 			if (record.timings) this.timings(row, record.timings);
 			if (record.message) row.createDiv({ cls: 'tikzjax-debug-message', text: record.message });
+		}
+	}
+
+	/**
+	 * Which version of the plugin this is, by its manifest.json and by its main.js, and what to do
+	 * when they differ (src/platform/version.ts): Sync left an old main.js on this device.
+	 */
+	private plugin(root: HTMLElement, about: About): void {
+		const section = root.createDiv({ cls: 'tikzjax-debug-section' });
+		section.createEl('h3', { text: 'Plugin' });
+		const facts = section.createDiv({ cls: 'tikzjax-debug-facts' });
+		this.fact(facts, STRINGS.pluginFact, about.plugin);
+		this.fact(facts, STRINGS.builtFact, about.built ?? STRINGS.builtUnknown);
+		if (about.built !== null && outOfStep(about.built, about.plugin)) {
+			const warning = section.createDiv({ cls: 'tikzjax-debug-warning' });
+			withReadme(
+				warning,
+				STRINGS.outOfStep(about.built, about.plugin),
+				STRINGS.readMore,
+				README_OUT_OF_STEP,
+			);
 		}
 	}
 

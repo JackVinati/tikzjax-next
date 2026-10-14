@@ -29,6 +29,7 @@ function snapshot(over: Partial<DiagnosticsSnapshot> = {}): DiagnosticsSnapshot 
 	return {
 		about: {
 			plugin: '0.2.1',
+			built: '0.2.1',
 			obsidian: '1.7.2',
 			platform: 'phone',
 			os: 'iOS',
@@ -98,7 +99,7 @@ describe('the text the diagnostics view copies', () => {
 	const text = diagnosticsText(snapshot());
 
 	it('says which plugin, which Obsidian, which device, what its WebView has, and which engine', () => {
-		expect(text).toContain('Plugin: 0.2.1');
+		expect(text).toContain('Plugin: 0.2.1, main.js 0.2.1\n');
 		expect(text).toContain('Obsidian: 1.7.2');
 		expect(text).toContain('Platform: phone, iOS');
 		expect(text).toContain(
@@ -191,6 +192,16 @@ describe('the text the diagnostics view copies', () => {
 		).toBe(
 			'started in 50 ms; 1 saved preamble, 0.0 MB, 2 saves failed, stopped after it had nothing to do',
 		);
+	});
+
+	it('says which version manifest.json gives and which main.js was built as, and when they differ', () => {
+		const about = snapshot().about;
+		const plugin = (over: Partial<typeof about>) =>
+			diagnosticsText(snapshot({ about: { ...about, ...over } })).split('\n')[1];
+		expect(plugin({ plugin: '0.2.2', built: '0.2.1' })).toBe(
+			'Plugin: 0.2.2, main.js 0.2.1, out of step: reinstall the plugin on this device',
+		);
+		expect(plugin({ plugin: '0.2.2', built: null })).toBe('Plugin: 0.2.2, main.js unknown');
 	});
 
 	it('says whether the JIT is on, as the latest engine to start found it, and what the probe took', () => {

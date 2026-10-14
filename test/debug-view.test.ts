@@ -5,7 +5,7 @@ import { shownNotices } from './stubs/obsidian';
 import { installObsidianDom } from './stubs/obsidian-dom';
 import { DebugView, type DebugSource, type RenderRecord } from '../src/ui/debug-view';
 import { diagnosticsText, type About } from '../src/ui/report';
-import { README_LOCKDOWN } from '../src/ui/strings';
+import { README_LOCKDOWN, README_OUT_OF_STEP } from '../src/ui/strings';
 import type { BootTimings } from '../engine-src/protocol';
 import type { EngineReport } from '../src/engine/worker-host';
 
@@ -44,6 +44,7 @@ function source(
 			webView: { decompressionStream: true, fromBase64: false, cores: 8, memoryGiB: 8 },
 			engineId: 'e'.repeat(64),
 			outputRevision: 'r'.repeat(64),
+			built: '0.2.1',
 			...about,
 		}),
 		now: () => 0,
@@ -282,6 +283,32 @@ describe('the JIT in the diagnostics view', () => {
 			expect(factsOf(view)['JIT'], os).toBe('off (probably)');
 			expect(warningsOf(view), os).toEqual([]);
 		}
+	});
+});
+
+describe('the plugin in the diagnostics view', () => {
+	it('gives the version manifest.json says and the one main.js was built as', async () => {
+		const view = await opened(source([], NO_STARTS, { plugin: '0.2.1', built: '0.2.1' }));
+		expect(factsOf(view)).toMatchObject({ Version: '0.2.1', 'main.js built as': '0.2.1' });
+		expect(warningsOf(view)).toEqual([]);
+	});
+
+	it('says when they differ that the files are out of step, and how to put it right', async () => {
+		const view = await opened(source([], NO_STARTS, { plugin: '0.2.2', built: '0.2.1' }));
+		expect(factsOf(view)).toMatchObject({ Version: '0.2.2', 'main.js built as': '0.2.1' });
+		const [warning] = warningsOf(view);
+		expect(warning?.textContent).toContain(
+			'This device runs main.js from version 0.2.1, while its manifest.json says 0.2.2.',
+		);
+		expect(warning?.textContent).toContain('Choose a single plugin to reinstall');
+		expect(warning?.textContent).toContain('turn off "Installed community plugins"');
+		expect(warning?.querySelector('a')?.getAttribute('href')).toBe(README_OUT_OF_STEP);
+	});
+
+	it('says nothing of a main.js built without its version', async () => {
+		const view = await opened(source([], NO_STARTS, { plugin: '0.2.2', built: null }));
+		expect(factsOf(view)['main.js built as']).toBe('unknown');
+		expect(warningsOf(view)).toEqual([]);
 	});
 });
 

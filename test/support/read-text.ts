@@ -23,6 +23,7 @@ export function readText(path: string): string {
 			'.sh': 'text',
 			'.txt': 'text',
 			'.js': 'text',
+			'.mjs': 'text',
 			'.json': 'text',
 			'': 'text',
 		},

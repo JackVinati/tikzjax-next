@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { describe, expect, it } from 'vitest';
-import { README_LOCKDOWN } from '../src/ui/strings';
+import { README_LOCKDOWN, README_OUT_OF_STEP } from '../src/ui/strings';
 
 /**
  * The README's list of bundled packages and libraries is the answer to the most common question
@@ -76,6 +76,10 @@ describe('README', () => {
 	it('has the answers the plugin links to, where it links to them', () => {
 		const answers: [string, string][] = [
 			[README_LOCKDOWN, 'Diagrams are very slow on my iPhone or iPad.'],
+			[
+				README_OUT_OF_STEP,
+				'After an update, another device shows the new version but nothing changed.',
+			],
 		];
 		for (const [url, question] of answers) {
 			const anchor = url.slice(url.indexOf('#') + 1);

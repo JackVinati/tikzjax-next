@@ -562,7 +562,7 @@ Configure Web Browsing in its settings you can exclude Obsidian alone, then rest
 exclusion takes Lockdown Mode's protection away from Obsidian's web content, so whether it is worth
 it is your call.
 
-**After an update, another device shows the new version but nothing changed.** Obsidian Sync
+<a id="out-of-step"></a>**After an update, another device shows the new version but nothing changed.** Obsidian Sync
 Standard does not copy a file over 5 MB, and `main.js` is about 12 MB. When Sync carries your
 installed plugins, the other device gets the new `manifest.json`, which names the new version, and
 keeps the old `main.js`; Obsidian and BRAT then see the new version number and offer no update. With

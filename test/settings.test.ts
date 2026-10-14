@@ -24,6 +24,7 @@ const CHANGED: TikzSettings = {
 	secondEngine: false,
 	preambleSnapshots: false,
 	jitNoticeShown: true,
+	outOfStepNoticeShown: '0.2.1-beta.3 → 0.2.1',
 	sourceHandling: 'legacy',
 	preamblePath: 'tex/preamble.tex',
 	autoPreambleName: '',

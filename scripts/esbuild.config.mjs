@@ -7,6 +7,7 @@ import { buildWorker as buildEngineWorker, engineIsBuilt } from './engine-assets
 import { buildStyles, fontsPlugin } from './gen-styles.mjs';
 import { assertMobileSafe } from './check-mobile.mjs';
 import { banners } from './banner.mjs';
+import { versionDefine } from './plugin-version.mjs';
 
 const prod = process.argv[2] === 'production';
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
@@ -136,6 +137,9 @@ const options = {
 	platform: 'browser',
 	target: 'es2022',
 	banner: { js: banner.js },
+	// manifest.json's version, which the plugin compares with the manifest it is loaded with, to tell
+	// a main.js that Sync left behind (src/platform/version.ts).
+	define: versionDefine(root),
 	minify: prod,
 	sourcemap: prod ? false : 'inline',
 	legalComments: 'none',

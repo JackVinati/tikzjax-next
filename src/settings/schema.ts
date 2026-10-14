@@ -40,6 +40,13 @@ export interface TikzSettings {
 	 * engine starts without one; false shows it again.
 	 */
 	jitNoticeShown: boolean;
+	/**
+	 * The versions of main.js and manifest.json, as `<main.js> → <manifest.json>`, that the notice
+	 * that they are out of step was last shown for (src/platform/version.ts, D34), so that it is shown
+	 * once for each pair. Synced with the rest of data.json, so another device out of step in the same
+	 * way is not told again; its diagnostics view still says so.
+	 */
+	outOfStepNoticeShown: string;
 
 	// --- source -------------------------------------------------------------------------------
 	/**
@@ -71,6 +78,7 @@ export const DEFAULT_SETTINGS: TikzSettings = {
 	secondEngine: true,
 	preambleSnapshots: true,
 	jitNoticeShown: false,
+	outOfStepNoticeShown: '',
 	sourceHandling: 'corrected',
 	preamblePath: '',
 	autoPreambleName: 'tikz-preamble.tex',
