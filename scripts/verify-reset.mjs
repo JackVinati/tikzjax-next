@@ -15,7 +15,9 @@
  *    163,840,000 bytes of it, which is what a new Memory holds;
  *  - a run that jumped out of TeX, overflowed the engine's stack or was cut off at a line longer
  *    than TeX's buffer must leave a new Memory to the next, and every other run its own, reset;
- *  - each input must get the same reply in every order, and each fixture the SVG smoke recorded.
+ *  - each input must get the same reply in every order, and each fixture the SVG smoke recorded;
+ *  - and, last, a run whose reset bookkeeping fails once TeX has ended must still be drawn, and
+ *    leave a new Memory to the next.
  *
  * Exits 1 on any difference.
  */
@@ -192,6 +194,8 @@ function where(offset) {
 
 /** Every run of TeX in the order being checked: the Memory it was handed, and how that went. */
 let runs = [];
+/** Whether the engine's marks throw when the worker reads them (the last check below). */
+let faultyMarks = false;
 const realInstantiate = WebAssembly.instantiate;
 WebAssembly.instantiate = function (module, imports, ...rest) {
 	const memory = imports?.env?.memory;
@@ -217,7 +221,17 @@ WebAssembly.instantiate = function (module, imports, ...rest) {
 		run.abnormal = true;
 		return imports.library.jumpOut(...a);
 	};
-	return realInstantiate.call(this, module, { ...imports, library }, ...rest);
+	const instance = realInstantiate.call(this, module, { ...imports, library }, ...rest);
+	if (!faultyMarks) return instance;
+	// The engine's marks failing as the worker reads them after TeX has ended, for the check below.
+	return instance.then(({ exports }) => ({
+		exports: {
+			...exports,
+			getStackLow: () => {
+				throw new RangeError('a fault in the bookkeeping, put there by verify-reset');
+			},
+		},
+	}));
 };
 
 // --- run -------------------------------------------------------------------------------------------
@@ -363,6 +377,28 @@ console.log(
 if (totals.reused === 0) {
 	failures++;
 	console.log('\x1b[31mFAIL\x1b[0m  no run reused a Memory: the reset was never exercised');
+}
+
+// A fault in the reset's own bookkeeping, after TeX has ended well, must cost the next run a new
+// Memory and never this run's diagram: `basic` with the marks throwing as the worker reads them must
+// still be drawn as smoke drew it, and the run after it must be handed a new Memory equal to the dump.
+{
+	const basic = inputs.find((input) => input.name === 'basic');
+	const send = await startWorker();
+	runs = [];
+	faultyMarks = true;
+	const reply = await send(basic);
+	faultyMarks = false;
+	const next = await send(basic);
+	const drawn = reply.type === 'ok' && reply.svg === basic.reference;
+	const renewed = runs.length === 2 && runs[1].memory !== runs[0].memory && runs[1].equal;
+	const ok = drawn && renewed && next.type === 'ok' && next.svg === basic.reference;
+	if (!ok) failures++;
+	console.log(
+		`${ok ? '\x1b[32mOK  \x1b[0m' : '\x1b[31mFAIL\x1b[0m'}  a reset whose bookkeeping fails costs a new ` +
+			`Memory, not the diagram: ${drawn ? 'drawn' : `${reply.type}: ${reply.message}`}, ` +
+			`${renewed ? 'then a new Memory' : 'then not a new Memory equal to the dump'}`,
+	);
 }
 console.log(
 	failures

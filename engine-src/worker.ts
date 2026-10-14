@@ -202,23 +202,31 @@ const memoryForRun = (dump: CoreDump): { memory: WebAssembly.Memory; fresh: bool
  * Keep `memory` for the next run, with where this run can have written: TeX's counters read from
  * it, the engine's marks of how far the string pool and the stack went, and what the host wrote.
  * Nothing is kept when they do not add up (./reset writtenSpans), and the next run takes a new one.
+ *
+ * It never throws. It runs after TeX has ended, in the same try as drawing the DVI, and an error out
+ * of it there would read as a run that wrote nothing: a fault in the reset's bookkeeping must cost
+ * the next run a new Memory, never this run's diagram.
  */
 const keep = (memory: WebAssembly.Memory, exports: WebAssembly.Exports): void => {
-	const mark = (name: string): number => {
-		const read = exports[name];
-		return typeof read === 'function' ? (read as () => number)() : -1;
-	};
-	const spans = writtenSpans(
-		new Uint8Array(memory.buffer),
-		CORE_LAYOUT,
-		{
-			poolPtrHigh: mark('getPoolPtrHigh'),
-			strPtrHigh: mark('getStrPtrHigh'),
-			stackLow: mark('getStackLow'),
-		},
-		library.hostWrites(),
-	);
-	kept = spans === undefined ? null : { memory, spans };
+	try {
+		const mark = (name: string): number => {
+			const read = exports[name];
+			return typeof read === 'function' ? (read as () => number)() : -1;
+		};
+		const spans = writtenSpans(
+			new Uint8Array(memory.buffer),
+			CORE_LAYOUT,
+			{
+				poolPtrHigh: mark('getPoolPtrHigh'),
+				strPtrHigh: mark('getStrPtrHigh'),
+				stackLow: mark('getStackLow'),
+			},
+			library.hostWrites(),
+		);
+		kept = spans === undefined ? null : { memory, spans };
+	} catch {
+		kept = null;
+	}
 };
 
 // --- transcript analysis --------------------------------------------------------------------------

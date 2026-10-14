@@ -1882,8 +1882,12 @@ dump's bytes back over only the parts that run can have written (`engine-src/res
 That is 26.5 to 27.3 MiB over the fixtures, in 14 stretches, and takes 2 ms a run in both browsers
 where a new Memory took 4 to 5, medians of the campaign. A run that jumped out of TeX, overflowed
 the engine's stack or trapped leaves a new Memory to the next, rather than trusting what it left
-behind, and so does a memory whose counters do not lie within their arrays. The diagnostics view
-says "new memory" for a diagram that took one, and "memory reset" for the rest.
+behind, and so does a memory whose counters do not lie within their arrays. So does a run whose
+reset bookkeeping fails once TeX has ended, and its diagram is drawn all the same: the worker works
+out what to keep in a try of its own, since an error there read as a run that wrote nothing ("TeX
+produced no output", with the marks made to throw), and a fault in the reset must cost a new
+Memory, never the diagram. The diagnostics view says "new memory" for a diagram that took one, and
+"memory reset" for the rest.
 
 **Why the engine had to mark three things.** TeX's counters are where a run ended, not how far it
 went, for two arrays. A string TeX builds and then flushes, as `\detokenize`, `\meaning` and
