@@ -82,6 +82,17 @@ export interface EngineReport {
 /** How many engines' lives the report keeps. A phone stops its engine every time it is backgrounded. */
 const ENGINE_LIVES = 20;
 
+/**
+ * The longest a job waits for its stored run to be read once an engine is idle for it (fetchStored),
+ * after which it goes without, and compiles its preamble as it would with nothing stored. The read
+ * runs from when the job reaches the host, so while an engine starts it costs nothing; once the engine
+ * is up it took 9 to 13 ms in WebKit and 1 to 3 in Chromium on the desktop, for runs of 0.2 to 2.8 MiB
+ * stored (internal/DECISIONS.md D36). Without a limit, a read that never settled held the job until
+ * its startup allowance ran out, 20 s on a computer and 30 on a phone, and failed it as an engine
+ * that would not start.
+ */
+const STORED_READ_WAIT_MS = 250;
+
 /** What an interrupted job is told, for each reason the engine can be stopped under it. */
 const INTERRUPTED: Record<'restart' | 'background' | 'unload', string> = {
 	restart: 'the engine was restarted',
@@ -155,6 +166,8 @@ export interface StoredRuns {
 	readonly writable: boolean;
 	/** Read what is stored, once; every later call waits for the same. */
 	load(): Promise<void>;
+	/** Whether a run is stored under `route`, as far as is known yet. */
+	has(route: string): boolean;
 	/** The run kept under `route`, if one is and it is worth sending; its own copy of the bytes. */
 	read(route: string): Promise<StoredRun | undefined>;
 	keep(message: SavedRunMessage): Promise<void>;
@@ -180,11 +193,18 @@ interface Job {
 	/**
 	 * The run kept for its diagram across the engines' stops (StoredRuns), while it is read, and once
 	 * it has been: sent with the job to an engine that does not hold the run, and the time the read
-	 * took. A job is not posted while its run is being read.
+	 * took. While its run is being read a job goes only to an idle engine that holds the run, and
+	 * lets the jobs behind it go first (pump).
 	 */
 	fetching: boolean;
 	stored: StoredRun | undefined;
 	fetchMs: number | undefined;
+	/**
+	 * The timer of the longest it waits for the read with an engine idle for it (STORED_READ_WAIT_MS),
+	 * and whether that ran out first: it then went without the run.
+	 */
+	readWait: number | null;
+	overdue: boolean;
 	/** What was sent of a stored run, for what putting it back took. */
 	sent: { bytes: number; rawBytes: number } | undefined;
 	readonly onRunning: (() => void) | undefined;
@@ -247,6 +267,11 @@ export class WorkerHost implements TexHost {
 	private idleTimer: number | null = null;
 	private inventory: EngineInventory | null = ENGINE_INVENTORY;
 	private nextId = 1;
+	/**
+	 * Reads of stored runs a job stopped waiting for, not settled yet: while there is one, storage is
+	 * not answering, and no other job's run is read until it has (fetchStored).
+	 */
+	private overdueReads = 0;
 
 	/** For the diagnostics view: see EngineReport. */
 	private starts = 0;
@@ -363,6 +388,8 @@ export class WorkerHost implements TexHost {
 				fetching: false,
 				stored: undefined,
 				fetchMs: undefined,
+				readWait: null,
+				overdue: false,
 				sent: undefined,
 				onRunning,
 				signal,
@@ -451,21 +478,30 @@ export class WorkerHost implements TexHost {
 		}
 
 		// The waiting jobs, oldest first, each to an idle engine: the one that holds the run its diagram
-		// would start from, if one does (./route).
-		for (;;) {
-			const next = this.waiting[0];
-			// A job whose stored run is being read waits for it, a few milliseconds, rather than
-			// compile its preamble: it is posted when the read is done (fetchStored).
-			if (next === undefined || next.fetching) break;
+		// would start from, if one does (./route). A job whose stored run is being read waits for it, a
+		// few milliseconds, rather than compile its preamble, unless an idle engine holds the run
+		// already; and meanwhile the jobs behind it go first, as an engine left idle while a job could
+		// run costs more than the read. It is posted when the read is done, or once it has waited
+		// STORED_READ_WAIT_MS with an engine idle for it (fetchStored).
+		for (let at = 0; at < this.waiting.length;) {
 			const idle = this.engines.filter((engine) => engine.up && engine.current === null);
-			const engine = pickEngine(
-				next.route,
-				idle,
-				this.waiting.slice(1).map((job) => job.route),
-			);
-			if (engine === undefined) break;
-			this.waiting.shift();
-			this.post(engine, next);
+			if (idle.length === 0) break;
+			const job = this.waiting[at]!;
+			const route = job.route;
+			const engine = job.fetching
+				? idle.find((candidate) => route !== undefined && candidate.held.has(route))
+				: pickEngine(
+						route,
+						idle,
+						this.waiting.filter((other) => other !== job).map((other) => other.route),
+					);
+			if (engine === undefined) {
+				this.waitForRead(job);
+				at++;
+				continue;
+			}
+			this.waiting.splice(at, 1);
+			this.post(engine, job);
 		}
 
 		const starting = this.engines.filter((engine) => !engine.up).length;
@@ -490,16 +526,27 @@ export class WorkerHost implements TexHost {
 
 	private post(engine: Engine, job: Job): void {
 		engine.current = job;
+		this.stopReadWait(job);
 		// The part of the engine's start this job was there for. Waiting behind another job once
 		// the engine was up is not the engine starting.
 		if (engine.readyAt !== null && job.arrived < engine.readyAt)
 			job.startMs = engine.readyAt - Math.max(job.arrived, engine.spawnedAt);
 		const snapshots = this.snapshotBudget();
+		const runs = this.runs;
+		const route = job.route;
 		// The stored run, to an engine that does not hold the run already; transferred, not copied.
 		const stored =
-			snapshots > 0 && job.route !== undefined && !engine.held.has(job.route) ? job.stored : undefined;
+			snapshots > 0 && route !== undefined && !engine.held.has(route) ? job.stored : undefined;
 		job.stored = undefined;
 		if (stored !== undefined) job.sent = { bytes: stored.data.byteLength, rawBytes: stored.rawBytes };
+		// The run this job saves is asked for while storage can keep it, but not when one is stored
+		// under its name and none was sent, as when it was not worth sending or the read was not waited
+		// for: the worker would write the same run out and gzip it again for nothing. One that was sent
+		// and turns out to be another text's, or not to read back, is replaced by the run saved here.
+		const persist =
+			snapshots > 0 &&
+			runs?.writable === true &&
+			(stored !== undefined || route === undefined || !runs.has(route));
 		const request: WorkerRequest = {
 			type: 'render',
 			id: job.id,
@@ -507,7 +554,7 @@ export class WorkerHost implements TexHost {
 			options: job.options,
 			snapshots,
 			...(stored === undefined ? {} : { stored }),
-			persist: snapshots > 0 && this.runs?.writable === true,
+			persist,
 		};
 		if (stored === undefined) engine.worker.postMessage(request);
 		else engine.worker.postMessage(request, [stored.data]);
@@ -727,6 +774,7 @@ export class WorkerHost implements TexHost {
 	/** Every settlement goes through here, so no job keeps a listener on a signal it is done with. */
 	private settle(job: Job, fn: () => void): void {
 		job.signal.removeEventListener('abort', job.onAbort);
+		this.stopReadWait(job);
 		fn();
 	}
 
@@ -790,29 +838,64 @@ export class WorkerHost implements TexHost {
 	}
 
 	/**
-	 * Read the run kept for a job's diagram across the engines' stops, while the job waits, when no
-	 * engine holds it: the job is posted once the read is done, with the run if there was one worth
-	 * sending (StoredRuns.read). The engine's start, when there is one, runs meanwhile.
+	 * Read the run kept for a job's diagram across the engines' stops, while the job waits, unless an
+	 * engine that holds the run will take the job: one is idle, or it is the only engine there can be.
+	 * One that holds it and is busy, with another engine idle or to be started, may well not: a job
+	 * never waits for a busy engine (./route), and went to the other without the run, which compiled
+	 * the preamble, saved it and stored it again. The job is posted once the read is done, with the
+	 * run if there was one worth sending (StoredRuns.read), or before, to an engine that turns out to
+	 * hold the run, and the bytes read are then let go. The engine's start, when there is one, runs
+	 * meanwhile. A job waits for the read at most STORED_READ_WAIT_MS with an engine idle for it, and
+	 * while a read it stopped waiting for has not settled, storage is not asked for another.
 	 */
 	private fetchStored(job: Job): void {
 		const runs = this.runs;
 		const route = job.route;
-		if (runs === undefined || !runs.readable || route === undefined) return;
-		if (this.engines.some((engine) => engine.held.has(route))) return;
+		if (runs === undefined || !runs.readable || route === undefined || this.overdueReads > 0) return;
+		const holders = this.engines.filter((engine) => engine.held.has(route));
+		if (holders.some((engine) => engine.up && engine.current === null)) return;
+		if (holders.length > 0 && this.size === 1) return;
 		job.fetching = true;
 		const started = this.now();
 		runs.read(route)
 			.then(
 				(run) => {
+					// Not waited for, or no longer needed: the bytes go.
+					if (job.overdue || !this.waiting.includes(job)) return;
 					job.stored = run;
 					job.fetchMs = this.now() - started;
 				},
 				() => undefined,
 			)
 			.finally(() => {
+				if (job.overdue) this.overdueReads--;
 				job.fetching = false;
+				this.stopReadWait(job);
 				this.pump();
 			});
+	}
+
+	/**
+	 * A job whose stored run is being read, with an engine idle for it: once STORED_READ_WAIT_MS has
+	 * gone by, it is posted without the run. Without timers, the read is waited for however long it
+	 * takes.
+	 */
+	private waitForRead(job: Job): void {
+		if (!job.fetching || job.readWait !== null || this.timers === undefined) return;
+		job.readWait = this.timers.setTimeout(() => {
+			job.readWait = null;
+			if (!job.fetching || !this.waiting.includes(job)) return;
+			job.fetching = false;
+			job.overdue = true;
+			this.overdueReads++;
+			this.pump();
+		}, STORED_READ_WAIT_MS);
+	}
+
+	private stopReadWait(job: Job): void {
+		if (job.readWait === null) return;
+		this.timers?.clearTimeout(job.readWait);
+		job.readWait = null;
 	}
 
 	/**

@@ -169,6 +169,11 @@ export class RunStore {
 		return this.index?.get(route);
 	}
 
+	/** Whether a run is stored under `route`, as far as is known: false until `load` has read them. */
+	has(route: string): boolean {
+		return this.index?.has(route) === true;
+	}
+
 	/**
 	 * Whether putting back a run like `info` is likely to cost less than compiling its preamble did:
 	 * reading its bytes, and in the worker inflating, checking and writing them, against what reaching
