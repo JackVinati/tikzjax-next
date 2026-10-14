@@ -140,3 +140,16 @@ export function engineCount(
 	if (webView.cores !== null && webView.cores < FEW_CORES) return 1;
 	return budgets.concurrency;
 }
+
+/**
+ * What each engine may hold of saved preambles on this device (internal/DECISIONS.md D32): the
+ * platform's `snapshotBytes`, but a phone's on a computer that reports less than 8 GiB of memory,
+ * which already runs one engine for that (`engineCount`): at a computer's 32 MiB, one engine's
+ * peak working set grew by 52 MiB in Chromium and 58 in WebKit over a note of 74 diagrams (D32).
+ * Where no memory figure is reported, the platform's.
+ */
+export function snapshotBytes(budgets: Budgets, webView: Pick<WebViewFeatures, 'memoryGiB'>): number {
+	if (webView.memoryGiB !== null && webView.memoryGiB < LOW_MEMORY_GIB)
+		return Math.min(budgets.snapshotBytes, MOBILE.snapshotBytes);
+	return budgets.snapshotBytes;
+}

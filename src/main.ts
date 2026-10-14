@@ -4,7 +4,7 @@ import { COLD_FONT_CSS } from 'virtual:fonts';
 import { TexError, type Budgets, type TexResult } from './types';
 import type { BootTimings, EngineInventory } from '../engine-src/protocol';
 import { WorkerHost } from './engine/worker-host';
-import { budgetsFor, engineCount } from './platform/budgets';
+import { budgetsFor, engineCount, snapshotBytes } from './platform/budgets';
 import { ensureFonts } from './platform/context';
 import { device, webViewFeatures } from './platform/device';
 import { BUILT_VERSION } from './platform/version';
@@ -97,8 +97,10 @@ export default class TikzjaxNextPlugin extends Plugin {
 			poolSize: engines,
 			onSize: (size) => this.queue?.setConcurrency(size),
 			// Saved preambles (internal/DECISIONS.md D32), read for each diagram, so that turning them
-			// off in data.json applies to the next one, also when the change arrives through Sync.
-			snapshotBudget: () => (this.settings.preambleSnapshots ? this.budgets.snapshotBytes : 0),
+			// off in data.json applies to the next one, also when the change arrives through Sync. A
+			// phone's budget on a computer short of memory (platform/budgets.ts snapshotBytes).
+			snapshotBudget: () =>
+				this.settings.preambleSnapshots ? snapshotBytes(this.budgets, webViewFeatures()) : 0,
 			// Whether TeX runs without the JIT, which on an iPhone or iPad is said once (D33).
 			onStarted: (boot) => this.warnIfNoJit(boot),
 		});
