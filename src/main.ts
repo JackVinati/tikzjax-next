@@ -99,8 +99,8 @@ export default class TikzjaxNextPlugin extends Plugin {
 			poolSize: engines,
 			onSize: (size) => this.queue?.setConcurrency(size),
 			// Saved preambles (internal/DECISIONS.md D32), read for each diagram, so that turning them
-			// off in data.json applies to the next one, also when the change arrives through Sync. A
-			// phone's budget on a computer short of memory (platform/budgets.ts snapshotBytes).
+			// off applies to the next one, also when the change arrives through Sync. A phone's budget
+			// on a computer short of memory (platform/budgets.ts snapshotBytes).
 			snapshotBudget: () =>
 				this.settings.preambleSnapshots ? snapshotBytes(this.budgets, webViewFeatures()) : 0,
 			// Whether TeX runs without the JIT, which on an iPhone or iPad is said once (D33).

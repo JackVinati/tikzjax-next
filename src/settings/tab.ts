@@ -189,6 +189,23 @@ export class TikzSettingTab extends PluginSettingTab {
 				);
 		}
 
+		// On every platform: the switch for saved preambles (internal/DECISIONS.md D32) has to be
+		// reachable where data.json is not, on a phone above all, should a diagram draw differently
+		// from one. The host reads it for each diagram, so it applies to the next.
+		new Setting(containerEl)
+			.setName('Saved preambles')
+			.setDesc(
+				'Start a diagram where an earlier one with the same packages and preamble stood once its ' +
+					'preamble was loaded, and compile only its body. Turn this off if a diagram draws ' +
+					'differently with it, and please report that diagram.',
+			)
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.preambleSnapshots).onChange(async (value) => {
+					this.plugin.settings.preambleSnapshots = value;
+					await this.plugin.saveSettings();
+				}),
+			);
+
 		new Setting(containerEl)
 			.setName('Time limit per diagram')
 			.setDesc(

@@ -27,9 +27,10 @@ export interface TikzSettings {
 	secondEngine: boolean;
 	/**
 	 * Start a diagram from the run an earlier one with the same preamble saved at the end of its
-	 * \begin{document} (internal/DECISIONS.md D32). Not in the settings tab: it is there to be turned
-	 * off, in data.json, should a diagram ever draw differently from a saved run than from the start,
-	 * without waiting for a release, and a release can turn it off for everyone the same way.
+	 * \begin{document} (internal/DECISIONS.md D32). It is there to be turned off, in the settings tab,
+	 * which a phone can reach where it cannot reach data.json, should a diagram ever draw differently
+	 * from a saved run than from the start, without waiting for a release; a release can turn it off
+	 * for everyone by its default.
 	 */
 	preambleSnapshots: boolean;
 

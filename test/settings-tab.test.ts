@@ -282,6 +282,25 @@ describe('settings tab — second engine', () => {
 	});
 });
 
+describe('settings tab — saved preambles', () => {
+	/*
+	 * The one switch for saved preambles (internal/DECISIONS.md D32), which a phone has to reach too:
+	 * its data.json is in a folder the Files app hides.
+	 */
+	for (const mobile of [false, true]) {
+		it(`offers them ${mobile ? 'on a phone or a tablet' : 'on a computer'}, on by default, and turning them off saves`, async () => {
+			fakes.Platform.isMobile = mobile;
+			display();
+			const toggle = setting('Saved preambles').controls[0]!;
+			expect(toggle.value).toBe(true);
+			await toggle.changed?.(false);
+			expect(settings.preambleSnapshots).toBe(false);
+			expect(saves).toBe(1);
+			expect(setting('Saved preambles').desc).toContain('Turn this off if a diagram draws differently');
+		});
+	}
+});
+
 describe('settings tab — preamble', () => {
 	it('has a Preamble section, after Source', () => {
 		display();
