@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RecentEdits } from '../src/block/edits';
+import { editedNote, RecentEdits } from '../src/block/edits';
 
 /*
  * Only a block of a note being typed in waits for the debounce (internal/DECISIONS.md D22). A note
@@ -57,5 +57,19 @@ describe('RecentEdits', () => {
 		clock.now += 999;
 		expect(recent.editing('a.md')).toBe(true);
 		expect(recent.editing('n0.md')).toBe(false);
+	});
+});
+
+describe('the note an editor-change names', () => {
+	it('is the file of the view or editor it came with', () => {
+		expect(editedNote({ file: { path: 'folder/note.md' } })).toBe('folder/note.md');
+	});
+
+	it('is none, without throwing, for an editor with no file or an event with no second argument', () => {
+		// Any plugin can trigger the workspace event, and not every one passes what Obsidian does.
+		expect(editedNote({ file: null })).toBeNull();
+		expect(editedNote({})).toBeNull();
+		expect(editedNote(undefined)).toBeNull();
+		expect(editedNote(null)).toBeNull();
 	});
 });

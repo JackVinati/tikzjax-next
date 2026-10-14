@@ -10,7 +10,7 @@ import { device, webViewFeatures } from './platform/device';
 import { DiagramCache } from './cache';
 import { RenderQueue } from './queue/queue';
 import { ViewportGate } from './block/viewport';
-import { RecentEdits } from './block/edits';
+import { editedNote, RecentEdits } from './block/edits';
 import {
 	BlockTally,
 	createProcessor,
@@ -124,10 +124,11 @@ export default class TikzjaxNextPlugin extends Plugin {
 		});
 
 		// Which notes are being typed in, in any pane, so that only their blocks debounce and every
-		// other diagram goes to the queue as soon as it is seen (block/edits.ts).
+		// other diagram goes to the queue as soon as it is seen (block/edits.ts). A change no editor
+		// made comes in through `modify`, below.
 		const edits = new RecentEdits(this.budgets.editWindowMs, () => Date.now());
 		this.registerEvent(
-			this.app.workspace.on('editor-change', (_editor, info) => edits.changed(info.file?.path ?? null)),
+			this.app.workspace.on('editor-change', (_editor, info) => edits.changed(editedNote(info))),
 		);
 
 		this.registerMarkdownCodeBlockProcessor(
@@ -241,6 +242,10 @@ export default class TikzjaxNextPlugin extends Plugin {
 		this.registerEvent(
 			this.app.vault.on('modify', (file) => {
 				if (!(file instanceof TFile)) return;
+				// A note rewritten by a sync or collaboration plugin, or by another program, is
+				// redrawn in a Reading view without any editor saying so; its blocks debounce like
+				// those of a note being typed in, so that changes coming in quickly compile once.
+				edits.changed(file.path);
 				const affected = this.preamble?.invalidate(file.path) ?? [];
 				for (const key of affected) void this.cache?.forget(key);
 				if (affected.length) this.rerenderOpenViews();

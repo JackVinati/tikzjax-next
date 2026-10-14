@@ -1205,11 +1205,11 @@ so a burst of typing compiles once, at the pause.
 
 So the debounce is kept for exactly that block and dropped for every other. A block is taken for one
 being typed in when the text of its note changed within `editWindowMs` (1 s on both platforms) of its
-cache miss, by any editor in any pane, as Obsidian's `editor-change` reports it
-(`src/block/edits.ts`); one whose editor names no note counts for every note. Such a block goes
-`GATING → DEBOUNCING` as before; any other goes `GATING → SCHEDULING` the moment the gate lets it
-through, in band 1, and a `lazy=off` block to SCHEDULING at once, in band 2. An export never gated or
-debounced, and still does not.
+cache miss, by any editor in any pane, as Obsidian's `editor-change` reports it, or by a change to
+its file, as `vault.on('modify')` reports it (`src/block/edits.ts`); an `editor-change` that names no
+note counts for every note. Such a block goes `GATING → DEBOUNCING` as before; any other goes
+`GATING → SCHEDULING` the moment the gate lets it through, in band 1, and a `lazy=off` block to
+SCHEDULING at once, in band 2. An export never gated or debounced, and still does not.
 
 The decision is made at the cache miss, not when the block is processed, because of the order of
 things in Obsidian, read in the 1.14.4 bundle: `editor-change` is triggered from the editor's update
@@ -1232,8 +1232,11 @@ How each place a diagram is drawn comes out:
   keystroke: one compile per pause.
 - **Opening a note, scrolling, switching view, a hover preview of a note nobody types in, "Render all
   diagrams in this note".** No edit, so no wait.
-- **A change that is not typing**: Sync, another program saving the file. Not an editor change, so
-  the block compiles at once; such changes come seconds apart, not a keystroke apart.
+- **A change that is not typing**: a sync or collaboration plugin, another program saving the file.
+  No editor reports it, but the file's `modify` does, so a note redrawn in a Reading view for each
+  change that comes in debounces, and changes arriving a moment apart compile once, as every change
+  did before. Obsidian saving the note being typed in counts as one more edit of it, which changes
+  nothing.
 - **PDF export.** Unchanged: never gated, never debounced.
 
 "The block at this place in the note had other text a moment ago" was the first idea, and was not

@@ -14,7 +14,9 @@
  * read. So a block whose note's text changed within `windowMs` of its miss is taken for one being
  * typed in, and debounces; any other block is one shown for the first time or shown again, and goes
  * to the queue as soon as it is seen. Edits are what Obsidian's `editor-change` reports, in any
- * pane; an edit whose note it does not name counts for every note.
+ * pane, and a note's file changing (`vault.on('modify')`), which is how a change that no editor
+ * made arrives: a sync or collaboration plugin, another program. An edit whose note `editor-change`
+ * does not name counts for every note.
  *
  * Deliberately not "the block at this place in the note had other text": with two panes on one
  * note, the second pane's block for a keystroke finds the first pane's block with the same text
@@ -58,4 +60,13 @@ export class RecentEdits {
 			now - (this.at.get(path) ?? Number.NEGATIVE_INFINITY) <= this.windowMs
 		);
 	}
+}
+
+/**
+ * The note an `editor-change` names: its second argument's file, if any. Defensive, because the
+ * event is a workspace event any plugin can trigger, with arguments of its own or none, and this
+ * listener must not throw into the plugin that did.
+ */
+export function editedNote(info: { file?: { path: string } | null } | null | undefined): string | null {
+	return info?.file?.path ?? null;
 }
