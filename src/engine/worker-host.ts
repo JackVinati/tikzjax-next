@@ -493,8 +493,8 @@ export class WorkerHost implements TexHost {
 		// STORED_READ_WAIT_MS with an engine idle for it (fetchStored).
 		for (let at = 0; at < this.waiting.length;) {
 			const idle = this.engines.filter((engine) => engine.up && engine.current === null);
-			if (idle.length === 0) break;
-			const job = this.waiting[at]!;
+			const job = this.waiting[at];
+			if (idle.length === 0 || job === undefined) break;
 			const route = job.route;
 			const engine = job.fetching
 				? idle.find((candidate) => route !== undefined && candidate.held.has(route))
