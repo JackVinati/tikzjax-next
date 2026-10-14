@@ -999,6 +999,13 @@ describe('the debounce', () => {
 		expect(bands).toEqual([]);
 	});
 
+	it('runs out for a block being typed in that the typing left alone, which is then queued as one in view', async () => {
+		const { queue, bands } = recordingBands();
+		const child = new TikzBlock(container(), spec(), deps({ queue, debounceMs: 1, editing: () => true }));
+		child.onload();
+		await vi.waitFor(() => expect(bands).toEqual([1]));
+	});
+
 	it('asks whether the note is being typed in when the cache misses, not before', async () => {
 		const asked = vi.fn(() => false);
 		const child = new TikzBlock(

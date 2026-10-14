@@ -121,7 +121,7 @@ export interface BlockDeps {
 	/**
 	 * Start the engine, if none is running or starting, without waiting for it. Called when the
 	 * cache misses, so that the engine's start runs while the block waits for the viewport gate and
-	 * its turn in the queue rather than after them (internal/DECISIONS.md D22). Omitted: the engine
+	 * its turn in the queue rather than after them (internal/DECISIONS.md D23). Omitted: the engine
 	 * starts when the queue hands it the first job.
 	 */
 	startEngine?: (() => void) | undefined;
