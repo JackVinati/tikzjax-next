@@ -1274,10 +1274,11 @@ a diagram on an Obsidian 1.7.2 install and a current one, by hand, is in `TODO.m
 job. Date of record: 2026-10-14.**
 
 Until 0.2.1 the engine was created when the first job reached it: after the diagram had been seen,
-after its debounce, after its turn in the queue. Its start, 192–234 ms in WebKit on the desktop
-with 0.2.0's worker (the 0.2.x measurements), was then paid in full by that diagram, and on a phone
-the engine stops after 30 s idle and whenever the app goes to the background, so the first diagram
-after each of those pays it again.
+after its debounce, after its turn in the queue. Its start, 192–234 ms with 0.2.0's worker, measured
+on 2026-10-13 in Playwright's WebKit 26.6 on the Windows 11 desktop the engine is maintained on (an
+i9-13900K), was then paid in full by that diagram, and on a phone the engine stops after 30 s idle
+and whenever the app goes to the background, so the first diagram after each of those pays it
+again.
 
 Now a block whose cache lookup misses asks the host to start an engine (`TexHost.ready`, through the
 processor's `startEngine`), unless it is `lazy=manual` and waits for its button. The start then runs
@@ -1290,14 +1291,14 @@ allowance gave up on a start that never finished, and one started early has no j
 
 - **Never at plugin load.** A session that only shows cached diagrams never starts an engine, as
   before. Starting one at load would cost every session its memory, about 81 MB once started for
-  0.2.0's worker, measured in Node 22 by the 0.2.x boot study, and the start's CPU.
+  0.2.0's worker, measured the same day in Node 22.19 on the same desktop, and the start's CPU.
 - **Never in the background.** On a phone the app going to the background stops the engine and
   pauses the queue so that nothing starts another (main.ts `registerTeardown`); the early start is
   not the queue, so it checks the visibility itself, of the block's own document: on a desktop the
   main window can be minimized while a pop-out window shows the note.
 - **What it costs.** Creating the worker takes the main thread 9–11 ms in WebKit and 19–21 ms in
-  Chromium on the desktop, with 0.2.0's worker (the 0.2.x boot study), which the first job used to
-  pay at the same moment of its life anyway.
+  Chromium 153 on the same desktop, with 0.2.0's worker, measured the same day, which the first job
+  used to pay at the same moment of its life anyway.
 
 What it gains was not measured in Obsidian: the "engine start" step of the first diagram in the
 diagnostics view (D21) shows it, on each device.
@@ -1314,8 +1315,8 @@ side: the second waited in the worker's own queue with its clock running. A seco
 side by side, at the cost of a second engine, and was left for later. It was measured for 0.2.x:
 0.2.0 with a pool of two workers, its worker unchanged, against 0.2.0, in a harness that runs the
 worker exactly as main.js carries it and hands it a note of 37 uncached diagrams, every fixture once,
-all at once, from the worker's creation to its last reply, median of 5 fresh browsers (the 0.2.x
-measurements, set B; Windows 11, i9-13900K, Playwright 1.63, busy with other work at 32–43% CPU):
+all at once, from the worker's creation to its last reply, median of 5 fresh browsers (measured on
+2026-10-13; Windows 11, i9-13900K, Playwright 1.63, busy with other work at 32–43% CPU):
 
 | | one worker | two workers |
 | --- | ---: | ---: |
@@ -1324,11 +1325,11 @@ measurements, set B; Windows 11, i9-13900K, Playwright 1.63, busy with other wor
 
 The first reply came no sooner (334 and 315 ms in WebKit): two engines help a note with many new
 diagrams waiting, not the first diagram. The second worker cost about 100 MB more at the peak, 141
-against 237 MB above the process's start with 0.2.0's worker in Node 22 (the 0.2.x boot study). In
+against 237 MB above the process's start with 0.2.0's worker, measured the same day in Node 22.19. In
 Obsidian the backlog is what the viewport gate lets through, so a note scrolled one diagram at a
 time gains less than this.
 
-What the host does (`src/engine/worker-host.ts`, from the `v-pool` prototype):
+What the host does (`src/engine/worker-host.ts`, first written as the prototype measured above):
 
 - **A second worker starts only while a job waits that no worker running or starting can take.**
   The engine started early for a cache miss (D23) is one worker at most, and a job arriving while it
@@ -1375,13 +1376,14 @@ The worker is 0.2.0's, byte for byte: `test/engine-id.test.ts` builds the worker
 holds it to the ENGINE_ID recorded in `test/fixtures/golden/REVISION.json` (D20), so the pool
 changes nothing a diagram draws and nothing in anyone's cache. The preamble snapshot planned for
 0.2.3 keeps its saved preambles per worker, and with two workers only 32 of 52 possible resumes
-happened in the prototype's note of 74 diagrams (the 0.2.x measurements, set F2); it needs each
+happened in a note of 74 diagrams, every fixture twice, with a prototype of the snapshot (measured on
+2026-10-14 in the same harness); it needs each
 diagram sent to the worker that holds its preamble, which is for that release.
 
-Tests: `test/worker-host.test.ts` (the prototype's pool tests, and idling down together, one worker
-with a pool of one, a crash, the pool shrinking and growing, a second worker that fails to start
-while the first is busy or starting), the queue's new slot count, `test/budgets.test.ts`, and the
-settings tab.
+Tests: `test/worker-host.test.ts` (the pool as the prototype had it, and idling down together, one
+worker with a pool of one, a crash, the pool shrinking and growing, a second worker that fails to
+start while the first is busy or starting), the queue's new slot count, `test/budgets.test.ts`, and
+the settings tab.
 
 ---
 
