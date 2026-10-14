@@ -129,8 +129,9 @@ export function dvi2htmlPatch() {
 
 /**
  * engine-src/library.ts and the patched dvi2html, bundled together for Node and imported: the
- * fork's exports plus `dvi2html`, and the worker's own `buildInput` (engine-src/document.ts) and
- * `restoreUnicode` (engine-src/unicode.ts). For the scripts that run the engine outside a worker,
+ * fork's exports plus `dvi2html`, and the worker's own `buildInput` (engine-src/document.ts),
+ * `restoreUnicode` (engine-src/unicode.ts) and reset of a Memory a run used (engine-src/reset.ts
+ * `writtenSpans`, `restoreSpans`). For the scripts that run the engine outside a worker,
  * so they assemble TeX's input and draw the result exactly as the plugin does. `name` keeps
  * concurrent scripts out of each other's way under node_modules/.cache.
  */
@@ -144,6 +145,7 @@ export async function importEngineForNode(root, name) {
 				"export * from './engine-src/library.ts';",
 				"export { buildInput } from './engine-src/document.ts';",
 				"export { restoreUnicode } from './engine-src/unicode.ts';",
+				"export { writtenSpans, restoreSpans } from './engine-src/reset.ts';",
 				"export { dvi2html } from '@drgrice1/dvi2html';",
 			].join('\n'),
 			resolveDir: root,

@@ -33,6 +33,8 @@
  *  9. The calls TeX makes once a line or once a character allocate nothing: views of the memory are
  *     made once a run rather than two or three a call, and a character is appended where it was
  *     wrapped in an array of its own. They answer and fail exactly as before (D29).
+ * 10. Where this host wrote into TeX's memory in a run is kept, and executeAsync says whether TeX
+ *     ended or jumped out, for the worker's reset of only what a run wrote (./reset, D31).
  */
 
 import { tfmData } from '@drgrice1/dvi2html';
@@ -68,6 +70,23 @@ let memory: ArrayBuffer | null = null;
  */
 let bytes: Uint8Array | null = null;
 let words: Uint32Array | null = null;
+/**
+ * The stretches of the memory this host wrote into this run, each [from, to), for the reset (change
+ * 10). A write joins the stretch it lies within NEAR of, or starts one of its own: TeX's buffer and
+ * its file variables lie 84 MB apart, and one stretch from the first to the last would have the
+ * reset write everything between.
+ */
+let written: [number, number][] = [];
+const NEAR = 65536;
+const wrote = (from: number, to: number) => {
+	for (const span of written) {
+		if (from > span[1] + NEAR || to < span[0] - NEAR) continue;
+		if (from < span[0]) span[0] = from;
+		if (to > span[1]) span[1] = to;
+		return;
+	}
+	written.push([from, to]);
+};
 let inputBuffer: string | null = null;
 let callback: (() => void) | null = null;
 
@@ -284,7 +303,17 @@ export const setMemory = (m: ArrayBuffer) => {
 	memory = m;
 	bytes = new Uint8Array(m);
 	words = new Uint32Array(m, 0, m.byteLength >>> 2);
+	written = [];
 };
+
+/**
+ * Where this host has written into the memory since setMemory, as stretches [from, to): TeX's
+ * buffer and the words beside it that inputln fills, and the file variables get reads a byte into.
+ * All of them are among TeX's globals, and the worker's reset writes the dump back over them with
+ * the rest (./reset).
+ */
+export const hostWrites = (): readonly (readonly [number, number])[] =>
+	written.map(([a, b]) => [a, b] as const);
 
 export const setInput = (input: string, cb?: () => void) => {
 	inputBuffer = input;
@@ -308,10 +337,11 @@ export const jumpOut = (): never => {
  * Runs TeX's main program, to its end or to a jump out. Synchronous since the engine has no
  * asyncify (change 7): once main returns, TeX has finished. It still returns a promise, which is
  * the worker's contract, and the promise fails only when the engine does, by a trap or by an
- * exception from this host.
+ * exception from this host. It says how TeX ended: `end` when its main program returned, `jump`
+ * when it jumped out (change 10).
  */
-export const executeAsync = (exports: WebAssembly.Exports): Promise<void> =>
-	new Promise<void>((resolve) => {
+export const executeAsync = (exports: WebAssembly.Exports): Promise<'end' | 'jump'> =>
+	new Promise<'end' | 'jump'>((resolve) => {
 		try {
 			(exports.main as () => void)();
 		} catch (error) {
@@ -319,8 +349,10 @@ export const executeAsync = (exports: WebAssembly.Exports): Promise<void> =>
 			// The program ends here rather than at TeX's final_end, which would have flushed the line
 			// it was printing: the error's context, which the transcript needs.
 			tex_final_end();
+			resolve('jump');
+			return;
 		}
-		resolve();
+		resolve('end');
 	});
 
 // --- clock (change 4) -------------------------------------------------------------------------
@@ -510,6 +542,7 @@ export const inputln = (
 
 	const first = word[firstp >>> 2]!;
 	word[lastp >>> 2] = first;
+	wrote(lastp, lastp + 4);
 
 	if (bypassEoln && !file.eof && file.eoln) file.position2 = (file.position2 ?? 0) + 1;
 	if (file.eof) return false;
@@ -535,6 +568,7 @@ export const inputln = (
 	const at = bufferp + first;
 	if (length < 64) for (let i = 0; i < length; i++) mem[at + i] = content[from + i]!;
 	else mem.set(content.subarray(from, endOfLine), at);
+	wrote(at, at + length);
 
 	// Trailing spaces off, looking only inside the buffer, as the view of it did: an index outside it
 	// read as undefined there, and ended the loop.
@@ -550,6 +584,7 @@ export const inputln = (
 export const get = (descriptor: number, pointer: number, length: number) => {
 	const file = files[descriptor]!;
 	const buffer = bytes!;
+	wrote(pointer, pointer + Math.max(1, length));
 
 	if (file.stdin) {
 		const input = inputBuffer ?? '';

@@ -165,6 +165,66 @@ function readVersions(out) {
  */
 export const ENGINE_ID_PLACEHOLDER = 'ENGINE_ID_PLACEHOLDER_0f6c8e1d5a2b';
 
+/**
+ * engine-build/out/memory-layout.json as the worker reads it (engine-src/reset.ts MemoryLayout):
+ * where each of TeX's globals lies, by name, with the memory's pages and hash_prime. The worker
+ * resets only the parts of its Memory a run can have written, and finds them from this and TeX's
+ * counters (internal/DECISIONS.md D31).
+ */
+export function readMemoryLayout(root) {
+	const raw = JSON.parse(readFileSync(join(engineOutDir(root), 'memory-layout.json'), 'utf8'));
+	const variables = {};
+	for (const { name, ...where } of raw.variables) variables[name] = where;
+	return {
+		pages: raw.pages,
+		globalsEnd: raw.globalsEnd,
+		dataEnd: raw.dataEnd,
+		hashPrime: raw.hashPrime,
+		variables,
+	};
+}
+
+/**
+ * The globals engine-src/reset.ts reads, by name: the arrays it does not reset whole, and the
+ * counters it bounds them by (its LAYOUT_NAMES, which test/reset.test.ts holds this list to). The
+ * worker carries the place of these and no more, since every other global is reset whole.
+ */
+export const RESET_NAMES = [
+	'mem',
+	'str_pool',
+	'str_start',
+	'font_info',
+	'trie',
+	'hash',
+	'save_stack',
+	'trie_c',
+	'trie_o',
+	'trie_l',
+	'trie_r',
+	'trie_hash',
+	'trie_taken',
+	'trie_op_hash',
+	'lo_mem_max',
+	'hi_mem_min',
+	'mem_end',
+	'pool_ptr',
+	'str_ptr',
+	'fmem_ptr',
+	'trie_max',
+	'hash_used',
+	'max_save_stack',
+];
+
+/** The layout as the worker carries it: RESET_NAMES' places, with the rest of the layout's numbers. */
+export function workerLayout(layout) {
+	const variables = {};
+	for (const name of RESET_NAMES) {
+		if (layout.variables[name] === undefined) throw new Error(`memory-layout.json has no ${name}`);
+		variables[name] = layout.variables[name];
+	}
+	return { ...layout, variables };
+}
+
 export function buildEngineAssets(root) {
 	const out = engineOutDir(root);
 	const dist = join(out, 'dist');
@@ -208,6 +268,7 @@ export function buildEngineAssets(root) {
 		`export const TEX_WASM_SIZE = ${gunzipSync(wasmGz).length};\n` +
 		`export const CORE_DUMP_SIZE = ${dump.size};\n` +
 		`export const CORE_DUMP_RUNS = ${JSON.stringify(dump.runs)};\n` +
+		`export const CORE_LAYOUT = ${JSON.stringify(workerLayout(readMemoryLayout(root)))};\n` +
 		`export const ENGINE_ID = ${JSON.stringify(ENGINE_ID_PLACEHOLDER)};\n` +
 		`export const INVENTORY = ${JSON.stringify(inventory)};\n`;
 

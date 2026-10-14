@@ -65,7 +65,8 @@ export interface DiagnosticsSnapshot {
 
 /**
  * Where a compile's time went, a step to an entry, in the order the steps happen: seen and waiting
- * to be asked for, behind other diagrams, waiting for the engine to start, setting up TeX's memory,
+ * to be asked for, behind other diagrams, waiting for the engine to start, setting up TeX's memory
+ * (its own, reset, or a new one),
  * TeX, DVI to SVG, the SVG pipeline, drawing it in the note, and the whole of it. A step nobody
  * timed is left out.
  */
@@ -74,7 +75,11 @@ export function timingSteps(timings: CompileTimings): string[] {
 		timings.waitedMs === undefined ? null : STRINGS.timingWaited(timings.waitedMs),
 		STRINGS.timingQueue(timings.queueMs),
 		timings.startMs === undefined ? null : STRINGS.timingStart(timings.startMs),
-		timings.resetMs === undefined ? null : STRINGS.timingReset(timings.resetMs),
+		timings.resetMs === undefined
+			? null
+			: (timings.newMemory ?? 0) > 0
+				? STRINGS.timingNewMemory(timings.resetMs)
+				: STRINGS.timingReset(timings.resetMs),
 		timings.texMs === undefined ? null : STRINGS.timingTex(timings.texMs, timings.passes ?? 1),
 		timings.svgMs === undefined ? null : STRINGS.timingSvg(timings.svgMs),
 		STRINGS.timingPost(timings.postMs),

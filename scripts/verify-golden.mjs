@@ -19,6 +19,12 @@
  * without asyncify, because upstream's host unwinds the wasm stack to load a file and that engine
  * has no stack to unwind; this one takes its place. See internal/DECISIONS.md D13.
  *
+ * The fixtures run one after another on one Memory, as in a worker: before each run the core dump
+ * is written back over only what the run before can have written (engine-src/reset.ts), and a run
+ * that did not end normally leaves a new Memory to the next (internal/DECISIONS.md D31). So the
+ * corpus holds the reset too, in name order; scripts/verify-reset.mjs holds it in five others, byte
+ * for byte.
+ *
  * An intended change to what a fixture renders is recorded with --update, in the commit that makes
  * it, which then says why. A new fixture has no golden output until it is recorded, and is reported
  * until it is. --update then records the corpus in REVISION.json as well (scripts/output-revision.mjs),
@@ -34,7 +40,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { importEngineForNode } from './dvi2html-patch.mjs';
 import { engineFilesPresent, readEngineFile } from './engine-files.mjs';
-import { buildWorker } from './engine-assets.mjs';
+import { buildWorker, readMemoryLayout } from './engine-assets.mjs';
 import { bumpAdvice, record } from './output-revision.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -72,6 +78,15 @@ for (const entry of readdirSync(join(DIST, 'tex_files'))) {
 }
 library.setBundledFiles(bundled, (gz) => new Uint8Array(gunzipSync(gz)));
 
+/**
+ * The Memory the last run used, with where it can have written, when that run ended normally, as
+ * engine-src/worker.ts keeps it; the dump as one run, for restoreSpans; and how many runs each way.
+ */
+let kept = null;
+const layout = readMemoryLayout(root);
+const whole = { size: coredump.length, runs: [{ offset: 0, bytes: coredump }] };
+const runsOn = { reset: 0, fresh: 0 };
+
 /** A fixture through the engine: the DVI's sha256, the transcript and the SVG, or null for none. */
 async function render(source, dataset) {
 	const log = [];
@@ -80,15 +95,37 @@ async function render(source, dataset) {
 	library.setShowConsole();
 	library.writeFileSync('input.tex', new TextEncoder().encode(library.buildInput(source, dataset).text));
 
-	const memory = new WebAssembly.Memory({ initial: library.pages, maximum: library.pages });
-	new Uint8Array(memory.buffer, 0, library.pages * 65536).set(coredump);
+	let memory;
+	if (kept !== null) {
+		library.restoreSpans(new Uint8Array(kept.memory.buffer), whole, kept.spans);
+		memory = kept.memory;
+		runsOn.reset++;
+	} else {
+		memory = new WebAssembly.Memory({ initial: library.pages, maximum: library.pages });
+		new Uint8Array(memory.buffer, 0, library.pages * 65536).set(coredump);
+		runsOn.fresh++;
+	}
+	kept = null;
 	library.setMemory(memory.buffer);
 	library.setInput('input.tex\n\\end\n');
 
 	let dvi = null;
 	try {
 		const instance = await WebAssembly.instantiate(code, { library, env: { memory } });
-		await library.executeAsync(instance.exports);
+		if ((await library.executeAsync(instance.exports)) === 'end') {
+			const mark = (name) => instance.exports[name]();
+			const spans = library.writtenSpans(
+				new Uint8Array(memory.buffer),
+				layout,
+				{
+					poolPtrHigh: mark('getPoolPtrHigh'),
+					strPtrHigh: mark('getStrPtrHigh'),
+					stackLow: mark('getStackLow'),
+				},
+				library.hostWrites(),
+			);
+			if (spans !== undefined) kept = { memory, spans };
+		}
 		dvi = library.readFileSync('input.dvi');
 	} catch {
 		// No DVI: the transcript says why, and that is what is compared.
@@ -252,6 +289,7 @@ if (UPDATE) {
 console.log(
 	differences
 		? `\n${differences} fixture(s) differ from the golden corpus.`
-		: `\n${names.length}/${names.length} byte-identical to the golden corpus.`,
+		: `\n${names.length}/${names.length} byte-identical to the golden corpus, ${runsOn.reset} of them on the ` +
+				`Memory of the run before, reset, and ${runsOn.fresh} on a new one.`,
 );
 process.exit(differences ? 1 : 0);

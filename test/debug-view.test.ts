@@ -110,6 +110,20 @@ describe('the timings of a diagram in the diagnostics view', () => {
 		expect(timingsOf(row)[1]).toBe('memory reset 5 ms');
 	});
 
+	it('say when the engine took a new memory for the diagram rather than resetting its own', async () => {
+		// Newest first, as the view lists them.
+		const [reset, fresh] = await rows([
+			record({
+				timings: { queueMs: 0, resetMs: 6, newMemory: 1, texMs: 63, svgMs: 9, passes: 1, postMs: 7 },
+			}),
+			record({
+				timings: { queueMs: 0, resetMs: 4, newMemory: 0, texMs: 63, svgMs: 9, passes: 1, postMs: 7 },
+			}),
+		]);
+		expect(timingsOf(fresh)).toContain('new memory 6 ms');
+		expect(timingsOf(reset)).toContain('memory reset 4 ms');
+	});
+
 	it('say when TeX ran twice', async () => {
 		const [row] = await rows([
 			record({ timings: { queueMs: 0, resetMs: 10, texMs: 120, svgMs: 9, passes: 2, postMs: 7 } }),

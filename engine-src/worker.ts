@@ -11,8 +11,10 @@
  *  - the WebAssembly.Module is compiled ONCE, not on every render;
  *  - no `coredump.slice(0)` — at pages=2500 that copy is 156.25 MiB per render — and the dump
  *    ships as its non-zero runs, packed by the build, which are all that is inflated at boot and
- *    all that a run's fresh Memory has written into it, since it is zero everywhere else already
+ *    all that a new Memory has written into it, since it is zero everywhere else already
  *    (./core-dump, ./inflate);
+ *  - one Memory per worker, not one per run: the dump is written back over only what the run before
+ *    can have written, and a run that did not end normally leaves a new Memory to the next (./reset);
  *  - \begin{document} wrapping is conditional (upstream nests it into every existing vault), and the
  *    input is assembled in ./document, with a TS1 shim for a block that can use one (./ts1-shim);
  *  - \nonstopmode, so a TeX error is logged instead of blocking on the interactive `? ` prompt;
@@ -39,7 +41,15 @@ import { describeConvertError } from './convert-error';
 import { buildInput } from './document';
 import { gunzipExactly } from './inflate';
 import { checkCoreDump, packedLength, startingMemory, unpackCoreDump, type CoreDump } from './core-dump';
-import { CORE_DUMP_RUNS, CORE_DUMP_SIZE, ENGINE_ID, INVENTORY, TEX_WASM_SIZE } from 'virtual:engine-assets';
+import { restoreSpans, writtenSpans, type Span } from './reset';
+import {
+	CORE_DUMP_RUNS,
+	CORE_DUMP_SIZE,
+	CORE_LAYOUT,
+	ENGINE_ID,
+	INVENTORY,
+	TEX_WASM_SIZE,
+} from 'virtual:engine-assets';
 import type {
 	BootTimings,
 	EngineAssets,
@@ -162,6 +172,54 @@ async function boot(assets: EngineAssets): Promise<BootTimings> {
 		nativeBase64: typeof nativeFromBase64 === 'function',
 	};
 }
+
+// --- the memory a run starts from -----------------------------------------------------------------
+
+/**
+ * The Memory the last run used, with where that run can have written (./reset), kept when TeX
+ * ended the run itself. Null when the next run takes a new one: before the first, and after a run
+ * that jumped out of TeX, overflowed the stack or trapped, whose counters are not trusted.
+ */
+let kept: { memory: WebAssembly.Memory; spans: Span[] } | null = null;
+
+/**
+ * The Memory a run starts from: the kept one, with the dump's bytes written back over what the run
+ * before wrote, or a new one with the dump written into it. Either way the same bytes, which
+ * scripts/verify-reset.mjs checks after every run of every fixture.
+ */
+const memoryForRun = (dump: CoreDump): { memory: WebAssembly.Memory; fresh: boolean } => {
+	const last = kept;
+	// Out of `kept` until the run is over, so that a run that throws leaves a new Memory to the next.
+	kept = null;
+	if (last !== null) {
+		restoreSpans(new Uint8Array(last.memory.buffer), dump, last.spans);
+		return { memory: last.memory, fresh: false };
+	}
+	return { memory: startingMemory(dump, library.pages), fresh: true };
+};
+
+/**
+ * Keep `memory` for the next run, with where this run can have written: TeX's counters read from
+ * it, the engine's marks of how far the string pool and the stack went, and what the host wrote.
+ * Nothing is kept when they do not add up (./reset writtenSpans), and the next run takes a new one.
+ */
+const keep = (memory: WebAssembly.Memory, exports: WebAssembly.Exports): void => {
+	const mark = (name: string): number => {
+		const read = exports[name];
+		return typeof read === 'function' ? (read as () => number)() : -1;
+	};
+	const spans = writtenSpans(
+		new Uint8Array(memory.buffer),
+		CORE_LAYOUT,
+		{
+			poolPtrHigh: mark('getPoolPtrHigh'),
+			strPtrHigh: mark('getStrPtrHigh'),
+			stackLow: mark('getStackLow'),
+		},
+		library.hostWrites(),
+	);
+	kept = spans === undefined ? null : { memory, spans };
+};
 
 // --- transcript analysis --------------------------------------------------------------------------
 
@@ -441,14 +499,15 @@ interface PassResult {
  */
 const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> => {
 	const started = performance.now();
-	// A new Memory with the dump's non-zero runs written into it: 22.3 MiB rather than all 156.25,
-	// the rest being zero from the start. Upstream also copies the dump with .slice(0) first, an
-	// extra 156.25 MiB allocated and discarded on every single render.
 	const dump = coreDump;
 	const module = texModule;
 	if (dump === null || module === null) throw new Error('the engine has not started');
-	const memory = startingMemory(dump, library.pages);
+	// The worker's own Memory, the dump written back over what the run before wrote, or a new one
+	// with the dump's non-zero runs written into it. Upstream copied the whole dump into a new
+	// 156.25 MiB Memory for every run.
+	const { memory, fresh } = memoryForRun(dump);
 	const reset = performance.now();
+	let keeping = 0;
 
 	library.setMemory(memory.buffer);
 	library.setInput(`${job}.tex\n\\end\n`);
@@ -466,8 +525,14 @@ const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> =
 			library,
 			env: { memory },
 		});
-		await library.executeAsync(instance.exports);
+		const ended = await library.executeAsync(instance.exports);
 		texDone = performance.now();
+		// Only a run TeX ended itself leaves counters to trust; one that jumped out of TeX leaves a new
+		// Memory to the next, as does one that never gets here: a trap, or the stack overflowing.
+		if (ended === 'end') {
+			keep(memory, instance.exports);
+			keeping = performance.now() - texDone;
+		}
 
 		const dvi = library.readFileSync(`${job}.dvi`);
 		wroteDvi = dvi.byteLength > 0;
@@ -492,7 +557,8 @@ const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> =
 	}
 
 	const done = performance.now();
-	spent.resetMs += reset - started;
+	spent.resetMs += reset - started + keeping;
+	spent.newMemory = (spent.newMemory ?? 0) + (fresh ? 1 : 0);
 	spent.texMs += (texDone ?? done) - reset;
 	spent.svgMs += drawing === undefined ? 0 : done - drawing;
 	spent.passes += 1;
@@ -502,6 +568,7 @@ const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> =
 /** `spent` as the plugin is told it: whole milliseconds, which is all a person reading it needs. */
 const rounded = (spent: RenderTimings): RenderTimings => ({
 	resetMs: Math.round(spent.resetMs),
+	newMemory: spent.newMemory ?? 0,
 	texMs: Math.round(spent.texMs),
 	svgMs: Math.round(spent.svgMs),
 	passes: spent.passes,
@@ -545,7 +612,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	const { text, bodyLine, unicode } = buildInput(source, options);
 	const input = new TextEncoder().encode(text);
 	/** Where the time went, over both passes when there are two. */
-	const spent: RenderTimings = { resetMs: 0, texMs: 0, svgMs: 0, passes: 0 };
+	const spent: RenderTimings = { resetMs: 0, newMemory: 0, texMs: 0, svgMs: 0, passes: 0 };
 
 	/** Where the first pass's transcript ends, so its diagnosis can never be read out of pass two. */
 	let firstEnd: number;

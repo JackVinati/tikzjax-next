@@ -67,6 +67,7 @@ const stubAssets = (dump = STUB_DUMP): Plugin => ({
 		build.onLoad({ filter: /^assets$/, namespace: 'stub' }, () => ({
 			contents: [
 				`export const TEX_WASM_SIZE = 8;`,
+				`export const CORE_LAYOUT = { pages: 1, globalsEnd: 0, dataEnd: 0, hashPrime: 1, variables: {} };`,
 				`export const CORE_DUMP_SIZE = ${dump.size};`,
 				`export const CORE_DUMP_RUNS = ${JSON.stringify(dump.runs)};`,
 				`export const ENGINE_ID = ${JSON.stringify(ENGINE_ID_PLACEHOLDER)};`,

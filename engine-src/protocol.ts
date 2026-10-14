@@ -128,8 +128,18 @@ export interface LogMessage {
  * diagnostics view shows them together, so a slow diagram can be reported with where it was slow.
  */
 export interface RenderTimings {
-	/** A fresh Memory with the core dump written into it (./core-dump). */
+	/**
+	 * Setting up TeX's memory for each pass: the dump written back over what the run before wrote
+	 * (./reset), or, when there was no Memory to reuse, a new one with the dump written into it
+	 * (./core-dump).
+	 */
 	resetMs: number;
+	/**
+	 * How many of the passes started from a new Memory rather than the worker's own, reset: the
+	 * first run in a worker, and a run after one that did not end normally. Absent from a worker
+	 * before 0.2.1-beta.2, which took a new one every time.
+	 */
+	newMemory?: number | undefined;
 	/** TeX: instantiating the compiled module, and the run. */
 	texMs: number;
 	/** dvi2html drawing the DVI as SVG. 0 when TeX wrote no DVI. */

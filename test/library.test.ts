@@ -26,13 +26,13 @@ const print = (text: string) => {
 };
 
 describe('executeAsync', () => {
-	it('settles when TeX returns from its main program', async () => {
+	it('settles when TeX returns from its main program, and says it ended', async () => {
 		let ran = false;
-		await expect(library.executeAsync({ main: () => (ran = true) })).resolves.toBeUndefined();
+		await expect(library.executeAsync({ main: () => (ran = true) })).resolves.toBe('end');
 		expect(ran).toBe(true);
 	});
 
-	it('settles when TeX jumps out to its end, and keeps the line TeX was printing', async () => {
+	it('settles when TeX jumps out to its end, says it jumped, and keeps the line TeX was printing', async () => {
 		const log: string[] = [];
 		library.setLogSink((line) => log.push(line));
 		library.setShowConsole();
@@ -41,7 +41,7 @@ describe('executeAsync', () => {
 			library.jumpOut();
 			print('\nTeX carried on past the jump');
 		};
-		await expect(library.executeAsync({ main })).resolves.toBeUndefined();
+		await expect(library.executeAsync({ main })).resolves.toBe('jump');
 		expect(log).toEqual(['! TeX capacity exceeded, sorry [input stack size=5000].', 'l.3 \\a']);
 	});
 
@@ -51,6 +51,32 @@ describe('executeAsync', () => {
 			throw trap;
 		};
 		await expect(library.executeAsync({ main })).rejects.toBe(trap);
+	});
+});
+
+describe('where the host writes into the memory', () => {
+	it('is where inputln put the line and moved last, and where get put the byte it read', () => {
+		const memory = new ArrayBuffer(1 << 20);
+		library.setMemory(memory);
+		expect(library.hostWrites()).toEqual([]);
+		new Uint8Array(memory).set(new TextEncoder().encode('in.tex'), 0);
+		library.writeFileSync('in.tex', new TextEncoder().encode('a line\n'));
+		const descriptor = library.reset(6, 0);
+		// buffer at 1024, 256 long; first at 64 holds 10; last at 68.
+		new DataView(memory).setUint32(64, 10, true);
+		expect(library.inputln(descriptor, 0, 1024, 64, 68, 0, 256)).toBe(true);
+		expect(library.hostWrites()).toEqual([[68, 1024 + 10 + 'a line'.length]]);
+		library.get(descriptor, 2000, 1);
+		expect(library.hostWrites()).toEqual([[68, 2001]]);
+		// Far from those, a stretch of its own: the reset must not write everything between.
+		library.get(descriptor, 900_000, 1);
+		expect(library.hostWrites()).toEqual([
+			[68, 2001],
+			[900_000, 900_001],
+		]);
+		// A new run's memory starts with nothing written.
+		library.setMemory(new ArrayBuffer(4096));
+		expect(library.hostWrites()).toEqual([]);
 	});
 });
 

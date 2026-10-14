@@ -21,6 +21,11 @@ declare module 'virtual:engine-assets' {
 	/** core.dump's non-zero runs, in order: an offset and a length for each, flat. */
 	export const CORE_DUMP_RUNS: readonly number[];
 	/**
+	 * Where TeX's globals lie in the memory (engine-build/out/memory-layout.json), for the reset of
+	 * only what a run wrote (engine-src/reset.ts).
+	 */
+	export const CORE_LAYOUT: import('../engine-src/reset').MemoryLayout;
+	/**
 	 * sha256 of the minified worker bundle that embeds it, the id itself left out
 	 * (scripts/engine-assets.mjs `buildWorker`). Names the build; the cache key holds
 	 * OUTPUT_REVISION (src/cache/key.ts) instead.

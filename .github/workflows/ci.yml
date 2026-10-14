@@ -115,6 +115,12 @@ jobs:
         # starts by pako and by the worker's own base64 (internal/DECISIONS.md D30).
         run: npm run verify:worker -- --legacy
 
+      - name: The engine's memory, reset, is a new one byte for byte
+        # The worker keeps one Memory and writes the core dump back over only what each run can have
+        # written (internal/DECISIONS.md D31). Every fixture, in five seeded orders: before every run
+        # the Memory TeX is handed must equal a new one, all 156.25 MiB of it.
+        run: npm run verify:reset
+
       - name: Build
         # The sha256 is printed, not just computed. A release asset has to match what anyone gets by
         # building the same commit — the community store checks exactly that — and this is where a

@@ -61,6 +61,8 @@ export const STRINGS = {
 	timingQueue: (ms: number) => `queue ${ms} ms`,
 	timingStart: (ms: number) => `engine start ${ms} ms`,
 	timingReset: (ms: number) => `memory reset ${ms} ms`,
+	/** The same step, when the engine took a new memory for the diagram rather than resetting its own. */
+	timingNewMemory: (ms: number) => `new memory ${ms} ms`,
 	timingTex: (ms: number, passes: number) =>
 		passes > 1 ? `TeX ${ms} ms, ${passes} passes` : `TeX ${ms} ms`,
 	timingSvg: (ms: number) => `DVI to SVG ${ms} ms`,

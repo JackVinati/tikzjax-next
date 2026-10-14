@@ -11,6 +11,12 @@ export declare function engineIdOf(bundle: string): string;
 
 export declare function readCoreDump(root: string): Uint8Array;
 
+/** The globals engine-src/reset.ts reads, whose places the worker carries. */
+export declare const RESET_NAMES: readonly string[];
+
+/** engine-build/out/memory-layout.json as the worker reads it. */
+export declare function readMemoryLayout(root: string): import('../engine-src/reset').MemoryLayout;
+
 /** `runs` is an offset and a length for each run, flat; `bytes` the runs' bytes back to back. */
 export declare function packCoreDump(
 	dump: Uint8Array,
