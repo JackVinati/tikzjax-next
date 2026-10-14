@@ -4,9 +4,9 @@ import { COLD_FONT_CSS } from 'virtual:fonts';
 import { TexError, type Budgets, type TexResult } from './types';
 import type { EngineInventory } from '../engine-src/protocol';
 import { WorkerHost } from './engine/worker-host';
-import { budgetsFor } from './platform/budgets';
+import { budgetsFor, engineCount } from './platform/budgets';
 import { ensureFonts } from './platform/context';
-import { device } from './platform/device';
+import { device, webViewFeatures } from './platform/device';
 import { DiagramCache } from './cache';
 import { RenderQueue } from './queue/queue';
 import { ViewportGate } from './block/viewport';
@@ -72,13 +72,9 @@ export default class TikzjaxNextPlugin extends Plugin {
 			return;
 		}
 
-		// No setting changes the concurrency any more: there is one worker, and it runs one job at a
-		// time, so a second slot would only queue a job inside the worker with its clock running. See
-		// DESKTOP.concurrency in platform/budgets.ts.
-		//
-		// Nor is the time limit folded in here any more. The processor reads it per block, so a
-		// change applies to the next diagram rather than after a restart, and a limit set back to 0
-		// falls back to this budget rather than to the value it had at load.
+		// The time limit is not folded in here any more. The processor reads it per block, so a change
+		// applies to the next diagram rather than after a restart, and a limit set back to 0 falls back
+		// to this budget rather than to the value it had at load.
 		this.budgets = budgetsFor(Platform.isMobile);
 
 		const timers = {
@@ -86,7 +82,16 @@ export default class TikzjaxNextPlugin extends Plugin {
 			clearTimeout: (id: number) => window.clearTimeout(id),
 		};
 
-		this.host = new WorkerHost({ idleTeardownMs: this.budgets.idleTeardownMs, timers });
+		// As many workers as jobs the queue runs at once, each running one job at a time: two on a
+		// computer, one on a phone, one where the second engine is off or memory is short
+		// (platform/budgets.ts `engineCount`). A job the queue starts beyond the workers would wait
+		// in the host on its startup allowance, behind someone else's diagram.
+		const engines = this.engineCount();
+		this.host = new WorkerHost({
+			idleTeardownMs: this.budgets.idleTeardownMs,
+			timers,
+			poolSize: engines,
+		});
 		this.preamble = new PreambleService(this.app, sha256Hex);
 		this.cache = new DiagramCache({
 			// `appId` is real but undocumented, so it is not on the public App type. It is what
@@ -100,7 +105,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 		});
 
 		this.queue = new RenderQueue<TexJobSpec, TexResult>({
-			concurrency: this.budgets.concurrency,
+			concurrency: engines,
 			depthCap: this.budgets.queueDepthCap,
 			run: (job, signal, running) => this.runJob(job, signal, running),
 			timers,
@@ -199,7 +204,8 @@ export default class TikzjaxNextPlugin extends Plugin {
 					cacheStats: () => this.cache?.stats() ?? Promise.resolve({ entries: 0, bytes: 0 }),
 					memoryStats: () => this.cache?.memoryStats() ?? { entries: 0, bytes: 0 },
 					queueDepth: () => this.queue?.size() ?? 0,
-					engine: () => this.host?.report() ?? { starts: 0, lives: [], lastStop: null },
+					engine: () =>
+						this.host?.report() ?? { starts: 0, lives: [], lastStop: null, poolSize: 1 },
 					about: () => ({
 						...device(),
 						plugin: this.manifest.version,
@@ -347,6 +353,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 	 */
 	async saveSettings(): Promise<void> {
 		this.queue?.clearPoison();
+		this.applyEngineCount();
 		this.showSettings();
 		await this.saveData(this.settings);
 	}
@@ -363,8 +370,24 @@ export default class TikzjaxNextPlugin extends Plugin {
 		void this.loadData().then((raw) => {
 			this.settings = migrateSettings(raw);
 			this.queue?.clearPoison();
+			this.applyEngineCount();
 			this.showSettings();
 		});
+	}
+
+	/** How many engines run at once on this device, under the settings now in force. */
+	private engineCount(): number {
+		return engineCount(this.budgets, this.settings.secondEngine, webViewFeatures());
+	}
+
+	/**
+	 * The second engine was turned on or off: the queue runs that many jobs at once from now on, and
+	 * the host that many workers. A worker no longer wanted goes when it has finished its job.
+	 */
+	private applyEngineCount(): void {
+		const engines = this.engineCount();
+		this.queue?.setConcurrency(engines);
+		this.host?.setPoolSize(engines);
 	}
 
 	/**

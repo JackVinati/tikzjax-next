@@ -20,6 +20,11 @@ export interface TikzSettings {
 	fast: boolean;
 	/** 0 uses the platform budget. A user value applies as it is, on every device. */
 	timeoutSeconds: number;
+	/**
+	 * Let a computer run a second engine while uncached diagrams queue up (DECISIONS.md D24). A phone
+	 * or tablet runs one whatever this says, and so does a computer short of memory.
+	 */
+	secondEngine: boolean;
 
 	// --- source -------------------------------------------------------------------------------
 	/**
@@ -48,6 +53,7 @@ export const DEFAULT_SETTINGS: TikzSettings = {
 	svgo: 'preset',
 	fast: false,
 	timeoutSeconds: 0,
+	secondEngine: true,
 	sourceHandling: 'corrected',
 	preamblePath: '',
 	autoPreambleName: 'tikz-preamble.tex',

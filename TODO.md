@@ -93,6 +93,7 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] Render queue: priority bands, dedup by key with refcounting, depth cap → manual demotion, session poison set, **every job settles in a `finally`**
 - [x] Viewport gate (one `IntersectionObserver` per scroll root) **+ the 2 s zero-record escape hatch**
 - [x] Debounce; pre-start cancellation on unload. Mid-flight termination only on timeout / plugin unload / backpressure
+- [x] Two engines on a computer (0.2.1), one on a phone, on a computer reporting less than 8 GiB of memory, or with the Second engine setting off. A second worker starts only while a job waits that none can take, a timeout or crash takes down only its own, kill stops all, and they idle down together; the queue runs as many jobs as there are workers (D24)
 - [x] The engine starts at the first cache miss (0.2.1), not when the first job reaches it, and never at load or in the background; one nobody uses idles down (D23)
 - [x] The debounce only for a block of a note being typed in (0.2.1): any other block is queued as soon as the viewport gate lets it through. A note is being typed in for a second after any editor changes its text, as `editor-change` reports it (`src/block/edits.ts`, D22)
 - [x] Export detection from `el.doc` + per-block export budget — **closes #45 #114 #101 #109**

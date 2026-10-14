@@ -108,6 +108,7 @@ export function diagnosticsText(s: DiagnosticsSnapshot): string {
 	const first = engine.starts - engine.lives.length + 1;
 	engine.lives.forEach((life, i) => lines.push(`  ${first + i}. ${engineLife(life)}`));
 	if (engine.lastStop !== null) lines.push(STRINGS.engineLastStop(engine.lastStop));
+	lines.push(STRINGS.enginePool(engine.poolSize));
 
 	lines.push(
 		'',

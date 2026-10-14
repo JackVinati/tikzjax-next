@@ -57,13 +57,17 @@ vi.mock('obsidian', () => {
 	}
 
 	class FakeControl {
+		value: unknown = undefined;
+		changed: ((value: unknown) => unknown) | null = null;
 		addOptions(): this {
 			return this;
 		}
-		setValue(): this {
+		setValue(value: unknown): this {
+			this.value = value;
 			return this;
 		}
-		onChange(): this {
+		onChange(callback: (value: unknown) => unknown): this {
+			this.changed = callback;
 			return this;
 		}
 		setWarning(): this {
@@ -83,6 +87,7 @@ vi.mock('obsidian', () => {
 		desc = '';
 		heading = false;
 		readonly texts: FakeText[] = [];
+		readonly controls: FakeControl[] = [];
 		constructor() {
 			Setting.all.push(this);
 		}
@@ -109,7 +114,9 @@ vi.mock('obsidian', () => {
 			return this;
 		}
 		addToggle(build: (control: FakeControl) => void): this {
-			build(new FakeControl());
+			const control = new FakeControl();
+			this.controls.push(control);
+			build(control);
 			return this;
 		}
 		addButton(build: (control: FakeControl) => void): this {
@@ -155,7 +162,10 @@ vi.mock('obsidian', () => {
 
 	class Notice {}
 
-	return { Setting, PluginSettingTab, AbstractInputSuggest, Notice };
+	/** Mutable, so a test can be a phone. */
+	const Platform = { isMobile: false };
+
+	return { Setting, PluginSettingTab, AbstractInputSuggest, Notice, Platform };
 });
 
 interface RecordedText {
@@ -165,11 +175,17 @@ interface RecordedText {
 	leave(): void;
 }
 
+interface RecordedControl {
+	readonly value: unknown;
+	readonly changed: ((value: unknown) => unknown) | null;
+}
+
 interface RecordedSetting {
 	readonly name: string;
 	readonly desc: string;
 	readonly heading: boolean;
 	readonly texts: RecordedText[];
+	readonly controls: RecordedControl[];
 }
 
 interface RecordedSuggest {
@@ -182,6 +198,7 @@ interface RecordedSuggest {
 const fakes = obsidian as unknown as {
 	Setting: { all: RecordedSetting[] };
 	AbstractInputSuggest: { all: RecordedSuggest[] };
+	Platform: { isMobile: boolean };
 };
 
 function file(path: string): { path: string; extension: string } {
@@ -227,6 +244,25 @@ function setting(name: string): RecordedSetting {
 beforeEach(() => {
 	settings = { ...DEFAULT_SETTINGS };
 	saves = 0;
+	fakes.Platform.isMobile = false;
+});
+
+describe('settings tab — second engine', () => {
+	it('offers the second engine on a computer, on by default, and turning it off saves', async () => {
+		display();
+		const toggle = setting('Second engine').controls[0]!;
+		expect(toggle.value).toBe(true);
+
+		await toggle.changed?.(false);
+		expect(settings.secondEngine).toBe(false);
+		expect(saves).toBe(1);
+	});
+
+	it('does not offer it on a phone or a tablet, which run one engine whatever it says', () => {
+		fakes.Platform.isMobile = true;
+		display();
+		expect(fakes.Setting.all.some((s) => s.name === 'Second engine')).toBe(false);
+	});
 });
 
 describe('settings tab — preamble', () => {

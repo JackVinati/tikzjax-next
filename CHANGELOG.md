@@ -26,6 +26,13 @@ top of its notes on GitHub, and will not publish a version that has none.
   still on its way into view, instead of when it is about to be compiled. It still never starts
   when every diagram shown is cached, and an engine started for a diagram you never scroll to stops
   again once it has had nothing to do for a while, as before.
+- On a computer, two diagrams compile at once when several new ones are waiting, each in a TeX
+  engine of its own. Handed a note of 37 new diagrams at once, two engines drew them all in 45–46%
+  less time than one, in WebKit and in Chromium, measured on a Windows desktop with this release's
+  engine; a note you scroll through one diagram at a time gains less. The second engine starts only
+  while diagrams wait, takes about 100 MB more while it runs, and stops with the first. Phones and
+  tablets keep one engine, and so does a computer with less than 8 GB of memory; Settings → Second
+  engine turns it off.
 
 ## 0.2.0 — 2026-10-13
 

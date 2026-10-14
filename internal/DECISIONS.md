@@ -1291,6 +1291,74 @@ diagnostics view (D21) shows it, on each device.
 
 ---
 
+## D24 — Two engines on a computer, one on a phone
+
+**Amends the 0.1.5 decision that made the desktop's concurrency 1 like the phone's (TODO.md §3,
+`DESKTOP.concurrency`), and DESIGN.md §4.3's one worker. Date of record: 2026-10-14.**
+
+0.1.5 brought the desktop down to one job at a time because two jobs in ONE worker do not run side by
+side: the second waited in the worker's own queue with its clock running. A second worker does run
+side by side, at the cost of a second engine, and was left for later. It was measured for 0.2.x:
+0.2.0 with a pool of two workers, its worker unchanged, against 0.2.0, in a harness that runs the
+worker exactly as main.js carries it and hands it a note of 37 uncached diagrams, every fixture once,
+all at once, from the worker's creation to its last reply, median of 5 fresh browsers (the 0.2.x
+measurements, set B; Windows 11, i9-13900K, Playwright 1.63, busy with other work at 32–43% CPU):
+
+| | one worker | two workers |
+| --- | ---: | ---: |
+| WebKit 26.6 | 6,897 ms | 3,705 ms (−46%) |
+| Chromium 153 | 4,823 ms | 2,649 ms (−45%) |
+
+The first reply came no sooner (334 and 315 ms in WebKit): two engines help a note with many new
+diagrams waiting, not the first diagram. The second worker cost about 100 MB more at the peak, 141
+against 237 MB above the process's start with 0.2.0's worker in Node 22 (the 0.2.x boot study). In
+Obsidian the backlog is what the viewport gate lets through, so a note scrolled one diagram at a
+time gains less than this.
+
+What the host does (`src/engine/worker-host.ts`, from the `v-pool` prototype):
+
+- **A second worker starts only while a job waits that no worker running or starting can take.**
+  The engine started early for a cache miss (D23) is one worker at most, and a job arriving while it
+  starts waits for it rather than starting another.
+- **A timeout or a crash takes down only its own worker**; the other keeps its job.
+- **`kill()` stops them all** — Restart the TeX engine, the app going to the background, unload — and
+  interrupts every job, as it did the one worker.
+- **They idle down together**, once neither has a job, after the platform's idle budget; one with
+  nothing to do while the other works is kept.
+- **The queue runs as many jobs at once as there are workers.** A job the queue started beyond the
+  workers would wait in the host on its startup allowance, behind someone else's diagram.
+
+How many (`engineCount` in `src/platform/budgets.ts`):
+
+- **A phone or a tablet: one**, whatever the settings say. Each compile there is a new 156.25 MiB
+  WebAssembly memory (D18), inside the one WebView the whole app runs in (`MOBILE.concurrency` in
+  `platform/budgets.ts`), and nobody has measured a second engine on a device. That waits for a
+  measurement on one.
+- **A computer: two**, with three exceptions that make it one. The setting **Second engine**
+  (`secondEngine`, on by default, shown on desktop only) is off. The computer reports less than 8 GiB
+  of memory (`navigator.deviceMemory`). Or it reports no memory figure — Chromium gives it only to a
+  secure context — and fewer than 4 logical cores (`navigator.hardwareConcurrency`): two engines
+  compiling at once want two cores of their own beside the one Obsidian draws on. A computer that
+  reports neither keeps two, since the second only starts while diagrams queue up and the setting
+  turns it off. The copied diagnostics (D21) carry both figures, so whether desktop Obsidian reports
+  its memory is something a bug report will show.
+- **Changing the setting applies at once**, also when it arrives through Sync: the queue's
+  concurrency and the pool follow, an idle second worker goes at once, and a busy one when it has
+  finished its job. The diagnostics say "stopped when the second engine was turned off".
+
+The worker is 0.2.0's, byte for byte: `test/engine-id.test.ts` builds the worker that ships and
+holds it to the ENGINE_ID recorded in `test/fixtures/golden/REVISION.json` (D20), so the pool
+changes nothing a diagram draws and nothing in anyone's cache. The preamble snapshot planned for
+0.2.3 keeps its saved preambles per worker, and with two workers only 32 of 52 possible resumes
+happened in the prototype's note of 74 diagrams (the 0.2.x measurements, set F2); it needs each
+diagram sent to the worker that holds its preamble, which is for that release.
+
+Tests: `test/worker-host.test.ts` (the prototype's pool tests, and idling down together, one worker
+with a pool of one, a crash, the pool shrinking and growing), the queue's new slot count,
+`test/budgets.test.ts`, and the settings tab.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

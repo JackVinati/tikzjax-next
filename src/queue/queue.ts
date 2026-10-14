@@ -194,7 +194,7 @@ type Outcome<T> =
 	{ kind: 'ok'; value: T } | { kind: 'error'; error: unknown } | { kind: 'timeout' } | { kind: 'stalled' };
 
 export class RenderQueue<J, T> {
-	private readonly concurrency: number;
+	private concurrency: number;
 	private readonly depthCap: number;
 	private readonly run: (job: J, signal: AbortSignal, running: () => void) => Promise<T>;
 	private readonly timers: QueueTimers;
@@ -265,6 +265,16 @@ export class RenderQueue<J, T> {
 
 	resume(): void {
 		this.paused = false;
+		this.pump();
+	}
+
+	/**
+	 * Run this many jobs at once from now on: as many as the engine has workers, when the second one
+	 * is turned on or off (main.ts). A job already started carries on; with fewer slots than started
+	 * jobs, nothing new starts until enough of them have finished.
+	 */
+	setConcurrency(concurrency: number): void {
+		this.concurrency = Math.max(1, Math.floor(concurrency));
 		this.pump();
 	}
 

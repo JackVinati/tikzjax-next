@@ -18,6 +18,7 @@ const STOPPED: Record<EngineStop, string> = {
 	background: 'stopped when the app went to the background',
 	timeout: 'stopped when a diagram ran out of time in it',
 	restart: 'stopped by Restart the TeX engine',
+	settings: 'stopped when the second engine was turned off',
 	error: 'stopped by an error',
 	unload: 'stopped when the plugin was unloaded',
 };
@@ -76,6 +77,8 @@ export const STRINGS = {
 	engineRunning: (start: string) => `${start}, running`,
 	engineStopped: (start: string, why: EngineStop) => `${start}, ${STOPPED[why]}`,
 	engineLastStop: (why: EngineStop) => `Last stopped: ${STOPPED[why]}.`,
+	enginePool: (count: number) =>
+		count === 1 ? 'One engine compiles at a time.' : `Up to ${count} engines compile at once.`,
 
 	// The diagnostics view's Copy button, and the plain text it copies for a bug report.
 	copyDiagnostics: 'Copy',

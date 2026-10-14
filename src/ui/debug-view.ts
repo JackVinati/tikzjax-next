@@ -219,6 +219,7 @@ export class DebugView extends ItemView {
 		list.start = report.starts - report.lives.length + 1;
 		for (const life of report.lives) list.createEl('li', { text: engineLife(life) });
 		if (report.lastStop !== null) starts.createDiv({ text: STRINGS.engineLastStop(report.lastStop) });
+		starts.createDiv({ text: STRINGS.enginePool(report.poolSize) });
 	}
 
 	/**

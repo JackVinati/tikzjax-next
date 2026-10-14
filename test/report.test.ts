@@ -37,6 +37,7 @@ function snapshot(over: Partial<DiagnosticsSnapshot> = {}): DiagnosticsSnapshot 
 				{ startMs: 221, stop: null },
 			],
 			lastStop: 'background',
+			poolSize: 1,
 		},
 		memory: { entries: 4, bytes: 2 * 1048576 },
 		stored: { entries: 40, bytes: 3 * 1048576 },
@@ -96,15 +97,22 @@ describe('the text the diagnostics view copies', () => {
 		expect(text).toContain('  2. started in 214 ms, stopped when the app went to the background');
 		expect(text).toContain('  3. started in 221 ms, running');
 		expect(text).toContain('Last stopped: stopped when the app went to the background.');
+		expect(text).toContain('One engine compiles at a time.');
 	});
 
 	it('numbers the starts it still lists from the first of them, when older ones were dropped', () => {
 		const later = diagnosticsText(
 			snapshot({
-				engine: { starts: 25, lives: [{ startMs: null, stop: 'error' }], lastStop: 'error' },
+				engine: {
+					starts: 25,
+					lives: [{ startMs: null, stop: 'error' }],
+					lastStop: 'error',
+					poolSize: 2,
+				},
 			}),
 		);
 		expect(later).toContain('  25. never finished starting, stopped by an error');
+		expect(later).toContain('Up to 2 engines compile at once.');
 	});
 
 	it('lists every recent render, newest first, with each step of its time', () => {

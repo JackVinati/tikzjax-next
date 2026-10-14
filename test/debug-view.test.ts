@@ -19,7 +19,7 @@ beforeAll(() => {
  * its Copy button puts all of it on the clipboard as text.
  */
 
-const NO_STARTS: EngineReport = { starts: 0, lives: [], lastStop: null };
+const NO_STARTS: EngineReport = { starts: 0, lives: [], lastStop: null, poolSize: 2 };
 
 function source(records: RenderRecord[], engine: EngineReport = NO_STARTS): DebugSource {
 	return {
@@ -150,6 +150,7 @@ describe('the engine in the diagnostics view', () => {
 					{ startMs: 214, stop: null },
 				],
 				lastStop: 'background',
+				poolSize: 2,
 			}),
 		);
 		const text = view.contentEl.querySelector('.tikzjax-debug-starts')?.textContent ?? '';
@@ -157,6 +158,7 @@ describe('the engine in the diagnostics view', () => {
 		expect(text).toContain('started in 230 ms, stopped when the app went to the background');
 		expect(text).toContain('started in 214 ms, running');
 		expect(text).toContain('Last stopped: stopped when the app went to the background.');
+		expect(text).toContain('Up to 2 engines compile at once.');
 	});
 });
 

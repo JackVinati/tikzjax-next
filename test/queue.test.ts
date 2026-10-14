@@ -254,6 +254,31 @@ describe('concurrency', () => {
 		expect(a.status).toBe('fulfilled');
 		expect(h.queue.inflightCount()).toBe(0);
 	});
+
+	/**
+	 * The second engine turned on or off: the queue runs as many jobs at once as the host has
+	 * workers. A job already running is never stopped for it.
+	 */
+	it('follows a new slot count: more starts at once, fewer lets the running finish first', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		for (const k of ['a', 'b', 'c', 'd']) h.submit(k, 1);
+		await tick();
+		expect(h.runs.started).toEqual(['a']);
+
+		h.queue.setConcurrency(2);
+		await tick();
+		expect(h.runs.started).toEqual(['a', 'b']);
+
+		h.queue.setConcurrency(1);
+		h.runs.finish('a');
+		await tick();
+		// One slot, still held by `b`: nothing new starts until it is done.
+		expect(h.runs.started).toEqual(['a', 'b']);
+		h.runs.finish('b');
+		await tick();
+		expect(h.runs.started).toEqual(['a', 'b', 'c']);
+		expect(h.runs.maxLive).toBe(2);
+	});
 });
 
 describe('dedup by key', () => {

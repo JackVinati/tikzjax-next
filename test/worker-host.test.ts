@@ -391,7 +391,7 @@ describe('what the diagnostics view is told about the engine', () => {
 		let now = 0;
 		const timers = new FakeTimers();
 		const host = new WorkerHost({ idleTeardownMs: 1000, timers, now: () => now });
-		expect(host.report()).toEqual({ starts: 0, lives: [], lastStop: null });
+		expect(host.report()).toEqual({ starts: 0, lives: [], lastStop: null, poolSize: 1 });
 
 		render(host, 'a');
 		now = 212;
@@ -424,6 +424,7 @@ describe('what the diagnostics view is told about the engine', () => {
 				{ startMs: null, stop: 'error' },
 			],
 			lastStop: 'error',
+			poolSize: 1,
 		});
 	});
 
@@ -616,5 +617,173 @@ describe('where the time went', () => {
 		await tick();
 
 		expect(a.result.value?.timings).toBeUndefined();
+	});
+});
+
+describe('a pool of workers', () => {
+	it('starts a second worker only while a job waits that the first cannot take', async () => {
+		const host = new WorkerHost({ poolSize: 2 });
+		const a = render(host, 'a');
+		expect(FakeWorker.spawned).toHaveLength(1);
+		const b = render(host, 'b');
+		expect(FakeWorker.spawned).toHaveLength(2);
+		const c = render(host, 'c');
+		// Never more than poolSize.
+		expect(FakeWorker.spawned).toHaveLength(2);
+
+		worker(1).boot();
+		expect(worker(1).renders).toHaveLength(1);
+		expect(a.running.at).toBe(true);
+		worker(0).boot();
+		expect(worker(0).renders).toHaveLength(1);
+		expect(b.running.at).toBe(true);
+		expect(c.running.at).toBe(false);
+
+		worker(0).reply(worker(0).renders[0] ?? -1);
+		await tick();
+		expect(c.running.at).toBe(true);
+		expect(worker(0).renders).toHaveLength(2);
+	});
+
+	it('does not start a second worker for a job the first can take as soon as it is up', () => {
+		const host = new WorkerHost({ poolSize: 2 });
+		// The plugin starts an engine when a diagram misses the cache, before its job arrives.
+		host.ready().catch(() => undefined);
+		render(host, 'a');
+		expect(FakeWorker.spawned).toHaveLength(1);
+	});
+
+	it('takes down only the worker whose job timed out', async () => {
+		const host = new WorkerHost({ poolSize: 2 });
+		const stop = new AbortController();
+		const a = render(host, 'a', stop.signal);
+		const b = render(host, 'b');
+		worker(0).boot();
+		worker(1).boot();
+
+		stop.abort();
+		await tick();
+		expect(a.result.status).toBe('rejected');
+		expect(worker(0).terminated).toBe(true);
+		expect(worker(1).terminated).toBe(false);
+
+		worker(1).reply(worker(1).renders[0] ?? -1);
+		await tick();
+		expect(b.result.status).toBe('fulfilled');
+		expect(host.report().lives.map((life) => life.stop)).toEqual(['timeout', null]);
+	});
+
+	it('takes down only the worker that crashed, and the other carries on with its job', async () => {
+		const host = new WorkerHost({ poolSize: 2 });
+		const a = render(host, 'a');
+		const b = render(host, 'b');
+		worker(0).boot();
+		worker(1).boot();
+
+		worker(0).crash('RuntimeError: unreachable');
+		await tick();
+		expect((a.result.error as TexError).kind).toBe('engine-unavailable');
+		expect(worker(1).terminated).toBe(false);
+		worker(1).reply(worker(1).renders[0] ?? -1);
+		await tick();
+		expect(b.result.status).toBe('fulfilled');
+	});
+
+	it('interrupts every worker on kill()', async () => {
+		const host = new WorkerHost({ poolSize: 2 });
+		const a = render(host, 'a');
+		const b = render(host, 'b');
+		const c = render(host, 'c');
+		worker(0).boot();
+		worker(1).boot();
+		host.kill('background');
+		await tick();
+		for (const r of [a, b, c]) expect(r.result.error).toBeInstanceOf(InterruptedError);
+		expect(worker(0).terminated && worker(1).terminated).toBe(true);
+		expect(host.report().lives.map((life) => life.stop)).toEqual(['background', 'background']);
+	});
+
+	it('starts an engine on ready(), before any job, and only one', async () => {
+		const host = new WorkerHost({ poolSize: 2 });
+		const ready = host.ready();
+		expect(FakeWorker.spawned).toHaveLength(1);
+		host.ready().catch(() => undefined);
+		expect(FakeWorker.spawned).toHaveLength(1);
+		worker(0).boot();
+		await ready;
+		const a = render(host, 'a');
+		expect(a.running.at).toBe(true);
+		expect(FakeWorker.spawned).toHaveLength(1);
+	});
+
+	it('idles the workers down together, and not while one of them still has a job', async () => {
+		const timers = new FakeTimers();
+		const host = new WorkerHost({ poolSize: 2, idleTeardownMs: 1000, timers });
+		render(host, 'a');
+		render(host, 'b');
+		worker(0).boot();
+		worker(1).boot();
+
+		worker(0).reply(worker(0).renders[0] ?? -1);
+		await tick();
+		timers.advance(5000);
+		expect(worker(0).terminated).toBe(false);
+
+		worker(1).reply(worker(1).renders[0] ?? -1);
+		await tick();
+		timers.advance(999);
+		expect(worker(0).terminated || worker(1).terminated).toBe(false);
+		timers.advance(1);
+		expect(worker(0).terminated && worker(1).terminated).toBe(true);
+		expect(host.report().lastStop).toBe('idle');
+	});
+
+	it('never runs more than one worker with a pool of one, as on a phone', async () => {
+		const host = new WorkerHost({ poolSize: 1 });
+		const jobs = ['a', 'b', 'c', 'd'].map((key) => render(host, key));
+		host.ready().catch(() => undefined);
+		worker(0).boot();
+		for (let i = 0; i < jobs.length; i++) {
+			expect(FakeWorker.spawned).toHaveLength(1);
+			worker(0).reply(worker(0).renders[i] ?? -1);
+			await tick();
+		}
+		for (const job of jobs) expect(job.result.status).toBe('fulfilled');
+		expect(FakeWorker.spawned).toHaveLength(1);
+	});
+
+	it('lets the second worker go when the pool shrinks: at once if idle, after its job if busy', async () => {
+		const host = new WorkerHost({ poolSize: 2 });
+		render(host, 'a');
+		const b = render(host, 'b');
+		worker(0).boot();
+		worker(1).boot();
+
+		// Both busy: neither is stopped under its job.
+		host.setPoolSize(1);
+		expect(worker(0).terminated || worker(1).terminated).toBe(false);
+
+		// The first to finish goes; its job's result is delivered all the same.
+		worker(1).reply(worker(1).renders[0] ?? -1);
+		await tick();
+		expect(b.result.status).toBe('fulfilled');
+		expect(worker(1).terminated).toBe(true);
+		expect(worker(0).terminated).toBe(false);
+		expect(host.report()).toMatchObject({ poolSize: 1, lastStop: 'settings' });
+
+		// From now on one worker: a backlog starts no second.
+		render(host, 'c');
+		render(host, 'd');
+		expect(FakeWorker.spawned).toHaveLength(2);
+	});
+
+	it('starts a second worker again for the next backlog once the pool grows', () => {
+		const host = new WorkerHost({ poolSize: 1 });
+		render(host, 'a');
+		render(host, 'b');
+		expect(FakeWorker.spawned).toHaveLength(1);
+		host.setPoolSize(2);
+		expect(FakeWorker.spawned).toHaveLength(2);
+		expect(host.report().poolSize).toBe(2);
 	});
 });

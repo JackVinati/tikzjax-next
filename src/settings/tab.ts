@@ -1,5 +1,5 @@
 import type { App, ButtonComponent, TextComponent, TFile } from 'obsidian';
-import { AbstractInputSuggest, Notice, PluginSettingTab, Setting } from 'obsidian';
+import { AbstractInputSuggest, Notice, Platform, PluginSettingTab, Setting } from 'obsidian';
 import type TikzjaxNextPlugin from '../main';
 import { STRINGS } from '../ui/strings';
 
@@ -166,6 +166,24 @@ export class TikzSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}),
 			);
+
+		// Desktop only: a phone or tablet runs one engine whatever this says (platform/budgets.ts
+		// `engineCount`), and a toggle that did nothing there would only mislead.
+		if (!Platform.isMobile) {
+			new Setting(containerEl)
+				.setName('Second engine')
+				.setDesc(
+					'Compile two new diagrams at a time when several are waiting. The second engine starts ' +
+						'only then, takes more memory while it runs, and stops with the first. A computer with ' +
+						'less than 8 GB of memory always uses one.',
+				)
+				.addToggle((t) =>
+					t.setValue(this.plugin.settings.secondEngine).onChange(async (value) => {
+						this.plugin.settings.secondEngine = value;
+						await this.plugin.saveSettings();
+					}),
+				);
+		}
 
 		new Setting(containerEl)
 			.setName('Time limit per diagram')
