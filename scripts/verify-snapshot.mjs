@@ -29,7 +29,13 @@
  *    TeX's log kept, the plugin's default, and once without, which a saved run is kept apart by, and
  *    a run saved with the log kept never starts a diagram without it;
  *  - and in the worker, a save that fails, at its first copy or at its comparison with the dump,
- *    keeps nothing, draws the diagram as from the start, says so, and is counted.
+ *    keeps nothing, draws the diagram as from the start, says so, and is counted;
+ *  - resumed from storage (engine-src/stored-run.ts, internal/DECISIONS.md D36): in the engine, each
+ *    saved run written out as bytes, gzipped and gunzipped, read back and resumed from; in the
+ *    worker, the bytes the shipped worker hands the host for each run it saves, sent back with a
+ *    render to a second worker that holds no run, as the host sends a stored run after the engine
+ *    stopped, the same as from the start, and kept there for the next diagram; and a stored run with
+ *    a byte changed, or of another engine, refused and the diagram drawn as from the start.
  *
  * Exits 1 on any difference.
  */
@@ -38,7 +44,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { gunzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { importEngineForNode } from './dvi2html-patch.mjs';
 import {
 	buildWorker,
@@ -243,8 +249,30 @@ async function runTeX(text, logging, files, { save = false, resume = null, garba
 	return { result: JSON.stringify(result), saved: saved || null, stray };
 }
 
+/** Which files of a run are the worker's own (library.ts change 14), as the worker names them. */
+const sources = { originOf: lib.storedOriginOf, contentOf: lib.storedContentOf };
+
+/**
+ * `saved` as a host keeps it and sends it back: written out as bytes, gzipped as the platform's gzip
+ * does it, gunzipped, and read back (engine-src/stored-run.ts). The checksum is read too.
+ */
+function throughStorage(saved, logging) {
+	const raw = lib.encodeSavedRun(
+		{ ...saved, logging, route: 'verify', spans: [], bytes: 0 },
+		'verify',
+		sources,
+	);
+	return lib.decodeSavedRun(
+		new Uint8Array(gunzipSync(gzipSync(raw))),
+		'verify',
+		layout.globalsEnd,
+		sources,
+	);
+}
+
 let engineRuns = 0;
 let engineResumed = 0;
+let engineStored = 0;
 for (const c of cases) {
 	const logging = true;
 	const files = c.files ?? [];
@@ -286,11 +314,24 @@ for (const c of cases) {
 			if (resumed.result !== cold.result)
 				wrong.push(`${what}${garbage ? ', the stack filled with 0xAA,' : ''} against from the start`);
 		}
+		// The same run as a host keeps it across the engine's stops, and sends it back.
+		let stored;
+		try {
+			stored = throughStorage(run, logging);
+		} catch (error) {
+			wrong.push(`${what}: written out, it does not read back (${error.message})`);
+			continue;
+		}
+		const resumed = await runTeX(text, logging, files, { resume: stored });
+		engineRuns++;
+		engineResumed++;
+		engineStored++;
+		if (resumed.result !== cold.result) wrong.push(`${what}, through storage, against from the start`);
 	}
 	if (wrong.length) fail(`engine  ${c.name}: ${wrong.join('; ')}`);
 	else
 		pass(
-			`engine  ${c.name}: ${expectSave ? `saved, ${resumes.length * 2} resumed runs` : 'not saved'}, all as from the start`,
+			`engine  ${c.name}: ${expectSave ? `saved, ${resumes.length * 3} resumed runs, ${resumes.length} through storage` : 'not saved'}, all as from the start`,
 		);
 }
 
@@ -330,6 +371,7 @@ const inbox = [];
 let onmessage = null;
 globalThis.self = {
 	postMessage: (m) => inbox.push(m),
+	setTimeout: (fn, ms) => setTimeout(fn, ms),
 	set onmessage(fn) {
 		onmessage = fn;
 	},
@@ -337,16 +379,32 @@ globalThis.self = {
 		return onmessage;
 	},
 };
-new Function(workerSource)();
-onmessage({ data: { type: 'boot', assets } });
-for (let waited = 0; !inbox.some((m) => m.type === 'ready') && waited < 60_000; waited += 2)
-	await new Promise((resolve) => setTimeout(resolve, 2));
-if (!inbox.some((m) => m.type === 'ready')) {
-	console.error('the worker did not start');
-	process.exit(1);
+/**
+ * A worker of the build that ships, started as the host starts one. Two of them: the first saves
+ * and hands its runs over, and the second, which holds none, is sent them back, as a worker started
+ * after the first stopped is. Both post into one inbox; each reply carries the id it answers.
+ */
+async function startWorker() {
+	new Function(workerSource)();
+	const handler = onmessage;
+	const before = inbox.filter((m) => m.type === 'ready').length;
+	handler({ data: { type: 'boot', assets } });
+	for (
+		let waited = 0;
+		inbox.filter((m) => m.type === 'ready').length === before && waited < 60_000;
+		waited += 2
+	)
+		await new Promise((resolve) => setTimeout(resolve, 2));
+	if (inbox.filter((m) => m.type === 'ready').length === before) {
+		console.error('the worker did not start');
+		process.exit(1);
+	}
+	return handler;
 }
+const first = await startWorker();
+const second = await startWorker();
 let id = 0;
-const send = (source, options, snapshots, captureLog = true) =>
+const send = (source, options, snapshots, captureLog = true, extra = {}, worker = first) =>
 	new Promise((resolve, reject) => {
 		const request = {
 			type: 'render',
@@ -354,6 +412,7 @@ const send = (source, options, snapshots, captureLog = true) =>
 			source,
 			options: { ...options, captureLog },
 			snapshots,
+			...extra,
 		};
 		const deadline = Date.now() + 120_000;
 		const settle = () => {
@@ -362,9 +421,23 @@ const send = (source, options, snapshots, captureLog = true) =>
 			else if (Date.now() > deadline) reject(new Error('no reply in 120 s'));
 			else setTimeout(settle, 2);
 		};
-		onmessage({ data: request });
+		worker({ data: request });
 		settle();
 	});
+
+/** The run the worker handed over after the render `reply` answers, once it has: within 60 s. */
+async function handedOver(reply) {
+	const deadline = Date.now() + 60_000;
+	for (;;) {
+		const message = inbox.find((m) => m.type === 'saved-run' && m.id === reply.id);
+		if (message) return message;
+		if (Date.now() > deadline) return undefined;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+}
+
+/** A diagram that lets every saved run the second worker holds go, as the switch turned off does. */
+const letGo = () => send('\\draw (0,0) -- (1,1);', {}, 0, true, {}, second);
 
 /** A reply as a diagram resumed must give it: everything the plugin reads but how long it took. */
 const gist = (reply) =>
@@ -391,15 +464,21 @@ const how = (reply) =>
 
 let workerResumed = 0;
 let workerSaved = 0;
+let workerStored = 0;
 // The log kept, as the plugin keeps it by default, and not, as the setting can have it.
 for (const logging of [true, false])
 	for (const c of cases) {
 		const [b1, b2] = c.bodies;
 		const o = c.options;
-		const ask = (body, budget) => send(body, o, budget, logging);
+		const ask = (body, budget, extra = {}, worker = first) =>
+			send(body, o, budget, logging, extra, worker);
 		const cold1 = await ask(b1, 0);
 		const cold2 = await ask(b2, 0);
-		const saved1 = await ask(b1, BUDGET);
+		const saved1 = await ask(b1, BUDGET, { persist: true });
+		// Handed over only for a run the host can name, which it can find again (engine-src/document.ts).
+		const named =
+			lib.routeOf(lib.buildInput(b1, { ...o, captureLog: logging }).text, logging) !== undefined;
+		const stored1 = how(saved1) === 'saved' && named ? await handedOver(saved1) : undefined;
 		const own1 = await ask(b1, BUDGET);
 		const other2 = await ask(b2, BUDGET);
 		await ask(b2, 0);
@@ -440,9 +519,52 @@ for (const logging of [true, false])
 		)
 			wrong.push('the worker does not hold the run under the name the host gives it');
 		if (!expectSave && (saved1.snapshots?.held.length ?? 0) > 0) wrong.push('the worker holds a run');
+
+		// Through storage: the run the first worker handed over, sent with the same diagram to the
+		// second, which holds none, as after the engine stopped; then the other body, which resumes from
+		// it in memory where the two share their preamble; then, after letting it go, the other body
+		// sent the stored run, which it starts from where they share it and refuses as not its own
+		// where they do not.
+		const storage = [];
+		if (expectSave && route !== undefined) {
+			if (stored1 === undefined) wrong.push('the worker handed over no run for the host to keep');
+			else {
+				const copy = () => ({ ...stored1.run, data: stored1.run.data.slice(0) });
+				const back1 = await ask(b1, BUDGET, { stored: copy() }, second);
+				const then2 = await ask(b2, BUDGET, {}, second);
+				await letGo();
+				const back2 = await ask(b2, BUDGET, { stored: copy() }, second);
+				await letGo();
+				for (const [reply, cold, what, outcome, way] of [
+					[back1, cold1, 'the first body from storage', 'used', 'resumed'],
+					[then2, cold2, 'the second body after it', undefined, shared ? 'resumed' : 'saved'],
+					[
+						back2,
+						cold2,
+						'the second body from storage',
+						shared ? 'used' : 'mismatch',
+						shared ? 'resumed' : 'saved',
+					],
+				]) {
+					if (gist(reply) !== gist(cold))
+						wrong.push(`${what} (${how(reply)}) is not as from the start`);
+					if (reply.stored !== outcome)
+						wrong.push(`${what}: the stored run was ${reply.stored}, not ${outcome}`);
+					if (how(reply) !== way) wrong.push(`${what} was ${how(reply)}, not ${way}`);
+					if (outcome === 'used' && reply.timings?.restored !== true)
+						wrong.push(`${what} does not say it was restored`);
+					if (reply.stored === 'used') workerStored++;
+					storage.push(reply.stored === 'used' ? 'restored' : how(reply));
+				}
+			}
+		}
 		const where = logging ? 'worker ' : 'worker, log off,';
 		if (wrong.length) fail(`${where} ${c.name}: ${wrong.join('; ')}`);
-		else pass(`${where} ${c.name}: ${replies.map(([, reply]) => how(reply)).join(', ')}`);
+		else
+			pass(
+				`${where} ${c.name}: ${replies.map(([, reply]) => how(reply)).join(', ')}` +
+					(storage.length ? `; through storage: ${storage.join(', ')}` : ''),
+			);
 	}
 
 // A run saved with the log kept says again what TeX had said by then, which a diagram drawn without
@@ -467,6 +589,64 @@ for (const logging of [true, false])
 		fail(
 			`a run saved with the log kept, then the same diagram without: ${how(withLog)}, ${how(without)}, ${how(again)}`,
 		);
+}
+
+// A stored run as a platform without its own gzip keeps it, uncompressed, iOS before 16.4: resumed
+// from, the same as from the start. And a stored run with a byte changed, gzipped or not, or cut
+// short, is refused: the diagram is drawn as from the start, and the host told to delete it.
+{
+	const basic = fixtures.find((c) => c.name === 'basic');
+	const [body] = basic.bodies;
+	const cold = await send(body, basic.options, 0);
+	const saving = await send(body, basic.options, BUDGET, true, { persist: true });
+	const message = await handedOver(saving);
+	await letGo();
+	const raw = new Uint8Array(gunzipSync(new Uint8Array(message.run.data)));
+	const plain = () => ({ ...message.run, compressed: false, data: raw.slice().buffer });
+	const changed = (stored, at) => {
+		const data = new Uint8Array(stored.data.slice(0));
+		data[at] ^= 0x40;
+		return { ...stored, data: data.buffer };
+	};
+	const fromPlain = await send(body, basic.options, BUDGET, true, { stored: plain() }, second);
+	await letGo();
+	// A stored run larger than what the worker may hold is started from all the same, and not kept.
+	const tooLarge = await send(body, basic.options, 1024, true, { stored: plain() }, second);
+	await letGo();
+	if (
+		tooLarge.stored === 'used' &&
+		how(tooLarge) === 'resumed' &&
+		gist(tooLarge) === gist(cold) &&
+		tooLarge.snapshots?.held.length === 0
+	)
+		pass('a stored run larger than the budget is started from, as from the start, and not kept');
+	else
+		fail(
+			`a stored run larger than the budget: ${tooLarge.stored}, ${how(tooLarge)}, holding ${tooLarge.snapshots?.held.length}`,
+		);
+	const outcomes = [];
+	for (const stored of [
+		changed(message.run, 10),
+		changed(message.run, Math.floor(message.run.data.byteLength / 2)),
+		{ ...message.run, data: message.run.data.slice(0, message.run.data.byteLength - 9) },
+		changed(plain(), Math.floor(raw.length / 2)),
+		changed(plain(), raw.length - 1),
+		{ ...plain(), data: raw.slice(0, raw.length - 8).buffer },
+	]) {
+		const reply = await send(body, basic.options, BUDGET, true, { stored }, second);
+		await letGo();
+		outcomes.push(
+			`${reply.stored}, ${how(reply)}, ${gist(reply) === gist(cold) ? 'as from the start' : 'NOT as from the start'}`,
+		);
+	}
+	if (fromPlain.stored === 'used' && how(fromPlain) === 'resumed' && gist(fromPlain) === gist(cold))
+		pass('a stored run kept uncompressed is resumed from, as from the start');
+	else fail(`a stored run kept uncompressed: ${fromPlain.stored}, ${how(fromPlain)}`);
+	if (outcomes.every((o) => o === 'corrupt, saved, as from the start'))
+		pass(
+			'a stored run with a byte changed, gzipped or not, or cut short, is refused, and the diagram drawn as from the start',
+		);
+	else fail(`a stored run with a byte changed, or cut short: ${outcomes.join('; ')}`);
 }
 
 // A save that fails, at its first copy or at its comparison with the dump: nothing is kept, the
@@ -503,10 +683,12 @@ for (const logging of [true, false])
 WebAssembly.instantiate = realInstantiate;
 
 console.log(
-	`\n${cases.length} cases. In the engine, ${engineRuns} runs, ${engineResumed} of them resumed; in the worker, ` +
-		`${workerSaved} renders saved and ${workerResumed} resumed.`,
+	`\n${cases.length} cases. In the engine, ${engineRuns} runs, ${engineResumed} of them resumed, ${engineStored} ` +
+		`through storage; in the worker, ${workerSaved} renders saved and ${workerResumed} resumed, ` +
+		`${workerStored} from a run sent back from storage.`,
 );
 if (engineResumed === 0 || workerResumed === 0) fail('nothing was resumed: the snapshot was never exercised');
+if (engineStored === 0 || workerStored === 0) fail('nothing was resumed from storage');
 console.log(
 	failures
 		? `\n${failures} failure(s).`

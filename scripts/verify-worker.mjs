@@ -5,8 +5,9 @@
  *   node scripts/verify-worker.mjs [--legacy] [fixture ...]
  *
  * --legacy runs it as iOS 14.5 to 16.3 would, and Chromium before 140: without the platform's
- * DecompressionStream and Uint8Array.fromBase64, so that the worker starts by pako and by its own
- * base64 (internal/DECISIONS.md D30). Node 22 has no fromBase64 to begin with.
+ * DecompressionStream, CompressionStream and Uint8Array.fromBase64, so that the worker starts by pako
+ * and by its own base64 (internal/DECISIONS.md D30), and hands its saved runs to the host as they are,
+ * uncompressed (D36). Node 22 has no fromBase64 to begin with.
  *
  * verify-golden.mjs holds the engine and engine-src/library.ts to the recorded golden corpus. This
  * proves the whole artifact renders what they do: the start from the payload the host sends it,
@@ -51,8 +52,11 @@ console.log(
 if (LEGACY) {
 	// What a WebView without them has: neither is there for the worker to find.
 	delete globalThis.DecompressionStream;
+	delete globalThis.CompressionStream;
 	delete Uint8Array.fromBase64;
-	console.log('Without DecompressionStream and Uint8Array.fromBase64, as on iOS 14.5 to 16.3.\n');
+	console.log(
+		'Without DecompressionStream, CompressionStream and Uint8Array.fromBase64, as on iOS 14.5 to 16.3.\n',
+	);
 }
 
 // --- boot it ---------------------------------------------------------------------------------
@@ -60,6 +64,7 @@ const inbox = [];
 let onmessage = null;
 globalThis.self = {
 	postMessage: (m) => inbox.push(m),
+	setTimeout: (fn, ms) => setTimeout(fn, ms),
 	set onmessage(fn) {
 		onmessage = fn;
 	},
@@ -123,18 +128,26 @@ const REPLY_WITHIN_MS = 60_000;
  */
 const SNAPSHOTS = 32 * 1024 * 1024;
 
+/**
+ * The host keeps the runs a worker saves across the engine's stops, and asks for them with every render
+ * (internal/DECISIONS.md D36): the worker hands each over once it is idle, after the replies.
+ */
+const PERSIST = true;
+
 const send = (request) =>
 	new Promise((resolve, reject) => {
 		const before = inbox.length;
 		const deadline = Date.now() + REPLY_WITHIN_MS;
 		const settle = () => {
-			const replies = inbox.slice(before).filter((m) => m.id === request.id && m.type !== 'log');
+			const replies = inbox
+				.slice(before)
+				.filter((m) => m.id === request.id && (m.type === 'ok' || m.type === 'error'));
 			if (replies.length) resolve(replies[replies.length - 1]);
 			else if (Date.now() > deadline) reject(new Error(`no reply in ${REPLY_WITHIN_MS / 1000} s`));
 			else setTimeout(settle, 5);
 		};
 		try {
-			onmessage({ data: { snapshots: SNAPSHOTS, ...request } });
+			onmessage({ data: { snapshots: SNAPSHOTS, persist: PERSIST, ...request } });
 			settle();
 		} catch (e) {
 			reject(e);
@@ -535,5 +548,33 @@ if (
 	failures++;
 	console.error('FAIL  Broken Unicode markers must return an error with the TeX log.');
 } else console.log('OK    Broken Unicode markers report an error with the TeX log.');
+
+// The runs the worker saved, handed over for the host to keep once it was idle (D36): gzipped where
+// the platform has its own gzip, as they are where it has none.
+{
+	let seen = -1;
+	for (let quiet = 0, waited = 0; quiet < 1000 && waited < 60_000; waited += 50) {
+		const now = inbox.filter((m) => m.type === 'saved-run').length;
+		quiet = now === seen ? quiet + 50 : 0;
+		seen = now;
+		await new Promise((resolve) => setTimeout(resolve, 50));
+	}
+	const handed = inbox.filter((m) => m.type === 'saved-run');
+	const gzipped = typeof globalThis.CompressionStream === 'function';
+	const wrong = handed.filter(
+		(m) => m.run.compressed !== gzipped || !(m.run.data instanceof ArrayBuffer) || m.run.rawBytes <= 0,
+	);
+	if (handed.length === 0 || wrong.length > 0) {
+		failures++;
+		console.error(
+			`FAIL  ${handed.length} saved runs handed over, ${wrong.length} of them not as this platform gives them.`,
+		);
+	} else
+		console.log(
+			`OK    ${handed.length} saved runs handed over to keep, ${gzipped ? 'gzipped' : 'uncompressed'}, ` +
+				`${(handed.reduce((n, m) => n + m.run.data.byteLength, 0) / 1048576).toFixed(2)} MiB of ` +
+				`${(handed.reduce((n, m) => n + m.run.rawBytes, 0) / 1048576).toFixed(2)}`,
+		);
+}
 await window.happyDOM.close();
 process.exit(failures ? 1 : 0);
