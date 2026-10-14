@@ -44,9 +44,9 @@ npm test               # unit tests; `npm run test:coverage` adds coverage and i
 npm run smoke          # every fixture through the engine, headless
 npm run verify:golden  # every fixture against the output recorded in test/fixtures/golden
 npm run verify:worker  # the exact worker string that goes into main.js
-npm run verify:worker -- --legacy  # the same, without DecompressionStream and Uint8Array.fromBase64
+npm run verify:worker -- --legacy  # the same, without (De)CompressionStream and Uint8Array.fromBase64
 npm run verify:reset   # the engine's memory, reset between runs, against a new one, byte for byte
-npm run verify:snapshot  # a diagram resumed from a saved preamble against one drawn from the start
+npm run verify:snapshot  # a diagram resumed from a saved preamble, in memory or from storage, against one drawn from the start
 npm run build
 npm run scan:native -- --check   # about a minute
 ```
@@ -154,6 +154,12 @@ golden corpus, so it still holds when that is recorded again for a new TeX Live.
 preamble to learn something about the diagram after it, or a change to `engine-src/snapshot.ts` or
 to what the host keeps of a run (`library.ts` `captureHostState`) or of a file TeX can write, wants a
 hazard of its own there.
+
+Since 0.2.1-beta.4 a saved run also outlives the engine: the worker hands it to the host as bytes
+(`engine-src/stored-run.ts`), which keeps it in IndexedDB under the ENGINE_ID (`src/cache/runs.ts`,
+D36). `verify:snapshot` resumes every case from those bytes too, in the engine and through a second
+worker, so a field added to what a run holds (`SavedRun`, `HostState`, `TexFile`) has to be written
+out and read back there, and a change to the layout of the bytes moves `STORED_RUN_FORMAT`.
 
 Building the image is the only step that touches the network: it pins the upstream sources by commit
 (`engine-build/pins.env`), the font archive by SHA-256 and binaryen by the integrity npm publishes

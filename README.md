@@ -461,8 +461,8 @@ change with what people ask for.
   them, and a note often has several diagrams with the same preamble. Since 0.2.1 the engine keeps
   where TeX stands once a preamble is loaded and starts the later diagrams with it from there (see
   [Questions](#questions)), and a second engine runs on a computer while new diagrams queue up; on a
-  phone it stays at one until a phone shows it has the room. Next, the saved preambles are to
-  outlast the engine's stop, which on a phone comes after 30 seconds without a diagram.
+  phone it stays at one until a phone shows it has the room. Since 0.2.1-beta.4 the saved preambles
+  also outlast the engine's stop and a restart of Obsidian, kept in the device's own storage.
 - **0.3.0: TeX Live 2026.** Newer pgf/TikZ, pgfplots, circuitikz, chemfig and siunitx, which means
   new circuitikz components, chemfig's `\hreac` and three years of fixes. `main.js` should shrink
   from about 12.2 MB to about 8.3 MB, by an estimate from a test build. TeX itself will not get
@@ -507,18 +507,37 @@ drawn a second time in a row, a plain TikZ diagram took 4 ms of TeX instead of 1
 engine of Obsidian's desktop app, and circuitikz 61 instead of 194; in WebKit, the engine of the
 iPhone and iPad, 6 instead of 17 and 101 instead of 298. The first diagram of each preamble takes a
 few milliseconds more, to save it, and about a tenth of a second without the JIT (below). An engine
-keeps up to 32 MB of saved preambles on a computer and 12 MB on a phone or tablet, and lets them go
-when it stops: on a phone, after 30 seconds without a diagram and whenever Obsidian goes to the
-background, so there the second diagram has to come soon after the first. In 12 MB a large preamble
-does not always fit beside the ones in use, and is then not kept. A diagram drawn this way is the
-same, byte for byte, as one drawn from the start, and every release checks that for every test
-diagram; a preamble that asks the size of the diagram's own file, or reads it, is never saved. The
-diagnostics view says of each diagram whether it started from a saved preamble.
+keeps up to 32 MB of saved preambles in memory on a computer and 12 MB on a phone or tablet. In 12
+MB a large preamble does not always fit beside the ones in use, and is then not kept there. A
+diagram drawn this way is the same, byte for byte, as one drawn from the start, and every release
+checks that for every test diagram; a preamble that asks the size of the diagram's own file, or
+reads it, is never saved. The diagnostics view says of each diagram whether it started from a saved
+preamble.
+
+<a id="stored-preambles"></a>**Do saved preambles survive a restart?** Since 0.2.1-beta.4, yes. The
+engine stops when it has had nothing to do for a while, on a phone after 15 seconds and whenever
+Obsidian goes to the background, and its saved preambles used to go with it. Now each one is also
+kept in this device's own storage, in Obsidian's IndexedDB beside the diagram cache: never in your
+vault or the plugin's folder, so Obsidian Sync and iCloud never copy it, and each device keeps its
+own. When the engine starts again, after a stop or after Obsidian restarts, a diagram whose preamble
+is stored starts from it instead of loading its packages again. On a Windows desktop, in headless
+WebKit and Chromium rather than in Obsidian, the first diagram after a fresh start of the browser,
+its preamble stored, took 167 ms instead of 338 for siunitx in WebKit and 117 instead of 260 in
+Chromium, and circuitikz 331 instead of 623 and 221 instead of 437; without the JIT, in WebKit,
+circuitikz took 3.9 s instead of 11.4. They take up to 64 MB of storage on a computer and 16 MB on a
+phone or tablet, compressed where the system can, from iOS 16.4 on; when that is full, the preamble
+used least recently goes. A stored preamble belongs to one build of the engine, and an update with
+another one deletes the old ones unread. Clearing the diagram cache (Settings → TikZJax Next →
+Cached diagrams → Clear, or the command) clears them too. Where storage is not available, as in some
+private or restricted setups, preambles are kept only while the engine runs, as before, and the
+diagnostics view counts the storage errors. It shows how many preambles are stored and how much room
+they take, and says of a diagram that started from one "resumed from a stored preamble", with how
+long reading it and putting it back took.
 
 **How do I turn saved preambles off?** Should a diagram ever draw differently because of them, turn
 off Settings → TikZJax Next → Saved preambles, on a phone as on a computer; from the next diagram on,
-every diagram is compiled from the start, as in 0.2.0. Please open an issue with the diagram if that
-changes how it draws. Before 0.2.1-beta.3 the only switch was `"preambleSnapshots": false` in
+every diagram is compiled from the start, as in 0.2.0, and the preambles stored on that device are
+deleted. Please open an issue with the diagram if that changes how it draws. Before 0.2.1-beta.3 the only switch was `"preambleSnapshots": false` in
 `.obsidian/plugins/tikzjax-next/data.json`, which the setting writes.
 
 **Can I put TikZ in a `$$ … $$` math block?** No. Obsidian hands math blocks to MathJax before any

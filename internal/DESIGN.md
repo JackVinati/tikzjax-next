@@ -127,6 +127,7 @@ src/
     memory.ts                  L1 LRU (entry count + byte budget), O(1) touch.
     idb.ts                     L2 IndexedDB: `renders` + `meta`, lastUsed index, lazy schema eviction.
     legacy-import.ts           L3 read-through of TikzJax/svgImages (§8.3).
+    runs.ts                    Saved preambles kept across the engine's stops (0.2.1-beta.4, §4.7, §6.2).
     index.ts                   Facade: get / put / stats / clear / warmNote.
 
   engine/
@@ -444,12 +445,13 @@ The format runs the engine's `\tikzjaxsnapshot` at the end of LaTeX's `begindocu
 
 | | |
 |---|---|
-| Where | In the worker, per engine; gone with it (idle teardown, background, restart) |
+| Where | In the worker, per engine, while it runs; and since 0.2.1-beta.4 in this device's IndexedDB, across its stops (below, D36) |
 | Budget | 32 MiB an engine on a computer, 12 MiB on a phone and on a computer that reports less than 8 GiB (§5.4); least recently used first, never one in use or resumed from within the last 16 renders; a run that would not fit once everything that may go had gone evicts nothing and is not kept, and one of a preamble whose last run did not fit, or smaller than any saved yet, is not saved at all |
-| Switch | Settings → Rendering → Saved preambles (`preambleSnapshots` in `data.json`), default on, on every platform; the host sends the budget, or 0, with every job |
+| Stored (D36) | The worker hands each run it saves to the host as bytes (`engine-src/stored-run.ts`) once it has been idle 100 ms, gzipped 256 KiB at a time where the platform has `CompressionStream` and as they are where not; the bundled files and font metrics it read are named, not copied. The host keeps them in `tikzjax-next-<appId>-preambles` (`src/cache/runs.ts`), keyed by ENGINE_ID and the run's name, 64 MiB on a computer and 16 MiB on a phone and on a computer that reports less than 8 GiB, least recently used out; another ENGINE_ID's are deleted unread. A job whose run no engine holds is sent with the stored one, read while it waits, when putting it back is likely cheaper than its preamble was; the worker checks it and keeps it as if saved there. One that does not read back is deleted |
+| Switch | Settings → Rendering → Saved preambles (`preambleSnapshots` in `data.json`), default on, on every platform; the host sends the budget, or 0, with every job; off, nothing is stored, read or sent, and what was stored is deleted. Clearing the diagram cache clears the stored ones too |
 | Routing | The host names each job's run (`routeOf`), and the worker names a run as the host named the diagram that saved it, or by its text where the host has no name, and saves either way. The host gives a job to the idle engine that holds its run; else to an idle engine that holds none of the runs the other waiting jobs want; else to the first idle one (`src/engine/route.ts`) |
 | Reset | The reset after a resumed run also puts back the saved stretches (D31) |
-| Proof | `verify:snapshot` (every fixture and hazard, resumed against from the start, engine and worker, with the log kept and without, no golden corpus), `verify:reset` with resumed runs |
+| Proof | `verify:snapshot` (every fixture and hazard, resumed against from the start, engine and worker, with the log kept and without, and resumed from storage, written out, gzipped and read back; no golden corpus), `verify:reset` with resumed runs |
 
 ---
 
@@ -511,8 +513,9 @@ A bare `setTimeout(() => pool.kill(...))` around an `await host.run(...)` is **n
 | Debounce while editing | 300 ms | 500 ms |
 | L1 / L2 | 256 entries, 24 MB / 64 MB | 64 entries, 8 MB / 24 MB |
 | SVGO default | `targeted` (after the iOS gate) | `preset` |
-| Worker idle teardown | 5 min | 30 s, **and immediately on `visibilitychange → hidden`** |
+| Worker idle teardown | 5 min | 15 s since 0.2.1-beta.4, 30 s before (`internal/DECISIONS.md` D37), **and immediately on `visibilitychange → hidden`** |
 | Saved preambles, per engine (0.2.1, §4.7) | 32 MiB; 12 MiB where less than 8 GiB is reported | 12 MiB |
+| Saved preambles, stored (0.2.1-beta.4, §4.7, D36) | 64 MiB; 16 MiB where less than 8 GiB is reported | 16 MiB |
 
 Mobile concurrency 1 is not conservatism: even after P1/P2b each worker retains ~68.75 MiB, and two workers is ~137 MiB resident inside one WKWebView content process whose measured ceiling ranges from ~100 MB (iPhone SE3, iOS 26.2) to ~450 MB.
 
@@ -584,6 +587,8 @@ Two unit tests make this a *tested property* rather than a hope: key sensitivity
 **L2** — our own IndexedDB database, named **`obsidian-tikzjax-<app.appId>`**. The name must carry `appId`: every vault on a desktop install shares one origin, so an unqualified name would share one store, one byte cap and one "Clear all" across every vault on the machine. Obsidian namespaces its own stores exactly this way (`appId+"-cache"`, `appId+"-sync"`, verified in the 1.13.7 bundle). Every open and every write is wrapped: WebKit evicts IndexedDB under storage pressure and after prolonged non-use, and a `QuotaExceededError` on write must degrade to "L1 only for this session" plus one Notice — never a failed render, and never an unhandled rejection inside the settle path. It stores `renders` (keyPath `key`, index on `lastUsed`) and `meta` (`{schema, totalBytes}` so eviction never needs a full scan). As built since 0.1.5 (schema 3): `renders` holds the artifacts, a `usage` store holds `{key, lastUsed, bytes}` indexed by `lastUsed`, and `meta` the total — so a cache hit's touch writes a small record instead of rewriting the SVG, eviction walks the usage index without loading one, and every put, delete and eviction moves the total in the same transaction as the records it covers. The 0.1.4 total drifted upward until the store emptied itself on every write; the upgrade clears the schema-2 records, which no key could reach any more. A connection the browser closed (WebKit does, behind a suspended app) is reopened once per operation instead of switching L2 off for the session. An upgrade held up by an older connection (another window, or 0.1.4 updated in place, which never closed its connections when asked) runs memory-only until it goes through, instead of making every lookup wait for it. **Not localForage**: it is unmaintained (last published 2021-08-18), it is already fought with a try/catch at settings.ts:25-29 *because it breaks plugin load on mobile*, and it is the vendored bundle's store, not ours.
 
 The stored artifact is the **final** post-processed SVG with `__TZ__n` id placeholders, plus `{w, h, viewBox}`. A hit is a `Map.get`, one `replaceAll`, one `appendChild`.
+
+**Saved preambles** (0.2.1-beta.4, `internal/DECISIONS.md` D36) — a database of their own beside L2, **`tikzjax-next-<app.appId>-preambles`**, so that neither's schema or failures reach the other: `runs` (`{key, data}`, the bytes, read only to send one to an engine) and `index` (a small record per run, read whole once a session at the engine's early start), written together in one transaction. Keyed `<ENGINE_ID>/<route>`: a run is one build's memory, so another build's entries are deleted unread at that first read. Like L2 it is device-local and never in the vault: Sync and iCloud would carry megabytes of one engine's memory to devices that may run another. A database that cannot be opened turns it off for the session, a write refused for room stops writing for the session, and each counts as a storage error in the diagnostics view; a diagram is drawn either way. Clearing the cache clears it.
 
 ### 6.3 Invalidation, cap, eviction
 
