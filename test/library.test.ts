@@ -115,8 +115,10 @@ describe('the committed engine', () => {
  * the memory, and an array of one byte, every time. They no longer do, and must answer exactly as
  * before: the same bytes in the same places, the same results, and a RangeError wherever a view of
  * the old kind would have refused, since a RangeError out of TeX is how the worker recognises a run
- * cut off by the engine's stack. Each case below runs the code as it was, kept here, beside the
- * code as it is.
+ * cut off by the engine's stack. The one exception is a line that does not fit in what is left of
+ * TeX's buffer, where `set` threw one: that is LineTooLong now (change 11), which the worker reports
+ * as a line too long rather than as TeX nesting too deep. Each case below runs the code as it was,
+ * kept here, beside the code as it is.
  */
 describe('the host calls TeX makes per line and per character', () => {
 	interface OldFile {
@@ -149,7 +151,11 @@ describe('the host calls TeX makes per line and per character', () => {
 			file.eof = true;
 			return false;
 		}
-		buffer.subarray(first[0]).set(content.subarray(file.position2, endOfLine));
+		// As it was, but for the error `set` threw for a line longer than its target: LineTooLong now.
+		const line = content.subarray(file.position2, endOfLine);
+		const rest = buffer.subarray(first[0]);
+		if (line.length > rest.length) throw new library.LineTooLong(bufSize);
+		rest.set(line);
 		last[0] = first[0]! + endOfLine - file.position2;
 		while (buffer[last[0] - 1] === 32) last[0] = last[0] - 1;
 		file.position2 = endOfLine;
@@ -174,7 +180,12 @@ describe('the host calls TeX makes per line and per character', () => {
 		try {
 			result = String(call());
 		} catch (error) {
-			result = error instanceof RangeError ? 'RangeError' : `other: ${String(error)}`;
+			result =
+				error instanceof library.LineTooLong
+					? `LineTooLong ${error.bufSize}`
+					: error instanceof RangeError
+						? 'RangeError'
+						: `other: ${String(error)}`;
 		}
 		return { result, memory: Array.from(new Uint8Array(memory)) };
 	};
@@ -238,6 +249,27 @@ describe('the host calls TeX makes per line and per character', () => {
 			}
 		});
 	}
+
+	it('inputln refuses a line longer than what is left of the buffer with LineTooLong, not a RangeError', () => {
+		const memory = new ArrayBuffer(256);
+		library.setMemory(memory);
+		const descriptor = open(memory, 'long.tex', text(`${'x'.repeat(21)}\nshort`), 'r');
+		new DataView(memory).setUint32(32, 0, true);
+		let thrown: unknown;
+		try {
+			library.inputln(descriptor, 0, 64, 32, 36, 0, 20);
+		} catch (error) {
+			thrown = error;
+		}
+		expect(thrown).toBeInstanceOf(library.LineTooLong);
+		expect(thrown).not.toBeInstanceOf(RangeError);
+		expect((thrown as InstanceType<typeof library.LineTooLong>).bufSize).toBe(20);
+		// Twenty bytes fit, from the buffer's start.
+		library.deleteEverything();
+		library.setMemory(memory);
+		const fits = open(memory, 'fits.tex', text('y'.repeat(20)), 'r');
+		expect(library.inputln(fits, 0, 64, 32, 36, 0, 20)).toBe(true);
+	});
 
 	it('printChar to the terminal gives the lines it gave', () => {
 		const chars = [...'a line\n\n\nanother\nunfinished']

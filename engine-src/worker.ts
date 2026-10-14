@@ -332,6 +332,17 @@ const overflowed = (t: Transcript): Diagnosis => ({
 	line: t.line,
 });
 
+/**
+ * A run cut off at a line longer than TeX's buffer (runPass): TeX ran out of room again, in its
+ * buffer this time, which tex.web reports as "TeX capacity exceeded, sorry [buffer size=…]".
+ */
+const lineTooLong = (t: Transcript, bufSize: number): Diagnosis => ({
+	kind: 'capacity',
+	message: `TeX cannot read a line longer than its buffer of ${bufSize.toString().replace(/\B(?=(\d{3})+$)/g, ',')} bytes.`,
+	firstError: t.firstError,
+	line: t.line,
+});
+
 // --- two passes ----------------------------------------------------------------------------------
 
 /*
@@ -490,6 +501,8 @@ interface PassResult {
 	convertError?: string | undefined;
 	/** TeX nested deeper than the engine's stack holds, and the run was cut off there. */
 	overflowed?: boolean | undefined;
+	/** TeX was to read a line longer than its buffer, of this many bytes, and the run was cut off. */
+	lineTooLong?: number | undefined;
 }
 
 /**
@@ -516,6 +529,7 @@ const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> =
 	let wroteDvi = false;
 	let convertError: string | undefined;
 	let overflowed = false;
+	let lineTooLong: number | undefined;
 	// When TeX was done, and when drawing its DVI began. A run that throws out of TeX sets neither,
 	// and all of its time is TeX's; one that wrote no DVI drew nothing, and spent nothing drawing.
 	let texDone: number | undefined;
@@ -550,9 +564,12 @@ const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> =
 		//   - TeX itself is cut off by the stack it runs on. Each level of an expansion, or of a box
 		//     inside a box, is a few calls deeper in the engine, and something that nests itself a
 		//     few thousand deep runs out of the worker's stack before it reaches any limit of TeX's
-		//     own, so TeX says nothing and closes no file. V8 and JavaScriptCore throw a RangeError.
+		//     own, so TeX says nothing and closes no file. V8 and JavaScriptCore throw a RangeError;
+		//   - the host refuses a line longer than TeX's buffer, which TeX has no chance to report
+		//     itself (library.ts LineTooLong).
 		// Swallowing them all produced "TeX produced no output" for a compile that worked perfectly.
 		if (wroteDvi) convertError = error instanceof Error ? error.message : String(error);
+		else if (texDone === undefined && error instanceof library.LineTooLong) lineTooLong = error.bufSize;
 		else if (texDone === undefined && error instanceof RangeError) overflowed = true;
 	}
 
@@ -562,7 +579,7 @@ const runPass = async (job: string, spent: RenderTimings): Promise<PassResult> =
 	spent.texMs += (texDone ?? done) - reset;
 	spent.svgMs += drawing === undefined ? 0 : done - drawing;
 	spent.passes += 1;
-	return { svg, wroteDvi, convertError, overflowed };
+	return { svg, wroteDvi, convertError, overflowed, lineTooLong };
 };
 
 /** `spent` as the plugin is told it: whole milliseconds, which is all a person reading it needs. */
@@ -732,7 +749,11 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 		return {
 			type: 'error',
 			id,
-			...(reported.overflowed ? overflowed(transcript) : diagnose(transcript, missing)),
+			...(reported.overflowed
+				? overflowed(transcript)
+				: reported.lineTooLong !== undefined
+					? lineTooLong(transcript, reported.lineTooLong)
+					: diagnose(transcript, missing)),
 			bodyLine,
 			log,
 			missing,

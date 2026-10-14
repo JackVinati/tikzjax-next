@@ -66,6 +66,10 @@ top of its notes on GitHub, and will not publish a version that has none.
   allows.", as it did past the old limit. The deepest real diagrams tried draw as before, a `forest`
   tree 80 levels deep, 4,000 groups inside each other and a plot of 2,000 coordinates among them,
   and those three are now among the diagrams every release is tested with.
+- A line longer than TeX's buffer of 300,000 bytes, such as thousands of definitions written on one
+  line, fails with "TeX cannot read a line longer than its buffer of 300,000 bytes." Since 0.2.0 it
+  failed with "TeX nested deeper than the engine's stack allows.", which pointed at the wrong thing.
+  Written a line each, the same definitions draw.
 - The TeX engine starts in well under half the time. Measured on a Windows desktop, from 145 to
   57 ms in WebKit and from 160 to 51 ms in Chromium. The plugin now hands the engine its files when
   it starts it, instead of carrying them inside the engine's own code, which every start had to read

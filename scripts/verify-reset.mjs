@@ -13,8 +13,8 @@
  *    each shuffled from its own fixed seed, in a worker of its own;
  *  - before every run of TeX, the Memory the worker hands it is compared with the core dump, all
  *    163,840,000 bytes of it, which is what a new Memory holds;
- *  - a run that jumped out of TeX or overflowed the engine's stack must leave a new Memory to the
- *    next, and every other run its own, reset;
+ *  - a run that jumped out of TeX, overflowed the engine's stack or was cut off at a line longer
+ *    than TeX's buffer must leave a new Memory to the next, and every other run its own, reset;
  *  - each input must get the same reply in every order, and each fixture the SVG smoke recorded.
  *
  * Exits 1 on any difference.
@@ -115,6 +115,8 @@ const extra = [
 	['stack-overflow', `${B}edef${B}y{${`${B}number`.repeat(20_000)}7}\n${picture(`${B}y`)}`],
 	// TeX jumps out of its program, and the next run must take a new Memory.
 	['fatal-error', `${B}input{no-such-file-anywhere}\n${picture('x')}`],
+	// A line longer than TeX's buffer, which the host refuses: cut off, and a new Memory next.
+	['long-line', `${B}def${B}x{${'a'.repeat(310_000)}}\n${picture('x')}`],
 	// Two passes, the second on the first's Memory, reset.
 	['two-passes', `${B}refstepcounter{equation}${B}label{e}\n${picture(`${B}ref{e}`)}`, { twoPass: true }],
 	// A macro of 2,621,440 tokens: TeX's free list of one-word nodes runs dry, and hi_mem_min, which
@@ -290,8 +292,13 @@ for (let order = 1; order <= ORDERS; order++) {
 		const before = runs.length;
 		const reply = await send(input);
 		const mine = runs.slice(before);
-		// A run cut off by the engine's stack says so in the reply, and it is the render's last run.
-		if (reply.type === 'error' && reply.kind === 'capacity' && /engine's stack/.test(reply.message))
+		// A run cut off by the engine's stack, or at a line longer than TeX's buffer, says so in the
+		// reply, and it is the render's last run.
+		if (
+			reply.type === 'error' &&
+			reply.kind === 'capacity' &&
+			/engine's stack|a line longer than its buffer/.test(reply.message)
+		)
 			mine[mine.length - 1].abnormal = true;
 
 		for (const run of mine) {

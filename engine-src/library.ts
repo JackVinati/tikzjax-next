@@ -35,6 +35,9 @@
  *     wrapped in an array of its own. They answer and fail exactly as before (D29).
  * 10. Where this host wrote into TeX's memory in a run is kept, and executeAsync says whether TeX
  *     ended or jumped out, for the worker's reset of only what a run wrote (./reset, D31).
+ * 11. A line longer than what is left of TeX's buffer throws LineTooLong, where it threw the
+ *     RangeError of a view that refused it, so that the worker tells it from a run cut off by the
+ *     engine's stack (D29).
  */
 
 import { tfmData } from '@drgrice1/dvi2html';
@@ -507,6 +510,21 @@ export const close = (descriptor: number) => {
 	void files[descriptor];
 };
 
+/**
+ * What inputln throws for a line longer than what is left of TeX's buffer (change 11). tex.web's own
+ * input_ln copies a line in a character at a time and stops with "TeX capacity exceeded, sorry
+ * [buffer size=…]" once the buffer is full; here the host copies the line, before TeX can look, so
+ * the host stops the run instead, with the buffer's size. It threw a RangeError, which the worker
+ * took for a run cut off by the engine's stack, and reported as TeX nesting too deep.
+ */
+export class LineTooLong extends Error {
+	readonly bufSize: number;
+	constructor(bufSize: number) {
+		super(`a line longer than TeX's buffer of ${bufSize} bytes`);
+		this.bufSize = bufSize;
+	}
+}
+
 export const eof = (descriptor: number) => (files[descriptor]?.eof ? 1 : 0);
 export const erstat = (descriptor: number) => files[descriptor]?.erstat ?? 1;
 export const eoln = (descriptor: number) => (files[descriptor]?.eoln ? 1 : 0);
@@ -561,10 +579,10 @@ export const inputln = (
 	}
 
 	// The line into TeX's buffer at `first`, as `buffer.subarray(first).set(line)` did, which threw
-	// when the line did not fit in what was left of the buffer. A short line a byte at a time, which
-	// costs less than the view `set` needs.
+	// when the line did not fit in what was left of the buffer: that is LineTooLong now (change 11).
+	// A short line a byte at a time, which costs less than the view `set` needs.
 	const length = endOfLine - from;
-	if (length > (first < bufSize ? bufSize - first : 0)) throw new RangeError('offset is out of bounds');
+	if (length > (first < bufSize ? bufSize - first : 0)) throw new LineTooLong(bufSize);
 	const at = bufferp + first;
 	if (length < 64) for (let i = 0; i < length; i++) mem[at + i] = content[from + i]!;
 	else mem.set(content.subarray(from, endOfLine), at);

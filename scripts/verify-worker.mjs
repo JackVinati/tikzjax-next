@@ -386,6 +386,38 @@ const STACK_FLOOR = 2900;
 	);
 }
 
+// A line longer than TeX's buffer, which the host refuses before TeX can: the reply has to say so,
+// not that TeX nested too deep, and the same worker has to draw `basic` afterwards.
+{
+	const reply = await send({
+		type: 'render',
+		id: ++id,
+		source: `\\def\\x{${'a'.repeat(310_000)}}\n\\begin{tikzpicture}\\node{x};\\end{tikzpicture}`,
+		options: { captureLog: true },
+	}).catch((error) => ({ type: 'none', message: error.message }));
+	const ok =
+		reply.type === 'error' &&
+		reply.kind === 'capacity' &&
+		/a line longer than its buffer/.test(reply.message);
+	if (!ok) failures++;
+	console.log(
+		`${ok ? '\x1b[32mOK  \x1b[0m' : '\x1b[31mFAIL\x1b[0m'}  a line longer than TeX's buffer is reported ` +
+			`as one: ${reply.type === 'error' ? `${reply.kind}: ${reply.message}` : reply.type}`,
+	);
+	const next = await send({
+		type: 'render',
+		id: ++id,
+		source: basicSource,
+		options: { captureLog: true },
+	}).catch((error) => ({ type: 'none', message: error.message }));
+	const drew = next.type === 'ok' && basicReference !== null && next.svg === basicReference;
+	if (!drew) failures++;
+	console.log(
+		`${drew ? '\x1b[32mOK  \x1b[0m' : '\x1b[31mFAIL\x1b[0m'}  ${''.padEnd(24)} then basic, ` +
+			`${drew ? 'as drawn on its own' : next.type === 'ok' ? 'drawn differently' : `${next.type}: ${next.message}`}`,
+	);
+}
+
 // What the bridge writes back, checked as text rather than as bytes, on one pass and on two. The
 // fixtures in test/fixtures/tex with Unicode in them are compared above, with smoke, which puts the
 // same text back; these are for what that comparison cannot say: which runs come back, how they are

@@ -1735,6 +1735,19 @@ small, misplaced or outside the memory, with `first` and `last` misaligned or on
 compares every byte of the memory after each call. Changing either new check, the one for a
 negative pointer or the one for a line that does not fit, fails it.
 
+**A line longer than TeX's buffer** is the one place where failing as before was wrong. A line that
+did not fit in what was left of the buffer, 300,000 bytes, threw the RangeError of `set`, and since
+0.2.0 (D17) the worker has reported that as "TeX nested deeper than the engine's stack allows.":
+the review of this release's engine found 20,000 `\expandafter\def\csname…` on one line, about 960
+KB, failing that way, where on lines of their own they render. tex.web's own `input_ln` stops at a
+full buffer with "TeX capacity exceeded, sorry [buffer size=…]". `inputln` now throws
+`LineTooLong` there, which is not a RangeError, and the worker reports a capacity error, "TeX
+cannot read a line longer than its buffer of 300,000 bytes.", and leaves a new Memory to the next
+run, as after any run cut off before TeX ended it. Only the message changes, so `OUTPUT_REVISION`
+stays where it is. `test/library.test.ts` compares `inputln` with the old code as before, with
+`set`'s error taken for `LineTooLong`; `verify:worker` sends a line of 310,000 bytes and then
+`basic`, and `verify:reset` has the same line among its inputs.
+
 **What it gains.** Measured on 2026-10-14 on the desktop of D27 (Windows 11, i9-13900K, 128 GiB),
 quiet at the start (9% CPU), with the 0.2.x study's harness as D27 measured: each build's worker as
 its `main.js` carries it, in a real Web Worker of Playwright 1.63's WebKit 26.6 and Chromium 153,
@@ -1893,10 +1906,11 @@ from 236,378 to 238,195 bytes, 69,594 to 69,861 gzipped, and TeX's time does not
 same bytes.
 
 **The proof** is `npm run verify:reset`, in CI and in the Engine workflow. It runs the worker that
-ships over every fixture and eleven inputs the fixtures do not reach, in five orders shuffled from
+ships over every fixture and twelve inputs the fixtures do not reach, in five orders shuffled from
 fixed seeds, a worker each:
 
 - the `\detokenize`, the `\frac`s, a stack overflow, a fatal error and two passes;
+- a line longer than TeX's buffer, at which the host cuts the run off (D29);
 - a macro of 2,621,440 tokens, which runs TeX's free list of one-word nodes dry and takes
   `hi_mem_min` from the dump's 6,077,926 down to 3,477,793, where no fixture moves it;
 - a font's parameters grown, and two `\fontdimen` errors, which write the dummy entry TeX keeps at
@@ -1912,8 +1926,8 @@ words and by ten thousand slots, so that neither can stop testing what it is the
 Before each run of TeX the check compares the Memory the worker hands TeX with the dump, all
 163,840,000 bytes, which is what a new Memory holds; it requires a new Memory after a run that did
 not end normally and the worker's own after any other; and it requires the same reply for an input
-in every order, and a fixture's SVG to be the one smoke drew. On 2026-10-14: 280 runs, 240 on the
-worker's Memory, reset, 40 on a new one, every one equal.
+in every order, and a fixture's SVG to be the one smoke drew. On 2026-10-14: 285 runs, 241 on the
+worker's Memory, reset, 44 on a new one, every one equal.
 
 What it catches, each tried as one change in a scratch copy of the repository, run with one order:
 the pool bounded at `pool_ptr` plus 4,096, `str_start` at `str_ptr`, `font_info` 600 entries short
