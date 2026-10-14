@@ -23,6 +23,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { tfmData } from '@drgrice1/dvi2html';
 import { buildWorker, engineIsBuilt, readCoreDump, readMemoryLayout } from './engine-assets.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -70,6 +71,38 @@ const picture = (body) => `${B}begin{tikzpicture}${B}node{${body}};${B}end{tikzp
 let fractions = 'x';
 for (let i = 0; i < 200; i++) fractions = `${B}frac{${fractions}}{2}`;
 const letters = 'abcdefghijklmnopqrstuvwxyz'.repeat(400);
+
+// Every font metric the engine can load: the ones dvi2html carries, which openSync tries first,
+// among the faces the plugin ships, and the ones bundled with the TeX files. Each at a size of its
+// own, so that TeX loads every one rather than finding it loaded.
+const isBuiltIn = (name) => {
+	try {
+		tfmData(name);
+		return true;
+	} catch {
+		return false;
+	}
+};
+const metrics = [
+	...new Set([
+		...readdirSync(join(root, 'engine-build', 'out', 'dist', 'fonts'))
+			.filter((f) => f.endsWith('.woff2'))
+			.map((f) => basename(f, '.woff2'))
+			.filter(isBuiltIn),
+		...Object.keys(assets.files)
+			.filter((f) => f.endsWith('.tfm'))
+			.map((f) => basename(f, '.tfm')),
+	]),
+].sort();
+const letterName = (i) => String.fromCharCode(97 + (i % 26), 97 + Math.floor(i / 26));
+const everyFont = metrics
+	.map((name, i) => `${B}font${B}verify${letterName(i)}=${name} at ${5 + (i % 7)}pt`)
+	.join('\n');
+const manyNames = Array.from(
+	{ length: 20_000 },
+	(_, i) => `${B}expandafter${B}def${B}csname verify${i}${B}endcsname{${i}}\n`,
+).join('');
+
 const extra = [
 	// A string TeX builds and flushes, 10,400 characters past where pool_ptr ends the run.
 	[
@@ -84,13 +117,47 @@ const extra = [
 	['fatal-error', `${B}input{no-such-file-anywhere}\n${picture('x')}`],
 	// Two passes, the second on the first's Memory, reset.
 	['two-passes', `${B}refstepcounter{equation}${B}label{e}\n${picture(`${B}ref{e}`)}`, { twoPass: true }],
-].map(([name, source, options = {}]) => ({
+	// A macro of 2,621,440 tokens: TeX's free list of one-word nodes runs dry, and hi_mem_min, which
+	// no fixture moves, comes down from where the dump has it.
+	[
+		'free-list',
+		`${B}def${B}a{abcdefghij}\n${`${B}edef${B}a{${B}a${B}a}\n`.repeat(18)}${picture('x')}`,
+		{},
+		['hi_mem_min', 1_000_000],
+	],
+	// A font's parameters grown past its own, and two \fontdimen errors, each of which writes the dummy
+	// entry TeX keeps at fmem_ptr.
+	[
+		'font-parameters',
+		`${B}font${B}fx=cmr10 at 11.5pt ${B}fontdimen99${B}fx=1pt ${B}font${B}fy=cmr12 at 13.5pt ` +
+			`${B}fontdimen200${B}fx=2pt ${B}fontdimen0${B}fy=3pt\n${picture('x')}`,
+	],
+	// \dump where a document's body is.
+	['dump', `${B}dump\n${picture('x')}`],
+	// Every font metric at once: the reset trusts that none stops loading half-way, past fmem_ptr.
+	['every-font', `${everyFont}\n${picture('x')}`],
+	// 20,000 names, a line each, which overflow into the hash table's slots from hash_used down.
+	['many-names', `${manyNames}${picture('x')}`, {}, ['hash_used', 10_000]],
+	// e-TeX's pseudo-files, which \scantokens keeps in mem.
+	[
+		'scantokens',
+		`${B}scantokens{}${B}scantokens{a}${B}scantokens{${'abc '.repeat(3000)}}\n${picture('x')}`,
+	],
+].map(([name, source, options = {}, lowers]) => ({
 	name,
 	source,
 	options: { ...options, captureLog: true },
 	reference: null,
+	// The counter of TeX's the input is there to move, and by how much at least below where the dump
+	// has it, checked after its run, so that an input that no longer reaches what it is for fails
+	// instead of passing.
+	lowers,
 }));
 const inputs = [...fixtures, ...extra];
+console.log(
+	`${fixtures.length} fixtures and ${extra.length} inputs of its own, one of them the ${metrics.length} ` +
+		`font metrics the engine can load.\n`,
+);
 
 /** A fixed shuffle: mulberry32 from `seed`, then Fisher-Yates. */
 function shuffled(list, seed) {
@@ -245,6 +312,24 @@ for (let order = 1; order <= ORDERS; order++) {
 				if (reused) fail(`${input.name}: handed the Memory of a run that did not end normally`);
 			} else if (!reused) fail(`${input.name}: handed a new Memory after a run that ended normally`);
 		}
+
+		// The Memory the run ended with is not reset until the next run starts, so TeX's counters are
+		// still where the run left them.
+		if (input.lowers !== undefined && mine.length > 0) {
+			const [counter, by] = input.lowers;
+			const { offset } = layout.variables[counter];
+			const reached = Buffer.from(mine[mine.length - 1].memory.buffer).readInt32LE(offset);
+			const dumped = fresh.readInt32LE(offset);
+			if (reached > dumped - by)
+				fail(
+					`${input.name}: ${counter} came down from ${dumped} to ${reached}, not by ${by} or more`,
+				);
+		}
+		if (
+			input.name === 'every-font' &&
+			(reply.type !== 'ok' || reply.log.some((l) => /not loadable/.test(l)))
+		)
+			fail(`every-font: not all ${metrics.length} font metrics loaded`);
 
 		const said = gist(reply);
 		const earlier = replies.get(input.name);

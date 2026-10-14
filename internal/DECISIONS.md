@@ -1893,17 +1893,40 @@ from 236,378 to 238,195 bytes, 69,594 to 69,861 gzipped, and TeX's time does not
 same bytes.
 
 **The proof** is `npm run verify:reset`, in CI and in the Engine workflow. It runs the worker that
-ships over every fixture and five inputs the fixtures do not reach (the `\detokenize`, the
-`\frac`s, a stack overflow, a fatal error, two passes), in five orders shuffled from fixed seeds, a
-worker each. Before each run of TeX it compares the Memory the worker hands TeX with the dump, all
+ships over every fixture and eleven inputs the fixtures do not reach, in five orders shuffled from
+fixed seeds, a worker each:
+
+- the `\detokenize`, the `\frac`s, a stack overflow, a fatal error and two passes;
+- a macro of 2,621,440 tokens, which runs TeX's free list of one-word nodes dry and takes
+  `hi_mem_min` from the dump's 6,077,926 down to 3,477,793, where no fixture moves it;
+- a font's parameters grown, and two `\fontdimen` errors, which write the dummy entry TeX keeps at
+  `font_info[fmem_ptr]`;
+- `\dump` in the body;
+- every font metric the engine can load, 121 of them, at once, which holds the assumption above,
+  that none stops loading half-way, against a later bundle: a font that does not load fails it;
+- 20,000 names, a line each, which fill the hash table's overflow slots from `hash_used` down;
+- `\scantokens`, whose pseudo-files e-TeX keeps in `mem`.
+
+The free list's input and the names' fail the check if they stop moving their counter by a million
+words and by ten thousand slots, so that neither can stop testing what it is there for unnoticed.
+Before each run of TeX the check compares the Memory the worker hands TeX with the dump, all
 163,840,000 bytes, which is what a new Memory holds; it requires a new Memory after a run that did
 not end normally and the worker's own after any other; and it requires the same reply for an input
-in every order, and a fixture's SVG to be the one smoke drew. On 2026-10-14: 250 runs, 211 on the
-worker's Memory, reset, 39 on a new one, every one equal. It fails when the pool is bounded at
-`pool_ptr` plus 4,096, `str_start` at `str_ptr`, `font_info` 600 entries short of `fmem_ptr`, or the
-stack at 64 bytes below the top, each tried. `verify:golden` now runs the corpus on one Memory too,
-38 of the 44 fixtures on the run before's, and `test/reset.test.ts` holds the stretches to the
-committed dump's counters and the writing back to the dump.
+in every order, and a fixture's SVG to be the one smoke drew. On 2026-10-14: 280 runs, 240 on the
+worker's Memory, reset, 40 on a new one, every one equal.
+
+What it catches, each tried as one change in a scratch copy of the repository, run with one order:
+the pool bounded at `pool_ptr` plus 4,096, `str_start` at `str_ptr`, `font_info` 600 entries short
+of `fmem_ptr`, the stack at 64 bytes below the top, and, since the inputs above, `font_info` one
+entry short of `fmem_ptr` (the `\fontdimen` input), `mem` from one word above `hi_mem_min` (the free
+list's), `save_stack` without its slack of eight entries, and the hash's overflow slots left out.
+What it cannot catch: the host's writes left out of the reset, since every one of them lands in a
+global the reset writes back whole anyway, so `hostWrites` is a guard no input can show failing
+(`test/library.test.ts` holds what it records); `save_stack`'s slack cut from eight entries to two;
+and the one entry past `lo_mem_max`, `pool_ptr` and `str_ptr` left out, an entry TeX does not write.
+`verify:golden` now runs the corpus on one Memory too, 38 of the 44 fixtures on the run before's,
+and `test/reset.test.ts` holds the stretches to the committed dump's counters and the writing back
+to the dump.
 
 **What it gains.** The campaign of D29, the content process's peak working set and private commit
 over the round, median (range) of the seven rounds, against D28's commit, before any of D29 to D31:
