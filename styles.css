@@ -399,6 +399,15 @@ The fonts are converted from the BaKoMa Fonts Collection, whose licence follows.
 	font-size: var(--font-ui-smaller);
 }
 
+/*
+ * What the device does that slows the plugin or keeps it from updating, and what to do about it:
+ * TeX without the JIT on an iPhone or iPad, and a main.js Sync left behind.
+ */
+.tikzjax-debug-warning {
+	margin: 0.5em 0;
+	color: var(--text-warning);
+}
+
 /* The engine's starts this session, numbered from the first one still listed. */
 .tikzjax-debug-lives {
 	margin: 0.35em 0;

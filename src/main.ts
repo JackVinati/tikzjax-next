@@ -2,7 +2,7 @@ import { Notice, Platform, Plugin } from 'obsidian';
 import { COLD_FONT_CSS } from 'virtual:fonts';
 
 import { TexError, type Budgets, type TexResult } from './types';
-import type { EngineInventory } from '../engine-src/protocol';
+import type { BootTimings, EngineInventory } from '../engine-src/protocol';
 import { WorkerHost } from './engine/worker-host';
 import { budgetsFor, engineCount } from './platform/budgets';
 import { ensureFonts } from './platform/context';
@@ -27,6 +27,7 @@ import { sha256Hex } from './cache/sha256';
 import { OUTPUT_REVISION } from './cache/key';
 import { Component, MarkdownRenderer, TFile, type WorkspaceLeaf } from 'obsidian';
 import { TikzSettingTab } from './settings/tab';
+import { noJitNotice } from './ui/notices';
 import { STRINGS } from './ui/strings';
 
 /** The plugin this one forks from. Both register `tikz`, so both cannot run at once. */
@@ -96,6 +97,8 @@ export default class TikzjaxNextPlugin extends Plugin {
 			// Saved preambles (internal/DECISIONS.md D32), read for each diagram, so that turning them
 			// off in data.json applies to the next one, also when the change arrives through Sync.
 			snapshotBudget: () => (this.settings.preambleSnapshots ? this.budgets.snapshotBytes : 0),
+			// Whether TeX runs without the JIT, which on an iPhone or iPad is said once (D33).
+			onStarted: (boot) => this.warnIfNoJit(boot),
 		});
 		this.preamble = new PreambleService(this.app, sha256Hex);
 		this.cache = new DiagramCache({
@@ -260,6 +263,19 @@ export default class TikzjaxNextPlugin extends Plugin {
 		this.addSettingTab(new TikzSettingTab(this.app, this));
 		this.registerCommands();
 		this.registerTeardown();
+	}
+
+	/**
+	 * Say, once, on an iPhone or iPad, that TeX runs without the JIT there, which Lockdown Mode is the
+	 * usual cause of (engine-src/jit.ts, internal/DECISIONS.md D33). Until it is tapped, since it is
+	 * shown once; the diagnostics view says it whenever it is opened.
+	 */
+	private warnIfNoJit(boot: BootTimings | null): void {
+		const message = noJitNotice(boot, device().os, this.settings.jitNoticeShown);
+		if (message === null) return;
+		new Notice(message, 0);
+		this.settings.jitNoticeShown = true;
+		void this.saveData(this.settings);
 	}
 
 	/** Bounded: the view shows the last hundred, and an unbounded log of a vault scroll is a leak. */

@@ -114,6 +114,24 @@ export interface BootTimings {
 	nativeInflate: boolean;
 	/** Whether the platform's Uint8Array.fromBase64 decoded, rather than the worker's own loop. */
 	nativeBase64: boolean;
+	/**
+	 * Whether WebAssembly runs with a JIT here, probably, from a loop the worker timed once tex.wasm
+	 * was compiled (./jit). Absent where it could not be timed, and from a worker before
+	 * 0.2.1-beta.3, which did not time it.
+	 */
+	jit?: JitProbe | undefined;
+}
+
+/** What the worker's timing of a loop of known cost found (./jit, internal/DECISIONS.md D33). */
+export interface JitProbe {
+	/** The loop ran as compiled code runs: false when every attempt was slow, as without a JIT. */
+	on: boolean;
+	/** The fastest attempt by the worker's clock, in ms, cut short at the threshold when slow. */
+	fastestMs: number;
+	/** How many attempts it took: 1 unless the first was slow. */
+	attempts: number;
+	/** What the probe took of the start, in all. */
+	spentMs: number;
 }
 
 export interface ReadyMessage {

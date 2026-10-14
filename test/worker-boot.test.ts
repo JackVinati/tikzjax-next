@@ -51,6 +51,10 @@ describe('the engine starting from the payload the host sends it', { timeout: 12
 		expect(boot.nativeBase64).toBe(
 			typeof (Uint8Array as unknown as { fromBase64?: unknown }).fromBase64 === 'function',
 		);
+		// Node runs WebAssembly with a JIT, and the probe that says so is part of the start
+		// (engine-src/jit.ts, internal/DECISIONS.md D33).
+		expect(boot.jit).toMatchObject({ on: true });
+		expect(boot.jit!.spentMs).toBeLessThanOrEqual(boot.totalMs + 1);
 	});
 
 	it('answers ready without DecompressionStream and Uint8Array.fromBase64, as on iOS 14.5 to 16.3', async () => {

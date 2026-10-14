@@ -193,6 +193,45 @@ describe('the text the diagnostics view copies', () => {
 		);
 	});
 
+	it('says whether the JIT is on, as the latest engine to start found it, and what the probe took', () => {
+		const started = (jit: { on: boolean } | undefined) =>
+			diagnosticsText(
+				snapshot({
+					engine: {
+						starts: 2,
+						lives: [jit, undefined].map((probe) => ({
+							startMs: 60,
+							boot: {
+								decodeMs: 2,
+								inflateMs: 30,
+								compileMs: 1,
+								totalMs: 46,
+								nativeInflate: true,
+								nativeBase64: true,
+								...(probe === undefined
+									? {}
+									: { jit: { ...probe, fastestMs: 3, attempts: 4, spentMs: 12 } }),
+							},
+							snapshots: null,
+							stop: null,
+						})),
+						lastStop: null,
+						poolSize: 1,
+					},
+				}),
+			);
+		// An engine of a worker that does not time it says nothing, and the one before it does.
+		const off = started({ on: false });
+		expect(off).toContain('\nJIT: off (probably)\n');
+		expect(off).toContain(
+			'  1. started in 60 ms (in the worker 46 ms: decode 2 ms, inflate 30 ms, compile 1 ms, JIT probe 12 ms; ' +
+				'native gzip yes, native base64 yes; JIT off (probably)), running',
+		);
+		expect(started({ on: true })).toContain('\nJIT: on (probably)\n');
+		expect(started(undefined)).toContain('\nJIT: not measured yet\n');
+		expect(text).toContain('\nJIT: not measured yet\n');
+	});
+
 	it('has the cache and the queue in it', () => {
 		expect(text).toContain('In memory: 4 diagrams, 2.0 MB');
 		expect(text).toContain('On disk: 40 diagrams, 3.0 MB');

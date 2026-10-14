@@ -123,6 +123,18 @@ function mb(bytes: number): string {
 	return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
+/**
+ * Whether WebAssembly runs with a JIT, probably, as the latest engine to say found it
+ * (engine-src/jit.ts): null until an engine that times it has started.
+ */
+export function jitOf(engine: EngineReport): boolean | null {
+	for (let i = engine.lives.length - 1; i >= 0; i--) {
+		const jit = engine.lives[i]?.boot?.jit;
+		if (jit !== undefined) return jit.on;
+	}
+	return null;
+}
+
 /** The whole view as plain text, for a bug report. See the top of this file for what it leaves out. */
 export function diagnosticsText(s: DiagnosticsSnapshot): string {
 	const { about, engine } = s;
@@ -132,6 +144,7 @@ export function diagnosticsText(s: DiagnosticsSnapshot): string {
 		STRINGS.reportObsidian(about.obsidian),
 		STRINGS.reportPlatform(about.platform, about.os),
 		STRINGS.reportWebView(about.webView),
+		STRINGS.reportJit(jitOf(engine)),
 		STRINGS.reportEngine(about.engineId),
 		STRINGS.reportOutputRevision(about.outputRevision),
 		'',

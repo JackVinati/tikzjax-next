@@ -2,15 +2,17 @@ import { ItemView, Notice, type WorkspaceLeaf } from 'obsidian';
 import type { EngineInventory } from '../../engine-src/protocol';
 import type { EngineReport } from '../engine/worker-host';
 import type { CompileTimings } from '../types';
+import { withReadme } from './notices';
 import {
 	diagnosticsText,
 	engineLife,
+	jitOf,
 	renderName,
 	timingSteps,
 	type About,
 	type RenderRecord,
 } from './report';
-import { STRINGS } from './strings';
+import { README_LOCKDOWN, STRINGS } from './strings';
 
 export type { RenderRecord } from './report';
 
@@ -213,7 +215,9 @@ export class DebugView extends ItemView {
 		} else {
 			engine.createDiv({ text: 'Not started. It starts with the first diagram that is not cached.' });
 		}
-		this.starts(engine, this.source.engine());
+		const report = this.source.engine();
+		this.jit(engine, report, this.source.about());
+		this.starts(engine, report);
 
 		const cache = root.createDiv({ cls: 'tikzjax-debug-section' });
 		cache.createEl('h3', { text: 'Cache' });
@@ -254,6 +258,19 @@ export class DebugView extends ItemView {
 			});
 			if (record.timings) this.timings(row, record.timings);
 			if (record.message) row.createDiv({ cls: 'tikzjax-debug-message', text: record.message });
+		}
+	}
+
+	/**
+	 * Whether WebAssembly runs with a JIT, as the latest engine to start found it (engine-src/jit.ts),
+	 * and on an iPhone or iPad without one, why that is likely and what to do about it.
+	 */
+	private jit(section: HTMLElement, report: EngineReport, about: About): void {
+		const on = jitOf(report);
+		this.fact(section.createDiv({ cls: 'tikzjax-debug-facts' }), STRINGS.jitFact, STRINGS.jitState(on));
+		if (on === false && about.os === 'iOS') {
+			const hint = section.createDiv({ cls: 'tikzjax-debug-warning' });
+			withReadme(hint, STRINGS.jitHint, STRINGS.jitHintLink, README_LOCKDOWN);
 		}
 	}
 

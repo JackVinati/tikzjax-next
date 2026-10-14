@@ -128,6 +128,13 @@ export interface WorkerHostOptions {
 	 * Omitted: 0.
 	 */
 	snapshotBudget?: (() => number) | undefined;
+	/**
+	 * Told each time an engine has started, with what it said of its start: where the time went, and
+	 * whether WebAssembly runs with a JIT here (engine-src/protocol.ts BootTimings), null from a
+	 * worker that does not say. The plugin tells someone on an iPhone without one, once, why their
+	 * diagrams are slow (internal/DECISIONS.md D33).
+	 */
+	onStarted?: ((boot: BootTimings | null) => void) | undefined;
 }
 
 /** One render, from `render()` until it settles. */
@@ -216,6 +223,7 @@ export class WorkerHost implements TexHost {
 	private poolSize: number;
 	private readonly onSize: ((engines: number) => void) | undefined;
 	private readonly snapshotBudget: () => number;
+	private readonly onStarted: ((boot: BootTimings | null) => void) | undefined;
 
 	/**
 	 * A worker failed to start since the workers last stopped together (idle, or `kill()`), so no
@@ -252,6 +260,7 @@ export class WorkerHost implements TexHost {
 		this.poolSize = sizeOf(options.poolSize ?? 1);
 		this.onSize = options.onSize;
 		this.snapshotBudget = options.snapshotBudget ?? (() => 0);
+		this.onStarted = options.onStarted;
 		this.told = this.poolSize;
 	}
 
@@ -520,6 +529,11 @@ export class WorkerHost implements TexHost {
 			}
 			engine.resolveReady();
 			this.pump();
+			try {
+				this.onStarted?.(engine.life.boot);
+			} catch {
+				// The caller's business; the engine is up either way.
+			}
 			return;
 		}
 

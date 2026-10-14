@@ -4,7 +4,9 @@ import type { WorkspaceLeaf } from 'obsidian';
 import { shownNotices } from './stubs/obsidian';
 import { installObsidianDom } from './stubs/obsidian-dom';
 import { DebugView, type DebugSource, type RenderRecord } from '../src/ui/debug-view';
-import { diagnosticsText } from '../src/ui/report';
+import { diagnosticsText, type About } from '../src/ui/report';
+import { README_LOCKDOWN } from '../src/ui/strings';
+import type { BootTimings } from '../engine-src/protocol';
 import type { EngineReport } from '../src/engine/worker-host';
 
 beforeAll(() => {
@@ -22,7 +24,11 @@ beforeAll(() => {
 
 const NO_STARTS: EngineReport = { starts: 0, lives: [], lastStop: null, poolSize: 2 };
 
-function source(records: RenderRecord[], engine: EngineReport = NO_STARTS): DebugSource {
+function source(
+	records: RenderRecord[],
+	engine: EngineReport = NO_STARTS,
+	about: Partial<About> = {},
+): DebugSource {
 	return {
 		records: () => records,
 		inventory: () => null,
@@ -38,6 +44,7 @@ function source(records: RenderRecord[], engine: EngineReport = NO_STARTS): Debu
 			webView: { decompressionStream: true, fromBase64: false, cores: 8, memoryGiB: 8 },
 			engineId: 'e'.repeat(64),
 			outputRevision: 'r'.repeat(64),
+			...about,
 		}),
 		now: () => 0,
 	};
@@ -202,6 +209,79 @@ describe('the engine in the diagnostics view', () => {
 		);
 		expect(text).toContain('Last stopped: stopped when the app went to the background.');
 		expect(text).toContain('Up to 2 engines compile at once.');
+	});
+});
+
+/** An engine that has started once, and what it said of its start, the JIT among it. */
+function startedOnce(jit: BootTimings['jit']): EngineReport {
+	const boot: BootTimings = {
+		decodeMs: 3,
+		inflateMs: 45,
+		compileMs: 0,
+		totalMs: 59,
+		nativeInflate: true,
+		nativeBase64: true,
+		jit,
+	};
+	return {
+		starts: 1,
+		lives: [{ startMs: 96, boot, snapshots: null, stop: null }],
+		lastStop: null,
+		poolSize: 1,
+	};
+}
+
+/** The view's facts, label to value. */
+const factsOf = (view: DebugView): Record<string, string> =>
+	Object.fromEntries(
+		[...view.contentEl.querySelectorAll('.tikzjax-debug-fact')].map((fact) => [
+			fact.querySelector('.tikzjax-debug-label')?.textContent ?? '',
+			fact.querySelector('.tikzjax-debug-value')?.textContent ?? '',
+		]),
+	);
+
+const warningsOf = (view: DebugView): HTMLElement[] => [
+	...view.contentEl.querySelectorAll<HTMLElement>('.tikzjax-debug-warning'),
+];
+
+describe('the JIT in the diagnostics view', () => {
+	const OFF = { on: false, fastestMs: 3, attempts: 4, spentMs: 13 };
+	const ON = { on: true, fastestMs: 0.5, attempts: 1, spentMs: 0.7 };
+
+	it('is not measured until an engine that times it has started', async () => {
+		expect(factsOf(await opened(source([])))['JIT']).toBe('not measured yet');
+		expect(factsOf(await opened(source([], startedOnce(undefined))))['JIT']).toBe('not measured yet');
+	});
+
+	it('is what the latest engine to start found, and the start says what the probe took', async () => {
+		const view = await opened(source([], startedOnce(ON)));
+		expect(factsOf(view)['JIT']).toBe('on (probably)');
+		expect(warningsOf(view)).toEqual([]);
+		expect(view.contentEl.querySelector('.tikzjax-debug-starts')?.textContent).toContain(
+			'started in 96 ms (in the worker 59 ms: decode 3 ms, inflate 45 ms, compile 0 ms, JIT probe 0.7 ms; ' +
+				'native gzip yes, native base64 yes; JIT on (probably)), running',
+		);
+	});
+
+	it('says, on an iPhone or iPad without it, that Lockdown Mode is the usual cause and how to exclude Obsidian', async () => {
+		const view = await opened(source([], startedOnce(OFF), { platform: 'phone', os: 'iOS' }));
+		expect(factsOf(view)['JIT']).toBe('off (probably)');
+		const [hint] = warningsOf(view);
+		expect(hint?.textContent).toContain('TeX runs without the JIT compiler on this device');
+		expect(hint?.textContent).toContain(
+			'Settings → Privacy & Security → Lockdown Mode → Configure Web Browsing',
+		);
+		const link = hint?.querySelector('a');
+		expect(link?.getAttribute('href')).toBe(README_LOCKDOWN);
+		expect(link?.textContent).toBe('Lockdown Mode in the README');
+	});
+
+	it('says only that it is off elsewhere, where Lockdown Mode is not the cause', async () => {
+		for (const os of ['Android', 'Windows', 'macOS'] as const) {
+			const view = await opened(source([], startedOnce(OFF), { os }));
+			expect(factsOf(view)['JIT'], os).toBe('off (probably)');
+			expect(warningsOf(view), os).toEqual([]);
+		}
 	});
 });
 

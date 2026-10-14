@@ -558,6 +558,42 @@ describe('what the diagnostics view is told about the engine', () => {
 		expect(host.report().lives).toEqual([{ startMs: 86, boot: timings, snapshots: null, stop: null }]);
 	});
 
+	it('tells the plugin each time an engine has started, with what the worker said of it', async () => {
+		// The plugin tells someone on an iPhone without the JIT, once, why diagrams are slow
+		// (main.ts, internal/DECISIONS.md D33): it hears of every start, the JIT probe with it.
+		const started: (BootTimings | null)[] = [];
+		const host = new WorkerHost({ poolSize: 2, onStarted: (boot) => started.push(boot) });
+		const off: BootTimings = {
+			decodeMs: 3,
+			inflateMs: 45,
+			compileMs: 0,
+			totalMs: 61,
+			nativeInflate: true,
+			nativeBase64: true,
+			jit: { on: false, fastestMs: 3, attempts: 4, spentMs: 12 },
+		};
+		void host.ready();
+		worker(0).boot(off);
+		await tick();
+		expect(started).toEqual([off]);
+
+		// A worker that says nothing of its start, and a listener that throws, change nothing else.
+		host.kill();
+		const throwing = new WorkerHost({
+			onStarted: () => {
+				throw new Error('the listener failed');
+			},
+		});
+		const { result } = render(throwing, 'a');
+		worker(1).boot();
+		await tick();
+		expect(worker(1).renders).toHaveLength(1);
+		worker(1).reply(worker(1).renders[0] ?? -1);
+		await tick();
+		expect(result.status).toBe('fulfilled');
+		throwing.dispose();
+	});
+
 	it('keeps the last twenty, and counts them all', () => {
 		const host = new WorkerHost();
 		for (let i = 0; i < 25; i++) {

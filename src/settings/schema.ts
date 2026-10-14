@@ -33,6 +33,14 @@ export interface TikzSettings {
 	 */
 	preambleSnapshots: boolean;
 
+	// --- what the plugin has told this vault, not in the settings tab -------------------------------
+	/**
+	 * The notice that TeX runs without the JIT, which makes it about twenty times slower, has been
+	 * shown (internal/DECISIONS.md D33). It is shown once, on an iPhone or iPad, the first time an
+	 * engine starts without one; false shows it again.
+	 */
+	jitNoticeShown: boolean;
+
 	// --- source -------------------------------------------------------------------------------
 	/**
 	 * 'corrected' preserves blank lines (i.e. \par) and strips real U+00A0; 'legacy' reproduces the
@@ -62,6 +70,7 @@ export const DEFAULT_SETTINGS: TikzSettings = {
 	timeoutSeconds: 0,
 	secondEngine: true,
 	preambleSnapshots: true,
+	jitNoticeShown: false,
 	sourceHandling: 'corrected',
 	preamblePath: '',
 	autoPreambleName: 'tikz-preamble.tex',

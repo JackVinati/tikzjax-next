@@ -553,7 +553,7 @@ cable; then in Safari on the Mac, Develop → the device → the Obsidian window
 report on the original repository is untriageable for want of this paragraph, so if you are filing
 one, this is how to get something worth attaching.
 
-**Diagrams are very slow on my iPhone or iPad.** See whether Lockdown Mode is on: Settings →
+<a id="lockdown-mode"></a>**Diagrams are very slow on my iPhone or iPad.** See whether Lockdown Mode is on: Settings →
 Privacy & Security → Lockdown Mode. It runs Obsidian's web content without the JIT compiler, and
 the TeX engine with it, which costs a factor of about twenty. On my iPhone with 0.2.0, a circuitikz
 diagram took 7.3 s of TeX with Lockdown Mode on and 0.27 s with Obsidian excluded from it, and the

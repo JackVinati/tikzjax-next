@@ -23,6 +23,7 @@ const CHANGED: TikzSettings = {
 	timeoutSeconds: 45,
 	secondEngine: false,
 	preambleSnapshots: false,
+	jitNoticeShown: true,
 	sourceHandling: 'legacy',
 	preamblePath: 'tex/preamble.tex',
 	autoPreambleName: '',

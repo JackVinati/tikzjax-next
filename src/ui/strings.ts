@@ -26,6 +26,15 @@ const STOPPED: Record<EngineStop, string> = {
 
 const yesNo = (value: boolean): string => (value ? 'yes' : 'no');
 
+/** The README's answers, which the hints below link to (README.md, Questions). */
+const README = 'https://github.com/JackVinati/tikzjax-next';
+/** "Diagrams are very slow on my iPhone or iPad": Lockdown Mode. */
+export const README_LOCKDOWN = `${README}#lockdown-mode`;
+
+/** What the probe of the JIT found (engine-src/jit.ts), as the diagnostics say it: it is a guess. */
+const jitState = (on: boolean | null): string =>
+	on === null ? 'not measured yet' : on ? 'on (probably)' : 'off (probably)';
+
 export const STRINGS = {
 	rendering: 'Rendering diagram',
 	renderDiagram: 'Render diagram',
@@ -81,11 +90,17 @@ export const STRINGS = {
 			? 'The engine started once this session.'
 			: `The engine started ${count} times this session.`,
 	engineStartedIn: (ms: number) => `started in ${ms} ms`,
-	/** A start, with where it went once the worker had its payload, and which native decoders it had. */
+	/**
+	 * A start, with where it went once the worker had its payload, which native decoders it had, and
+	 * what its probe found of the JIT and took to find it.
+	 */
 	engineStartedWith: (ms: number, boot: BootTimings) =>
 		`started in ${ms} ms (in the worker ${boot.totalMs} ms: decode ${boot.decodeMs} ms, ` +
-		`inflate ${boot.inflateMs} ms, compile ${boot.compileMs} ms; native gzip ${yesNo(boot.nativeInflate)}, ` +
-		`native base64 ${yesNo(boot.nativeBase64)})`,
+		`inflate ${boot.inflateMs} ms, compile ${boot.compileMs} ms` +
+		(boot.jit === undefined ? '' : `, JIT probe ${boot.jit.spentMs} ms`) +
+		`; native gzip ${yesNo(boot.nativeInflate)}, native base64 ${yesNo(boot.nativeBase64)}` +
+		(boot.jit === undefined ? '' : `; JIT ${jitState(boot.jit.on)}`) +
+		')',
 	engineNeverStarted: 'never finished starting',
 	/** What an engine held of saved preambles after its last diagram, and its saves that failed. */
 	engineSaved: (start: string, runs: number, mb: string, failures: number) =>
@@ -97,6 +112,24 @@ export const STRINGS = {
 	enginePool: (count: number) =>
 		count === 1 ? 'One engine compiles at a time.' : `Up to ${count} engines compile at once.`,
 
+	// Whether WebAssembly runs with a JIT here (engine-src/jit.ts, internal/DECISIONS.md D33), as
+	// the latest engine to start found, and, on an iPhone or iPad without one, what to do about it.
+	jitFact: 'JIT',
+	jitState,
+	/** Shown in the view on iOS and iPadOS when the JIT is off, before the link to the README. */
+	jitHint:
+		'TeX runs without the JIT compiler on this device, which makes diagrams about twenty times ' +
+		'slower. Lockdown Mode is the usual cause. It can stay on with Obsidian excluded: Settings → ' +
+		'Privacy & Security → Lockdown Mode → Configure Web Browsing, then restart Obsidian.',
+	jitHintLink: 'Lockdown Mode in the README',
+	/** Shown once, the first time an engine starts without the JIT on iOS or iPadOS. */
+	jitNotice:
+		'TikZJax Next: TeX runs without the JIT compiler on this device, which makes diagrams about ' +
+		'twenty times slower. Lockdown Mode is the usual cause. It can stay on with Obsidian excluded: ' +
+		'Settings → Privacy & Security → Lockdown Mode → Configure Web Browsing, then restart Obsidian. ' +
+		'This notice is shown once; "Open TikZ diagnostics" says it again.',
+	readMore: 'Read more',
+
 	// The diagnostics view's Copy button, and the plain text it copies for a bug report.
 	copyDiagnostics: 'Copy',
 	diagnosticsCopied: 'Diagnostics copied to the clipboard.',
@@ -104,6 +137,7 @@ export const STRINGS = {
 	diagnosticsText: 'Diagnostics as text',
 	reportTitle: 'TikZJax Next diagnostics',
 	reportPlugin: (version: string) => `Plugin: ${version}`,
+	reportJit: (on: boolean | null) => `JIT: ${jitState(on)}`,
 	reportObsidian: (version: string) => `Obsidian: ${version}`,
 	reportPlatform: (platform: string, os: string) => `Platform: ${platform}, ${os}`,
 	reportWebView: (features: WebViewFeatures) =>

@@ -42,6 +42,7 @@ import * as library from './library';
 import { describeConvertError } from './convert-error';
 import { buildInput, routeOf } from './document';
 import { gunzipExactly } from './inflate';
+import { probeJit } from './jit';
 import { checkCoreDump, packedLength, startingMemory, unpackCoreDump, type CoreDump } from './core-dump';
 import { restoreSpans, writtenSpans, type RunMarks, type Span } from './reset';
 import {
@@ -152,7 +153,9 @@ let coreDump: CoreDump | null = null;
  *    is checked: the dump has to fill the Memory exactly, or live TeX state would start at zero, a
  *    corruption that would surface much later as garbage output, so it fails here instead;
  *  - the bundled TeX files stay base64 text until TeX first asks for one, when that one is decoded
- *    and inflated, and library.ts keeps it inflated for the rest of the worker's life.
+ *    and inflated, and library.ts keeps it inflated for the rest of the worker's life;
+ *  - once tex.wasm is compiled, a loop of known cost is timed, to say whether WebAssembly runs with a
+ *    JIT here, which Lockdown Mode on an iPhone turns off (./jit, internal/DECISIONS.md D33).
  */
 async function boot(assets: EngineAssets): Promise<BootTimings> {
 	const started = performance.now();
@@ -175,14 +178,16 @@ async function boot(assets: EngineAssets): Promise<BootTimings> {
 	coreDump = dump;
 	library.setBundledFiles(new Map(Object.entries(assets.files)), (b64: string) => ungzip(fromBase64(b64)));
 	const done = performance.now();
+	const jit = probeJit();
 
 	return {
 		decodeMs: Math.round(decoded - started),
 		inflateMs: Math.round(ready - decoded),
 		compileMs: Math.round(done - ready),
-		totalMs: Math.round(done - started),
+		totalMs: Math.round(performance.now() - started),
 		nativeInflate: inflated.native,
 		nativeBase64: typeof nativeFromBase64 === 'function',
+		jit,
 	};
 }
 
