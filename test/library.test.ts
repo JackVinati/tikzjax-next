@@ -450,6 +450,11 @@ describe('the job file a saved run stands for', () => {
 		for (const c of 'so far') library.printChar(log, c.charCodeAt(0));
 		const state = library.captureHostState();
 		expect(library.hostStateBytes(state)).toBe('so far'.length);
+		// Not the job's own text, which a run that resumes is always given anew: kept, it was the
+		// saving diagram's whole input twice, outside what the budget counts.
+		expect(state.filesystem['input.tex']).toEqual(new Uint8Array(0));
+		expect(state.files.find((f) => f.filename === 'input.tex')?.content).toEqual(new Uint8Array(0));
+		expect(state.files.find((f) => f.filename === 'input.tex')?.position2).toBe('pre'.length);
 		// The run that saved goes on writing; what was saved does not change.
 		for (const c of ', and on') library.printChar(log, c.charCodeAt(0));
 		library.deleteEverything();

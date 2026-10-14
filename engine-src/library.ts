@@ -420,10 +420,24 @@ export interface HostState {
 const copyOfFile = (f: TexFile): TexFile =>
 	f.written && f.content ? { ...f, content: f.content.slice(0, Math.max(f.position ?? 0, 0)) } : { ...f };
 
-/** This run's host state, as \tikzjaxsnapshot found it. */
+/**
+ * This run's host state, as \tikzjaxsnapshot found it. Without the text of the job's own file, the
+ * one watchJobFile watches: restoreHostState is always given that anew, the diagram's that resumes,
+ * and keeping the saving diagram's, twice, held its whole input beyond what the saved runs' budget
+ * counts, an inline table of data and all, for as long as the run was kept.
+ */
 export const captureHostState = (): HostState => ({
-	files: files.map(copyOfFile),
-	filesystem: { ...filesystem },
+	files: files.map((f) =>
+		f.filename === jobFile && !f.written && f.content !== undefined
+			? { ...f, content: new Uint8Array(0) }
+			: copyOfFile(f),
+	),
+	filesystem: Object.fromEntries(
+		Object.entries(filesystem).map(([name, bytes]) => [
+			name,
+			name === jobFile ? new Uint8Array(0) : bytes,
+		]),
+	),
 	inputBuffer,
 	consoleBuffer,
 });
@@ -435,7 +449,8 @@ export const hostStateBytes = (state: HostState): number =>
 /**
  * Put back a captured host state, for a run that starts from the memory saved with it. `inputs`
  * replaces the text of files TeX is reading, by name: the job's file, whose text past the saved line
- * is the new diagram's. Each file's entry keeps the place TeX had reached in it.
+ * is the new diagram's, and which it must hold, as the state holds none (captureHostState). Each
+ * file's entry keeps the place TeX had reached in it.
  */
 export const restoreHostState = (state: HostState, inputs: Readonly<Record<string, Uint8Array>>) => {
 	files = state.files.map((f) => {
