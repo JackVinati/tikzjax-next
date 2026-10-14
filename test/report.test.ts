@@ -298,6 +298,10 @@ describe('the text the diagnostics view copies', () => {
 		expect(line({ available: false, read: true, runs: 0, bytes: 0, errors: 2 })).toEqual([
 			'Stored preambles: unavailable, 2 storage errors',
 		]);
+		// Off: the store is never read that session, and is not "not read yet".
+		expect(line({ available: true, read: false, runs: 0, bytes: 0, errors: 0, off: true })).toEqual([
+			'Stored preambles: off',
+		]);
 		expect(line(null)).toEqual([]);
 	});
 

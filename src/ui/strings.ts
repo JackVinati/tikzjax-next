@@ -222,14 +222,18 @@ export const STRINGS = {
 	reportPreamblesUnavailable: (errors: number) => `Stored preambles: unavailable${storageErrors(errors)}`,
 	/** Before the engine has first started this session, when what is stored has not been read. */
 	reportPreamblesUnread: 'Stored preambles: not read yet, until the engine starts',
+	/** Settings → Saved preambles is off: nothing is stored, read or sent. */
+	reportPreamblesOff: 'Stored preambles: off',
 	reportQueue: (depth: number) => `Queue depth: ${depth}`,
 	reportRenders: (count: number) => `Recent renders, newest first: ${count}`,
 	reportTier: (tier: string) => `from ${tier}`,
 	reportAgo: (seconds: number) => `${seconds} s ago`,
 
 	// Cache.
-	cacheStats: (count: number, mb: string) => `${count} diagrams, ${mb}`,
-	cacheCleared: 'Cleared the diagram cache.',
+	/** Clearing deletes the stored preambles too (cache/runs.ts), which the setting says. */
+	cacheStats: (count: number, mb: string) =>
+		`${count} diagrams, ${mb}. Clearing also deletes the stored preambles.`,
+	cacheCleared: 'Cleared the diagram cache and the stored preambles.',
 	legacyImported: (count: number, mb: string) =>
 		`Imported ${count} diagrams (${mb}) from the previous plugin.`,
 } as const;

@@ -70,6 +70,11 @@ export interface StoredRunStats {
 	bytes: number;
 	/** Opens, reads and writes the browser refused this session, and runs that did not read back. */
 	errors: number;
+	/**
+	 * Saved preambles are turned off (Settings → Saved preambles), so that nothing is read, kept or
+	 * sent: said by the plugin, which has the switch.
+	 */
+	off?: boolean | undefined;
 }
 
 export interface RunStoreOptions {

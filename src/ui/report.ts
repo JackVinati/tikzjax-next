@@ -156,6 +156,8 @@ export function jitOf(engine: EngineReport): boolean | null {
 
 /** What is stored of saved preambles, as a line of the view and of the copied text. */
 export function preamblesLine(stats: StoredRunStats): string {
+	// Off, nothing is read: the store is never read that session, and would say "not read yet".
+	if (stats.off === true) return STRINGS.reportPreamblesOff;
 	if (!stats.available) return STRINGS.reportPreamblesUnavailable(stats.errors);
 	return stats.read
 		? STRINGS.reportPreambles(stats.runs, mb(stats.bytes), stats.errors)
