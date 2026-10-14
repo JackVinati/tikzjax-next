@@ -362,8 +362,9 @@ describe('preflight', () => {
 
 		it('retains the measured distinction for Latin-1 and native punctuation', () => {
 			expect(preflight('\\node (café) {中文};', baked(), caps())).toEqual([]);
-			const found = preflight('\\node (Müller) {45°};', baked(), caps());
-			expect(found[0]?.message).toContain('U+00FC');
+			const found = preflight('\\node (Müller ¥5) {45°};', baked(), caps());
+			expect(found[0]?.message).toContain('U+00A5');
+			expect(found[0]?.message).not.toContain('U+00FC');
 			expect(found[0]?.message).not.toContain('U+00B0');
 		});
 	});

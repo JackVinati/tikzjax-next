@@ -9,6 +9,15 @@
  */
 
 import { isNativeUnicode } from '../src/source/native-unicode';
+import { isTs1Symbol } from './ts1-shim';
+
+/**
+ * What the engine draws without the bridge: ASCII, what the scan measured native on the bare
+ * engine, and what ./ts1-shim redefines into Computer Modern. The scan measures the bare engine,
+ * which cannot draw the shim's symbols, so ° × ± µ £ € © and the rest are not in its table, and
+ * bridging them would take them out of Computer Modern and set each in a sans-serif em of its own.
+ */
+const drawnByEngine = (cp: number): boolean => cp <= 0x7f || isNativeUnicode(cp) || isTs1Symbol(cp);
 
 export interface UnicodeBridge {
 	source: string;
@@ -43,7 +52,7 @@ export function bridgeUnicode(source: string): UnicodeBridge {
 		}
 
 		const cp = source.codePointAt(i) ?? 0;
-		if (cp <= 0x7f || isNativeUnicode(cp)) {
+		if (drawnByEngine(cp)) {
 			const length = cp > 0xffff ? 2 : 1;
 			encoded += source.slice(i, i + length);
 			i += length;
@@ -54,7 +63,7 @@ export function bridgeUnicode(source: string): UnicodeBridge {
 		let count = 0;
 		while (i < source.length) {
 			const next = source.codePointAt(i) ?? 0;
-			if (next <= 0x7f || isNativeUnicode(next)) break;
+			if (drawnByEngine(next)) break;
 			i += next > 0xffff ? 2 : 1;
 			count++;
 		}
@@ -101,7 +110,10 @@ export function restoreUnicode(svg: string, runs: readonly string[]): string {
 			const family = /\sfont-family="[^"]*"/.test(centred)
 				? centred.replace(/\sfont-family="[^"]*"/, ' font-family="sans-serif"')
 				: centred.replace(/>$/, ' font-family="sans-serif">');
-			return `<g data-tikzjax-unicode="${rawId}" data-quad="${rawQuad}pt">${family}${escapeXml(text)}</text></g>`;
+			// The marker goes with the proxies. It lives only between dvi2html and here, and the
+			// sanitizer's allowlist has no data-* attributes: it would report every bridged run as
+			// removed active content under the diagram.
+			return `${family}${escapeXml(text)}</text>`;
 		},
 	);
 }

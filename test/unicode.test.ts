@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TS1_SYMBOLS } from '../engine-src/ts1-shim';
 import { bridgeUnicode, restoreUnicode } from '../engine-src/unicode';
 
 describe('8-bit TeX Unicode bridge', () => {
@@ -32,10 +33,18 @@ describe('8-bit TeX Unicode bridge', () => {
 		expect(bridgeUnicode(source)).toEqual({ source, preamble: '', runs: [] });
 	});
 
-	it('bridges unsupported Latin-1 while retaining native characters between runs', () => {
-		const result = bridgeUnicode('\\node {Müller 45° äöü ×};');
-		expect(result.runs).toEqual(['ü', '°', 'äöü', '×']);
-		expect(result.source.match(/\\hbox to1em/g)).toHaveLength(6);
+	it('leaves what the engine or the TS1 shim draws, and bridges the rest of Latin-1', () => {
+		const result = bridgeUnicode('\\node {Müller 45° äöü × Łódź £5 ¥5 ‰};');
+		expect(result.runs).toEqual(['¥', '‰']);
+		expect(result.source).toContain('Müller 45° äöü × Łódź £5 ');
+		expect(result.source.match(/\\hbox to1em/g)).toHaveLength(2);
+	});
+
+	it('never bridges a character the TS1 shim draws', () => {
+		for (const { codepoint } of TS1_SYMBOLS) {
+			if (codepoint === undefined) continue;
+			expect(bridgeUnicode(String.fromCodePoint(codepoint)).runs, codepoint.toString(16)).toEqual([]);
+		}
 	});
 
 	it('leaves Unicode macro names alone after an odd number of backslashes', () => {
@@ -54,7 +63,7 @@ describe('8-bit TeX Unicode bridge', () => {
 			'</g></svg>';
 
 		expect(restoreUnicode(svg, ['开始'])).toBe(
-			'<svg><g data-tikzjax-unicode="0" data-quad="10.0pt"><text x="22" y="34" font-family="sans-serif" font-size="10" fill="#c00" text-anchor="middle">开始</text></g></svg>',
+			'<svg><text x="22" y="34" font-family="sans-serif" font-size="10" fill="#c00" text-anchor="middle">开始</text></svg>',
 		);
 	});
 
@@ -62,9 +71,7 @@ describe('8-bit TeX Unicode bridge', () => {
 		const marker =
 			'<g data-tikzjax-unicode="0" data-quad="10pt"><text x="0" font-family="cmr10" font-size="10">M</text></g>';
 		expect(restoreUnicode(marker + marker, ['Ω'])).toBe(
-			'<g data-tikzjax-unicode="0" data-quad="10pt"><text x="5" font-family="sans-serif" font-size="10" text-anchor="middle">Ω</text></g>'.repeat(
-				2,
-			),
+			'<text x="5" font-family="sans-serif" font-size="10" text-anchor="middle">Ω</text>'.repeat(2),
 		);
 	});
 

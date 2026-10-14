@@ -328,18 +328,20 @@ for (const twoPass of [false, true]) {
 		assert.equal(reply.type, 'ok', reply.message);
 		assert.equal(reply.firstError, undefined);
 		if (twoPass) assert.ok(reply.log.some((line) => line.includes('(tikzjax) second pass:')));
-		for (const label of ['开始', 'Привет', '😀', 'äöü', '°', '×', 'Ωμέγα', '中文'])
-			assert.ok(reply.svg.includes(label), label);
+		// äöü, 45° and × stay with the engine and the TS1 shim, in Computer Modern; only what neither
+		// draws comes back as sans-serif text, and no marker is left for the sanitizer to strip.
+		assert.ok(!reply.svg.includes('data-tikzjax-unicode'), 'a marker is left in the SVG');
 		const doc = new window.DOMParser().parseFromString(reply.svg, 'image/svg+xml');
 		assert.equal(doc.documentElement.localName, 'svg');
 		assert.equal(doc.querySelector('parsererror'), null);
-		const markers = doc.querySelectorAll('g[data-tikzjax-unicode]');
-		assert.equal(markers.length, 10);
-		for (const marker of markers) {
-			assert.equal(marker.children.length, 1);
-			assert.equal(marker.firstElementChild.localName, 'text');
-			assert.equal(marker.firstElementChild.getAttribute('text-anchor'), 'middle');
-			assert.ok(!/[\uF000-\uF8FF]/u.test(marker.textContent), 'leftover proxy glyph');
+		const restored = [...doc.querySelectorAll('text[font-family="sans-serif"]')];
+		assert.deepEqual(
+			restored.map((text) => text.textContent),
+			['开始', 'Привет', '😀', 'Ωμέγα', '中文', '中文', '中文'],
+		);
+		for (const text of restored) {
+			assert.equal(text.getAttribute('text-anchor'), 'middle');
+			assert.ok(!/[\uF000-\uF8FF]/u.test(text.textContent), 'leftover proxy glyph');
 		}
 		writeFileSync(join(RESULTS, `unicode-labels-${twoPass ? 'two' : 'one'}-pass.svg`), reply.svg);
 		console.log(`OK    Unicode labels (${twoPass ? 'two' : 'one'} pass)`);
