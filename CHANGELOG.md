@@ -5,11 +5,27 @@ top of its notes on GitHub, and will not publish a version that has none.
 
 ## 0.2.1-beta.1 — 2026-10-14
 
-- Updating from 0.2.0 recompiles nothing: every diagram 0.2.0 cached is shown from the cache, as
-  before. Updating from 0.1.x compiles every cached diagram once more, the next time it is shown, as
-  0.2.0 did. From this release on, the cache is tied to what the engine draws rather than to the
-  exact build of it, so a release that only makes the engine faster no longer compiles every cached
-  diagram once more. A release that changes what diagrams look like still does, and says so here.
+- Updating from 0.2.0 recompiles only the diagrams that contain a character the engine has no font
+  for, such as Chinese, Greek or Cyrillic, so that their labels show it (see the next point); every
+  other diagram 0.2.0 cached is shown from the cache, as before. Updating from 0.1.x compiles every
+  cached diagram once more, the next time it is shown, as 0.2.0 did. From this release on, the cache
+  is tied to what the engine draws rather than to the exact build of it, so a release that only
+  makes the engine faster no longer compiles every cached diagram once more. A release that changes
+  what diagrams look like still does, and says so here.
+- Labels in Chinese, Greek, Cyrillic, Arabic, Hebrew, Thai, Devanagari, IPA and emoji are drawn.
+  The engine has no fonts for them, so TeX sets each character as a box one em wide, and the
+  plugin writes the character over it in your system's sans-serif font; nodes and arrows are
+  placed around it as around any other text. Until now TeX left each one out with "Unicode
+  character … not set up for use with LaTeX". `¥` `¢` `‰` `½` `№` typed in a label, which made the
+  whole diagram fail, are drawn the same way. In a `text width` node or a `\parbox` the text
+  wraps: Chinese and Japanese between characters, though never before closing punctuation, and
+  other scripts where a space is typed. Names in these scripts, of nodes, coordinates, styles,
+  colours and `\label`s, work as they did in 0.2.0. The README lists what the text drawn this way
+  cannot do. From pull request #2.
+- Pre-flight no longer warns about characters the engine cannot typeset, in a label or in a name:
+  the engine, its stand-ins for `°` `×` `£` `€` and the rest, or the sans-serif text above now draw
+  every one of them, and names in any script work since 0.2.0. In maths, TeX's own `$\alpha$`
+  still gives Computer Modern's α, where a typed `α` is drawn upright in sans-serif.
 - The diagnostics view shows the rest of a diagram's wait: how long it waited between coming into
   view and being handed to the queue, how long it took to be drawn in the note once its SVG was
   ready, and the whole time from coming into view to drawn. It also says how many times the engine

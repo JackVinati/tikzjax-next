@@ -1,6 +1,4 @@
 import type { BakedOptions, Diagnostic, EngineCapabilities } from '../types';
-import { isTs1Symbol } from '../../engine-src/ts1-shim';
-import { isNativeUnicode } from './native-unicode';
 
 /**
  * Pre-flight source lint. See internal/DESIGN.md §7.6.
@@ -13,9 +11,7 @@ import { isNativeUnicode } from './native-unicode';
  *
  * Pure by construction: no DOM, no clock, no engine. Everything it knows about the engine arrives
  * in `caps`, which is generated from the built image (protocol.ts `EngineInventory`) rather than
- * hand-maintained, so the hints stay true across an engine bump instead of rotting into lies. The
- * one exception is which characters the engine can typeset, and it is generated too: measured from
- * the committed engine into ./native-unicode, which CI checks against that engine.
+ * hand-maintained, so the hints stay true across an engine bump instead of rotting into lies.
  *
  * Every Diagnostic is `kind: 'warning'`. Pre-flight NEVER blocks a render: the file list is an
  * inventory of what the virtual filesystem can serve, not a proof of what TeX will need — a
@@ -45,7 +41,6 @@ export function preflight(source: string, baked: BakedOptions, caps: EngineCapab
 		checkPgfplotsCompat(text, caps, out);
 	}
 
-	checkEncoding(text, out);
 	checkRedefinitions(text, out);
 
 	// Sorted by position so the warning strip reads in source order regardless of rule order.
@@ -309,85 +304,14 @@ function compareVersions(a: string, b: string): number {
 }
 
 // -------------------------------------------------------------------------------------------
-// Rule 5 — characters the engine cannot typeset. Upstream #19, #36, #53.
-
-/** Enough to identify the characters without turning the warning strip into a hex dump. */
-const MAX_REPORTED_CHARS = 5;
-
-/**
- * Characters above Latin-1 that this engine cannot typeset — which is not every character above
- * Latin-1.
- *
- * The source reaches TeX as UTF-8 (engine-src/worker.ts writes input.tex through TextEncoder), and
- * the format's LaTeX reads UTF-8 by default: it reassembles each character from its bytes and
- * builds a great many of them out of Computer Modern glyphs and accents — Dvořák, Erdős, İstanbul,
- * the ﬁ ligature, and the curly quotes, dashes and ellipsis that iOS substitutes as you type. This
- * rule used to warn about every codepoint above U+00FF on the theory that an 8-bit engine prints
- * them all as garbage, which put a false warning under those diagrams, and on a phone under nearly
- * every one.
- *
- * Which characters are native is measured from the engine build, not written down here:
- * scripts/scan-native-unicode.mjs renders each one through the committed engine and writes
- * ./native-unicode. It is the same reason `caps` is generated — a hand-kept list would be true of
- * one engine and quietly wrong after the next rebuild. What remains genuinely fails: TeX leaves
- * Greek, Cyrillic and CJK out with "Unicode character … not set up for use with LaTeX", and ¥, ¢
- * and ‰ compile into a TS1 font the SVG converter cannot draw, which loses the whole diagram.
- *
- * Most of TS1 is drawable all the same. °, ×, µ, → and most of the others in engine-src/ts1-shim.ts
- * have a glyph in the math fonts, £, € and © can be built from the Computer Modern text fonts, and
- * the worker redefines them that way for any block that can use one. The scan measures the bare
- * engine, which still cannot draw them, so the shim's table is consulted here as well: a warning on
- * 90° or £5 would be false.
- *
- * Latin-1 is covered too, because the scan measured it and most of it is native but not all.
- * Letters with a dieresis — ä, ö, ü — were an exception, and this rule had to warn that no
- * spelling of them worked, \"u included: the SVG converter skipped the last character of every
- * font, and in cmr10 that is the accent. The build patches the converter
- * (scripts/dvi2html-patch.mjs), and the scan measures them native like any other accented letter,
- * so they pass here without a rule of their own.
- */
-function checkEncoding(text: string, out: Diagnostic[]): void {
-	const offenders = new Map<string, number>();
-
-	let i = 0;
-	for (const ch of text) {
-		// `for..of` iterates codepoints, so an astral character is one entry rather than two
-		// surrogate halves — otherwise the report would name characters that do not exist.
-		const cp = ch.codePointAt(0) ?? 0;
-		if (cp > 0x7f && !isNativeUnicode(cp) && !isTs1Symbol(cp) && !offenders.has(ch)) offenders.set(ch, i);
-		i += ch.length;
-	}
-	if (offenders.size === 0) return;
-
-	const listed = [...offenders.keys()]
-		.slice(0, MAX_REPORTED_CHARS)
-		.map((ch) => `'${ch}' (${codepoint(ch)})`);
-	const rest = offenders.size - listed.length;
-	const first = [...offenders.values()][0] ?? 0;
-
-	out.push({
-		kind: 'warning',
-		message: `Characters this engine cannot typeset: ${listed.join(', ')}${rest > 0 ? ` and ${rest} more` : ''}.`,
-		line: lineOf(text, first),
-		hint: ENCODING_HINT,
-	});
-}
-
-/**
- * No inputenc here, although the old hint offered it: the format already reads UTF-8, and what
- * stops these characters is that nothing defines them, which inputenc does not change. The
- * examples are math commands this engine draws for characters it does not; °, × and → were the
- * examples once, and they need none now, nor do £ and €. Nor is there a word about the dieresis any
- * more: it renders, however it is written.
- */
-const ENCODING_HINT =
-	'The engine typesets most accented letters, curly quotes, dashes and symbols such as ° × → £ € itself, ' +
-	'but not these: TeX either leaves each one out with an error or produces a diagram the SVG converter ' +
-	'cannot draw. Where TeX has a math command, write that instead: $\\Omega$, $\\alpha$, $\\in$, $\\infty$.';
-
-function codepoint(ch: string): string {
-	return `U+${(ch.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}`;
-}
+// Rule 5, characters the engine cannot typeset (upstream #19, #36, #53), is gone. The engine
+// typesets what scan:native measured native, engine-src/ts1-shim.ts draws its symbols, and
+// engine-src/unicode.ts draws every other character in a label over a box TeX sets for it; and
+// since 0.2.0's \ifincsname a name in any script works (internal/DECISIONS.md D26). So every
+// character draws, and the rule went by choice: a warning under a diagram that draws is what 0.1.5
+// took away for the characters the engine typesets. One hint would still be true, and the README
+// gives it instead of a warning strip: a Greek letter or a maths symbol typed inside $…$ is drawn
+// upright in sans-serif, where TeX's own command ($\alpha$, $\in$, $\infty$) draws Computer Modern.
 
 // -------------------------------------------------------------------------------------------
 // Rule 6 — redefining a TeX or TikZ built-in. Upstream #96.

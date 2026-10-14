@@ -55,6 +55,7 @@ import type {
 	TexErrorKind,
 	WorkerRequest,
 } from './protocol';
+import { restoreUnicode } from './unicode';
 
 // --- base64 -------------------------------------------------------------------------------------
 
@@ -481,7 +482,7 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 	if (logging) library.setShowConsole();
 
 	// Both passes read this same text, so `bodyLine` holds for an `l.NN` from either.
-	const { text, bodyLine } = buildInput(source, options);
+	const { text, bodyLine, unicode } = buildInput(source, options);
 	const input = new TextEncoder().encode(text);
 	/** Where the time went, over both passes when there are two. */
 	const spent: RenderTimings = { resetMs: 0, texMs: 0, svgMs: 0, passes: 0 };
@@ -612,10 +613,29 @@ async function render(id: number, source: string, options: RenderOptions): Promi
 			timings,
 		};
 	}
+	// The characters ./unicode declared, written back over the boxes TeX set for them. When the
+	// SVG's groups do not pair up, which a raw special in the diagram can do, that is what the card
+	// says, with TeX's log: not that TeX produced nothing, and not an SVG with the text missing.
+	let svg: string;
+	try {
+		svg = restoreUnicode(reported.svg, unicode);
+	} catch (error) {
+		return {
+			type: 'error',
+			id,
+			kind: 'tex-error',
+			message: error instanceof Error ? error.message : String(error),
+			bodyLine,
+			log,
+			missing,
+			durationMs,
+			timings,
+		};
+	}
 	return {
 		type: 'ok',
 		id,
-		svg: reported.svg,
+		svg,
 		log,
 		missing,
 		durationMs,

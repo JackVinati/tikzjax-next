@@ -1,0 +1,10 @@
+\refstepcounter{equation}\label{unicode-test}
+\begin{tikzpicture}
+  \node[draw] at (0,0) {开始};
+  \node[draw] at (0,-1) {Привет};
+  \node[draw] at (0,-2) {😀};
+  \node[draw] at (0,-3) {äöü 45° ×};
+  \node[draw,rotate=20,text=red,font=\large] at (3,0) {Ωμέγα};
+  \foreach \x in {1,2} {\node at (3,-\x) {中文};}
+  \node[draw] at (0,-4) {\ref{unicode-test} \char65\char38 中文};
+\end{tikzpicture}

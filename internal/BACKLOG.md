@@ -74,10 +74,16 @@ What the second pass *does* fix is `\label`/`\ref`: a picture node reading `\ref
 one pass and `1` on two. It ships behind `%!tikz twopass`, and it is free on a block that cannot
 benefit, because the worker only runs the second pass when the first left something readable behind.
 
+**8. #19 / #36 / #53 render in labels, without a rebuilt engine.** The row says the CJK half is
+impossible on an 8-bit engine. It is, for TeX to typeset; but TeX can set a box where each
+character goes, and the worker writes the character over it in the platform's sans-serif font
+(`engine-src/unicode.ts`, internal/DECISIONS.md D26). Greek, Cyrillic, IPA, Arabic, Hebrew and
+emoji go the same way, and since 0.2.0's `\ifincsname` names in any script work too. What a
+rebuild would still add is those scripts in Computer Modern's design, and text that wraps.
+
 **What has not changed:** everything resting on the DVI being wrong before any JavaScript runs
 (#25, #54 — a contributor opened `input.dvi` in TeXShop and the bonds were already absent), on
-LuaTeX (#20), on an 8-bit engine (#19 CJK), or on Obsidian Publish running no community plugins
-(#37, #47).
+LuaTeX (#20), or on Obsidian Publish running no community plugins (#37, #47).
 
 Sorted by category, then severity (critical → high → medium → low).
 

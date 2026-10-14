@@ -124,6 +124,7 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] `scale=` and `width=` enlarge as well as shrink (0.1.5): the svg fills a wrapper the block sized, and the scale is in points
 - [x] No `String.prototype` methods on the hot path — Pretty BibTeX 2.0.0 monkey-patched `replaceAll` and silently killed both inversion and SVGO (#48). Enforced by a lint rule
 - [x] Fast mode as a defined preset: `svgo: off` + skip lint + priority boost; **never** skips sanitize or ids. It does not skip the measurement after all — the engine's frame is an inch short, so a fast diagram would be clipped — and the priority boost was only implemented in 0.1.5
+- [ ] **open** — a tikz-cd diagram with an empty cell, `A & B \\ & C`, fails in the SVG pipeline with "Opening and ending tag mismatch: svg line 1 and g": what dvi2html writes for it has as many `<g` as `</g>`, but two `<svg` and one `</svg>`. 0.2.0's worker writes the same bytes; two rows of one cell each, and a square with its four arrows, parse. Found while testing names in tikz-cd for 0.2.1. Read the DVI first, to tell TeX's grouping from the converter's
 
 ## 5 · Errors
 
@@ -171,7 +172,8 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] `°` `×` `→` `±` `µ`, siunitx's units and list bullets (0.1.5): TS1, which the converter cannot draw, so the worker redefines 23 TS1 text commands to math-font glyphs when a block can use them (`engine-src/ts1-shim.ts`)
 - [x] `Ł` and `ł` (0.1.5): dvi2html's glyph map had no entry for 302 characters its fonts have metrics for, among them the stroke LaTeX builds them with (character 32 of the roman, bold, slanted, italic and sans text fonts) and `£` in the italics, and failed with "Cannot read properties of undefined (reading 'toString')". Patched in the bundler to fall back to the codepoint BaKoMa's faces put every character at (`scripts/dvi2html-patch.mjs`, D11); the upstream fix belongs in its `tools/glyphs.js` or `src/html.ts`, and goes in the same PR as the TFM fix
 - [x] `£` `€` `©` `®` `ª` `º`, `\pounds`, `\copyright` and `\$` outside math (0.1.5): TS1 with no math stand-in, so the shim builds these seven commands from the Computer Modern text fonts, mostly as older LaTeX releases did: `£` and `$` are character 36 of cmu/cmti and cmr, `©` and `®` a letter in cmsy's large circle, `€` LaTeX's own `\tc@fake@euro`, `ª` `º` a raised underlined a and o, lowercase in small caps as TS1 sets them (`test/fixtures/tex/ts1-currency.tex`, `ts1-small-caps.tex`)
-- [ ] **open** — the rest of TS1 still fails, `¥` `¢` `‰` `½` `№` and `\textcircled` among it; pre-flight warns about the typed ones. Real TS1 needs tcrm metrics in the converter and a cm-super face
+- [x] Greek, Cyrillic, CJK, Arabic, Hebrew, IPA and emoji in labels (0.2.1, PR #2, D26): TeX sets a box one em wide for each character the engine cannot typeset, declared to LaTeX's UTF-8 input, and the worker writes the character over it in sans-serif (`engine-src/unicode.ts`). Names in those scripts work as they did in 0.2.0. Typed `¥` `¢` `‰` `½` `№` are drawn the same way. In a `text width` node or a `\parbox`, Chinese and Japanese break between characters, never before closing punctuation (`test/fixtures/tex/unicode-wrap.tex`)
+- [ ] **open** — the rest of TS1 still fails as commands, `\textyen`, `\textperthousand` and `\textcircled` among them. Real TS1 needs tcrm metrics in the converter and a cm-super face
 - [ ] **open** — add the glyph map fix to the prepared dvi2html PR (the TFM fix) and send it, and retire `scripts/dvi2html-patch.mjs` once a release carries both; its exactly-one guards will fail the build to say so
 
 ## 9 · Release gate
@@ -188,11 +190,12 @@ The manual matrix in DESIGN.md §10.4, in full. The ones that catch the most:
 - [ ] **iOS, 0.2.1's numbers**: the same 20-diagram note, from a cleared cache, on 0.2.0 and on a 0.2.1 beta. On 0.2.0 read each diagram's steps from the diagnostics view by hand, as in the 0.2.0 step above; that view does not show the wait before the queue, which was the debounce, 500 ms by configuration. On 0.2.1 copy them with the view's Copy button, and read the medians of `waited`, `engine start` and `seen to drawn` for the first five diagrams, and the engine starts this session. The 0.2.1 copy is the phone's baseline for everything 0.2.2 and 0.2.3 change. A beta cut at the commit that added the diagnostics, before the debounce change, would give 0.2.0's waits in the new view as well
 - [ ] **Switching notes on a cold engine, on the phone** (0.2.1, D25): with the engine stopped (30 s idle, or back from the background), open a note with diagrams that are not cached and switch to another such note at once. In the copied diagnostics the first note's diagrams say `cancelled`, or `ok` for one the engine had already taken, and the second note's first diagram shows `queue` near 0 ms rather than the time of a compile of the first note's
 - [ ] **Typing in a diagram, on a 1.7.2 install and on the current Obsidian** (0.2.1, D22): change a number in a diagram for a few seconds, in Live Preview with the same note in a second pane, and with a Reading view beside the editor. The diagnostics view must show one compile after each pause, not one per keystroke. And a note opened fresh must show `waited 0 ms`, or near it, on its diagrams
+- [ ] **Unicode labels on a phone, and an update from 0.2.0** (0.2.1, D26): the flowchart of `test/fixtures/tex/unicode-bridge-probe.tex`, a `text width` node of Chinese, and labels in Arabic and emoji, on the iPhone and on Android, in light and dark, and in a PDF export. Every character must be drawn in the system's sans-serif inside its node, and the Chinese wrapped inside its border. Cached under 0.2.0 first: after the update that note must compile again, and a note without such characters must not
 - [ ] **A diagram in a list item, on a 1.7.2 install**: open it in Live Preview, then in Reading view; the diagnostics view must show one compile and then the diagram coming from the cache, and Copy SVG with the cursor in it must work. The shared key rests on `getSectionInfo` framing Live Preview's code-block widget as it does in 1.14.4, the only version it was checked against
 
 Submitted to the community plugin browser on 2026-09-01 through Obsidian's developer portal. The automated review runs on every version and pulls a failing one from search within a day, so each release is held to it: 0.1.3 passed with zero errors and a byte-for-byte reproducible `main.js`.
 
-Open contributions: PR #2 (Unicode labels through an SVG bridge) — changes requested, see the review on the PR. To add to that review after 0.1.5: letters with a dieresis are native now and must not be bridged; the bridge has to skip both `isNativeUnicode()` (`src/source/native-unicode.ts`) and `isTs1Symbol()` (`engine-src/ts1-shim.ts`) code points; and the worker's input is assembled in `engine-src/document.ts` now, which is where a bridge would hook in.
+Open contributions: none.
 
 ---
 
@@ -205,8 +208,9 @@ Full reasoning in `internal/BACKLOG.md`. The short version:
   `@drgrice1/dvi2html` has a fixed font table covering Computer Modern only, and it is not
   extensible from outside — which is `\mathfrak` and `\mathscr` (#55 #84). siunitx's unit symbols
   (#113) were the third, and render since 0.1.5, drawn from the math fonts instead. The `patterns` driver gap (#59) is a missing pattern definition in the DVI, chemfig's
-  `\schemestart` (#25 #54) loses its bonds before any JavaScript runs, CJK (#19) is impossible on
-  an 8-bit engine, and LuaTeX-only packages (#20) stay LuaTeX-only.
+  `\schemestart` (#25 #54) loses its bonds before any JavaScript runs, and LuaTeX-only packages
+  (#20) stay LuaTeX-only. CJK (#19) and the other scripts the engine has no fonts for are drawn in
+  sans-serif over boxes TeX sets for them, since 0.2.1 (D26).
 - **13 issues close as answered or out of scope** — including Obsidian Publish (#37 #47: Publish
   runs no community plugins; finalize-to-attachment is the answer, and is better for visitors than
   a WASM TeX per page view) and the inline `$tikz:…$` renderer (#112).

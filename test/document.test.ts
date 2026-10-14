@@ -65,4 +65,25 @@ describe('buildInput', () => {
 		expect(expectBodyAt(SOURCE, options)).toBe(3);
 		expect(MISSING_PACKAGE).not.toContain('\n');
 	});
+
+	it('declares what the Unicode bridge draws, from the block and its preambles, ahead of them', () => {
+		const addToPreamble = '\\newcommand\\city{北京}';
+		const input = buildInput('\\node {开始 \\city};', { addToPreamble });
+		expect(input.unicode).toEqual([0x4eac, 0x5317, 0x59cb, 0x5f00]);
+		const first = input.text.split('\n')[0] ?? '';
+		expect(first.indexOf('\\DeclareUnicodeCharacter{5317}')).toBeGreaterThan(
+			first.indexOf(MISSING_PACKAGE),
+		);
+		expect(first.indexOf('\\DeclareUnicodeCharacter')).toBeLessThan(first.indexOf(addToPreamble));
+		expect(input.bodyLine).toBe(buildInput('\\node {a};', { addToPreamble }).bodyLine);
+		expect(buildInput(SOURCE, {}).unicode).toEqual([]);
+	});
+
+	it('keeps the preamble just above the block when the declarations take more than a line', () => {
+		const many = Array.from({ length: 150 }, (_, i) => String.fromCodePoint(0x4e00 + i)).join('');
+		const source = `\\begin{tikzpicture}\n\\node {${many}};\n\\end{tikzpicture}`;
+		expect(expectBodyAt(source, { addToPreamble: 'a\nb' })).toBe(4);
+		const { text, bodyLine } = buildInput(source, { addToPreamble: 'a\nb' });
+		expect(text.split('\n')[bodyLine - 3]).toMatch(/}}a$/);
+	});
 });

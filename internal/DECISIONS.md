@@ -1109,7 +1109,8 @@ The field now holds `OUTPUT_REVISION` (`src/cache/key.ts`), a string that moves 
 engine draws can change: the DVI TeX writes, the transcript the plugin reads its errors from, or the
 SVG the converter makes. Its first value is exactly the ENGINE_ID 0.2.0 shipped,
 `5e861510239768c57ca2965eb2329bd2bafc1370df4821cd8d3b7088ce60efde`, in the same place in the
-payload, so every key 0.2.0 derived is derived again and updating to 0.2.1 recompiles nothing.
+payload, so every key 0.2.0 derived is derived again and updating to 0.2.1 recompiles nothing, but
+for a block with a character the Unicode bridge draws, which 0.2.0 drew without it (D26).
 `test/key.test.ts` pins a key 0.2.0 derived, computed outside the implementation, and
 `test/processor.test.ts` that a block keeps its key whichever build of the engine is running.
 
@@ -1126,8 +1127,8 @@ What keeps the revision honest:
 - **The worker.** `REVISION.json` also records the ENGINE_ID the corpus was last checked against,
   and `test/engine-id.test.ts` builds the worker that ships and fails when it is another one. That
   is the moment the decision is made, by a person, because the corpus is 37 diagrams and a change
-  can alter what a diagram outside it draws. In 0.2.1 it is also the proof that the worker is
-  0.2.0's, byte for byte.
+  can alter what a diagram outside it draws. Through 0.2.1's first stage it was also the proof that
+  the worker was 0.2.0's, byte for byte; the Unicode bridge (D26) is the change that ended that.
 - **By hand.** Whenever the CHANGELOG says that diagrams draw differently, the revision moves, also
   when no fixture shows it: a package bundled that was missing, a fixed TeX file, a converter change
   for a glyph no fixture uses. CONTRIBUTING.md says so. The sha256 of the first worker that draws
@@ -1372,13 +1373,13 @@ How many (`engineCount` in `src/platform/budgets.ts`):
   tells the queue, an idle second worker goes at once, and a busy one when it has finished its job.
   The diagnostics say "stopped when the second engine was turned off".
 
-The worker is 0.2.0's, byte for byte: `test/engine-id.test.ts` builds the worker that ships and
-holds it to the ENGINE_ID recorded in `test/fixtures/golden/REVISION.json` (D20), so the pool
-changes nothing a diagram draws and nothing in anyone's cache. The preamble snapshot planned for
-0.2.3 keeps its saved preambles per worker, and with two workers only 32 of 52 possible resumes
-happened in a note of 74 diagrams, every fixture twice, with a prototype of the snapshot (measured on
-2026-10-14 in the same harness); it needs each
-diagram sent to the worker that holds its preamble, which is for that release.
+The pool leaves the worker as it was: when it came, `test/engine-id.test.ts` built the worker that
+ships and held it to 0.2.0's ENGINE_ID, recorded in `test/fixtures/golden/REVISION.json` (D20), so
+the pool changes nothing a diagram draws and nothing in anyone's cache. The preamble snapshot
+planned for 0.2.3 keeps its saved preambles per worker, and with two workers only 32 of 52 possible
+resumes happened in a note of 74 diagrams, every fixture twice, with a prototype of the snapshot
+(measured on 2026-10-14 in the same harness); it needs each diagram sent to the worker that holds
+its preamble, which is for that release.
 
 Tests: `test/worker-host.test.ts` (the pool as the prototype had it, and idling down together, one
 worker with a pool of one, a crash, the pool shrinking and growing, a second worker that fails to
@@ -1424,6 +1425,119 @@ Tests: `test/queue.test.ts` (dropped before the engine has it; kept once it has 
 caller wants it; a caller asking again at once gets a job of its own; the randomised interleavings
 with a startup), `test/worker-host.test.ts` (the start kept for a cancel, stopped for a stall),
 `test/machine.test.ts` and `test/render-child.test.ts`.
+
+---
+
+## D26 — What the engine cannot typeset is drawn over a box TeX sets for it
+
+**Amends D8 and the backlog, which leave Greek, Cyrillic and CJK to a Unicode engine, builds on
+D16's `\ifincsname`, and amends D20's "updating to 0.2.1 recompiles nothing" for the blocks it
+draws in. It came as pull request #2.**
+
+The engine's fonts are Computer Modern, and its LaTeX has a definition for few characters beyond
+Latin. Every other one TeX leaves out with "Unicode character … not set up for use with LaTeX", and
+`¥` `¢` `‰` `½` `№`, which LaTeX sets in TS1, lose the whole diagram in the SVG converter. A Unicode
+engine, or fonts and metrics for each script, are far off. The pull request draws them another way:
+TeX sets each such character as a box one em wide, between two raw-SVG specials that mark it with
+the character and the font's quad, and the worker writes the character over the box as a `<text>`
+in the platform's `sans-serif`, centred in the space TeX set aside (`engine-src/unicode.ts`). TeX
+keeps the layout: a node is as wide, and an arrow ends where it would, as for any text of that
+width.
+
+As written, the bridge replaced each run of such characters in the block's source with a call to a
+macro that set the boxes. On 0.2.0 that broke what the engine already did. With `\ifincsname`, a
+UTF-8 character in LaTeX is a macro that gives its own bytes where LaTeX makes a name of it (D16), so
+on 0.2.0 a node, coordinate, style or colour named in Chinese or Greek, a `\label` key and its
+`\ref`, `\csname 开始\endcsname`, `\def\开始` and `\edef` all work. Rebased onto 0.2.0 with nothing
+else changed, the bridge put its boxes inside those names. Of 34 cases that 0.2.0's worker draws
+without a TeX error, names, labels and symbols in Chinese, Greek, accented Latin and TS1 among them,
+it changed 24: 18 failed with "Missing \endcsname inserted", one drew with that error,
+`\detokenize{开始}` printed the macro, two `\ifx` tests between equal texts came out unequal, a
+preamble's own `\DeclareUnicodeCharacter` was ignored, and the TS1 symbols left Computer Modern.
+
+So the bridge leaves the source alone, and declares each character it draws to LaTeX's UTF-8 input,
+`\DeclareUnicodeCharacter{5F00}{\tikzjaxUnicodeBridge{24320}}`, which changes only what the
+character typesets. All 34 cases come out byte for byte as on 0.2.0. Of the 46 in which 0.2.0 left
+characters out with an error or lost the whole diagram, 43 draw them, and in the other 3, where the
+characters stand outside the picture or in `\nullfont`, the diagram is drawn without them and
+without an error. Declaring reaches what replacing could not: a character in a preamble file or in a
+macro's body, `\verb`, pgfplots' tick labels.
+
+It declares what nothing else draws: not ASCII, not what `scan:native` measured native, and not what
+the TS1 shim draws (0.1.5). The scan measures the bare engine, which cannot draw the shim's symbols,
+so without that exception ° × ± µ £ € © and the rest came out of Computer Modern again, each in a
+sans-serif em. The declarations go on the input's first line after the shim, ahead of everything the
+user gave, so a preamble that declares a character of its own still wins, and a hundred to a line:
+TeX reads a line into a buffer that a line of 250 KB fits and one of 300 KB overflows, and 6,000
+declarations on one line came to 348 KB. A block with none of these characters gets nothing, so its
+input, its DVI and its SVG are what they were; the 37 fixtures that were there give the same DVI,
+transcript and SVG (D13).
+
+Each character is a marker of its own. The worker joins the ones TeX set side by side, on one
+baseline in one font and size, into one `<text>`, and across a gap of up to half an em, a space, so
+that a phrase in Arabic or Hebrew is one string the browser orders right to left; drawn a word at a
+time in TeX's order, its words came out reversed. The marker goes with the box: the sanitizer's
+allowlist (0.1.5) has no `data-*` attributes and would report every character as removed active
+content. A box that drew no glyph, set in `\nullfont` or outside the picture where dvi2html writes
+HTML, is dropped, as TeX drops a character it has no font for, where the pull request lost the whole
+diagram. An SVG whose groups no longer pair up, which a raw special can cause, is an error with TeX's
+log, of the kind whose card shows its message; it was sent as an empty output, whose card says the
+block is probably empty. A `<g/>` is not counted, since it opens and closes nothing.
+
+TeX breaks a line only at glue or a penalty, and there is none between two boxes, so as the pull
+request had it a line of Chinese in a `text width` node never broke; the plugin's SVG does not clip,
+and the line ran past the node's border and over what stood beside it. A Han character, a kana, a
+bopomofo letter and a fullwidth letter or digit are declared with a glue of no width in front of
+them, in horizontal mode only; an opening bracket with a `\nobreak` after it as well, because a glue
+after a penalty is no place to break; and closing punctuation, small kana, the iteration marks and
+the prolonged sound mark with neither. So no line begins with closing punctuation or a small kana,
+and none ends with an opening bracket. Korean is written with spaces and breaks there, like every
+other script. The glue adds no width and writes nothing to the DVI. The box also starts a paragraph
+where a letter would (`\leavevmode`): at the start of a `\parbox`, a minipage or a `p` column TeX is
+in vertical mode, where each box had gone on a line of its own, and a word in Cyrillic in a
+`\parbox` came out one letter under another. Through the worker, before and after, on the 184 cases
+the review and the rebase of the pull request had collected, the only SVGs that changed, besides
+the one with a `<g/>`, were those with Chinese in a `text width` node, now wrapped; a node
+without `text width`, maths, Korean and text outside the picture came out byte for byte the same.
+`unicode-wrap` in the golden corpus holds the breaks, and verify-worker the text of each line.
+
+What it costs, measured in Node 22.19 on the Windows desktop of D14 through the worker with the line
+breaks above, the shortest of three runs, against the same nodes holding as many `M`s, as TeX's
+time, the SVG converter's, and the worker's whole run up to the converter's SVG: 1,000 different CJK
+characters in 20 nodes, 127 ms against 73, 22 against 2, and 157 against 80; 3,000 in 60 nodes, 355
+against 190, 45 against 5, and 407 against 199; 6,000 in 120 nodes, 666 against 358, 81 against 10,
+and 754 against 373, about twice the time; 250 nodes of the same two characters, 714 against 692, 19
+against 13, and 738 against 712. Finding the characters in 147 KB of source takes 0.8 ms, and
+writing back the flowchart fixture's 21 markers 0.04 ms.
+
+`unicode-bridge-probe`, the flowchart of the report the pull request began with, and
+`unicode-names`, names in Chinese and Greek beside labels in Chinese and Cyrillic, are in the golden
+corpus with the boxes and markers as TeX and dvi2html leave them. smoke writes the text back as the
+worker does, so verify-worker compares the shipped worker with them byte for byte, and its fixtures
+in `test/fixtures/worker` check the runs that come back, on one pass and two, and the error. Chrome's
+XML parser accepts every SVG the bridge wrote in those cases, and the plugin's pipeline keeps every
+restored text with nothing to report. What the bridge cannot do is in the README: the text is not
+Computer Modern and takes an em a character, bold and italic are lost, a separate combining accent
+is drawn beside its letter, and text outside the picture is not drawn.
+
+**What it does to the cache.** 0.2.0 cached what it drew of a block with such a character: TeX left
+the character out with an error and drew the rest, and a diagram TeX drew after an error is cached
+(D20). The key 0.2.1 derives for that block is the key 0.2.0 stored it under (D20), so the drawing
+without the characters, with TeX's message on it, would have gone on being shown until the block was
+edited. Moving `OUTPUT_REVISION` would have compiled every cached diagram once more, for the few
+that have such a character. Instead a block whose TeX input has a character the bridge declares gets
+one more field in its key (`usesUnicodeBridge` in `src/cache/key.ts`), and no other block does.
+Everything the worker gives TeX is among the key's inputs: the block, and the packages with their
+options, the libraries, the preamble's text and the border that `baked` holds. The main thread reads
+them with the bridge's own test, `engine-src/bridged.ts`, which leaves out the TS1 shim's symbols
+and the native table's characters as the worker does; the paths in `depHashes` are not read, since
+TeX never sees them. For every other block the bridge adds nothing to TeX's input and changes
+nothing in the SVG, and the 37 fixtures that were in the golden corpus come out byte for byte as
+they did, so its key is 0.2.0's and nothing else compiles again. `test/key.test.ts` pins a key of
+each kind, computed outside the implementation. Reading a block of 150,000 ASCII characters to the
+end takes about 1 ms in Node 22.19 on the desktop of D14, and a block of a few lines well under a
+microsecond. A later change to what the bridge draws moves `OUTPUT_REVISION` like any change of
+output: the bridge's fixtures are recorded in `REVISION.json` under it.
 
 ---
 

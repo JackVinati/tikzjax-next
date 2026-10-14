@@ -18,6 +18,8 @@ import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 
 import { join, basename } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import assert from 'node:assert/strict';
+import { Window } from 'happy-dom';
 import { buildWorker, engineIsBuilt } from './engine-assets.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -313,4 +315,114 @@ if (names.includes('broken')) {
 	);
 }
 
+// What the bridge writes back, checked as text rather than as bytes, on one pass and on two. The
+// fixtures in test/fixtures/tex with Unicode in them are compared above, with smoke, which puts the
+// same text back; these are for what that comparison cannot say: which runs come back, how they are
+// placed, and an error. A worker with the bridge reverted must fail this check.
+const window = new Window();
+for (const twoPass of [false, true]) {
+	const reply = await send({
+		type: 'render',
+		id: ++id,
+		source: readFileSync(join(root, 'test', 'fixtures', 'worker', 'unicode-labels.tex'), 'utf8'),
+		options: { captureLog: true, twoPass },
+	});
+	try {
+		assert.equal(reply.type, 'ok', reply.message);
+		assert.equal(reply.firstError, undefined);
+		if (twoPass) assert.ok(reply.log.some((line) => line.includes('(tikzjax) second pass:')));
+		// äöü, 45° and × stay with the engine and the TS1 shim, in Computer Modern; only what neither
+		// draws comes back as sans-serif text, and no marker is left for the sanitizer to strip.
+		assert.ok(!reply.svg.includes('data-tikzjax-unicode'), 'a marker is left in the SVG');
+		const doc = new window.DOMParser().parseFromString(reply.svg, 'image/svg+xml');
+		assert.equal(doc.documentElement.localName, 'svg');
+		assert.equal(doc.querySelector('parsererror'), null);
+		const restored = [...doc.querySelectorAll('text[font-family="sans-serif"]')];
+		assert.deepEqual(
+			restored.map((text) => text.textContent),
+			['开始', 'Привет', '😀', 'Ωμέγα', '中文', '中文', '中文'],
+		);
+		for (const text of restored) {
+			assert.equal(text.getAttribute('text-anchor'), 'middle');
+			assert.ok(!/[\uF000-\uF8FF]/u.test(text.textContent), 'leftover proxy glyph');
+		}
+		// Where each run is put back, to a thousandth of a point: centred in the boxes TeX set, on
+		// their baseline, in their size and colour. The golden corpus holds the boxes, not this. The
+		// last \u4E2D\u6587 follows a \ref, which reads ?? on one pass and 1 on two.
+		const at = (text, name) => Number(Number(text.getAttribute(name)).toFixed(3));
+		assert.deepEqual(
+			restored.map((text) => [
+				text.textContent,
+				at(text, 'x'),
+				at(text, 'y'),
+				text.getAttribute('font-size'),
+				text.getAttribute('fill'),
+			]),
+			[
+				['\u5F00\u59CB', -25.404, -53.898, '10', 'black'],
+				['\u041F\u0440\u0438\u0432\u0435\u0442', -5.404, -53.898, '10', 'black'],
+				['\uD83D\uDE00', -30.404, -53.898, '10', 'black'],
+				['\u03A9\u03BC\u03AD\u03B3\u03B1', -6.029, -53.898, '12', '#ff0000'],
+				['\u4E2D\u6587', -25.404, -53.898, '10', 'black'],
+				['\u4E2D\u6587', -25.404, -53.898, '10', 'black'],
+				['\u4E2D\u6587', twoPass ? -1.792 : 4.069, -53.898, '10', 'black'],
+			],
+		);
+		writeFileSync(join(RESULTS, `unicode-labels-${twoPass ? 'two' : 'one'}-pass.svg`), reply.svg);
+		console.log(`OK    Unicode labels (${twoPass ? 'two' : 'one'} pass)`);
+	} catch (error) {
+		failures++;
+		console.error(`FAIL  Unicode labels: ${error.message}`);
+	}
+}
+// The text that comes back on each line where Chinese and Japanese wrap, in the golden fixture
+// that holds the breaks: no line begins with closing punctuation or a small kana, none ends with an
+// opening bracket, a node without `text width` keeps its one line, and a \parbox that begins with
+// Cyrillic is set as a paragraph, not a letter to a line.
+const wrapped = await send({
+	type: 'render',
+	id: ++id,
+	source: readFileSync(join(FIXTURES, 'unicode-wrap.tex'), 'utf8'),
+	options: { captureLog: true },
+});
+try {
+	assert.equal(wrapped.type, 'ok', wrapped.message);
+	const doc = new window.DOMParser().parseFromString(wrapped.svg, 'image/svg+xml');
+	assert.deepEqual(
+		[...doc.querySelectorAll('text[font-family="sans-serif"]')].map((text) => text.textContent),
+		[
+			'一二三四，',
+			'五六七八。',
+			'（九十）一',
+			'二三四',
+			'ちょっと',
+			'まってく',
+			'ださい',
+			'Это',
+			'длинный',
+			'текст',
+			'开始（不换行）',
+		],
+	);
+	console.log('OK    Unicode text wraps in a text width node and a \\parbox');
+} catch (error) {
+	failures++;
+	console.error(`FAIL  Unicode text wrapping: ${error.message}`);
+}
+const broken = await send({
+	type: 'render',
+	id: ++id,
+	source: readFileSync(join(root, 'test', 'fixtures', 'worker', 'unicode-broken-marker.tex'), 'utf8'),
+	options: { captureLog: true },
+});
+if (
+	broken.type !== 'error' ||
+	broken.kind !== 'tex-error' ||
+	!broken.message.includes('<g>') ||
+	!broken.log?.length
+) {
+	failures++;
+	console.error('FAIL  Broken Unicode markers must return an error with the TeX log.');
+} else console.log('OK    Broken Unicode markers report an error with the TeX log.');
+await window.happyDOM.close();
 process.exit(failures ? 1 : 0);

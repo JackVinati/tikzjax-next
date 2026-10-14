@@ -9,6 +9,7 @@
  * presentation) so it stays a fact rather than an intention.
  */
 
+import { hasBridgedCharacter } from '../../engine-src/bridged';
 import type { KeyInputs } from '../types';
 import { sha256Hex } from './sha256';
 
@@ -56,6 +57,40 @@ export const PIPELINE_REVISION = 2;
 export const OUTPUT_REVISION = '5e861510239768c57ca2965eb2329bd2bafc1370df4821cd8d3b7088ce60efde';
 
 /**
+ * A field of the key of a block whose TeX input has a character the Unicode bridge declares, and
+ * of no other block's (internal/DECISIONS.md D26).
+ *
+ * 0.2.1 draws those characters, where 0.2.0's TeX left each out with an error, and a diagram TeX
+ * drew after an error is cached (D20): without this, every such diagram 0.2.0 cached went on being
+ * shown without its characters until its block was edited. Moving OUTPUT_REVISION would have
+ * compiled every cached diagram once more, for the few with such a character; this moves only
+ * theirs. Every other block's input, DVI and SVG are what 0.2.0's worker made of them, so its key
+ * is what 0.2.0 derived. A later change to what the bridge draws moves OUTPUT_REVISION, as any
+ * change of output does: the golden corpus holds the bridge's fixtures to it like the others.
+ *
+ * It comes last, length-prefixed like the rest, so a payload with it reads as one more field than
+ * any payload without it, and no two inputs share a payload.
+ */
+const UNICODE_BRIDGE = 'unicode-bridge';
+
+/**
+ * Whether TeX's input for the block has a character the Unicode bridge declares. The worker makes
+ * that input of the block and of what the key's `baked` holds (engine-src/document.ts): the
+ * packages and their options, the libraries, the preamble's text and the border. `depHashes` only
+ * names files, which TeX does not read, so a preamble file with a path in Chinese moves nothing.
+ */
+export function usesUnicodeBridge({ normalizedSource, baked }: KeyInputs): boolean {
+	return [
+		normalizedSource,
+		baked.preamble,
+		baked.libraries,
+		baked.border ?? '',
+		...Object.keys(baked.packages),
+		...Object.values(baked.packages),
+	].some(hasBridgedCharacter);
+}
+
+/**
  * Fields are length-prefixed rather than joined with a separator.
  *
  * A separator has to be a byte no input can contain, and no such byte exists here: `baked.preamble`
@@ -76,7 +111,8 @@ export function deriveKey(i: KeyInputs): string {
 		field(i.normalizedSource) +
 		field(stableStringify(i.baked)) +
 		field(i.artifactRevision) +
-		field(stableStringify(i.pipeline));
+		field(stableStringify(i.pipeline)) +
+		(usesUnicodeBridge(i) ? field(UNICODE_BRIDGE) : '');
 
 	// 128 bits. Birthday collision at ~2^64 distinct diagrams; a vault holds ~10^4.
 	return sha256Hex(payload).slice(0, 32);

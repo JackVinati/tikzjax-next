@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { deriveKey, OUTPUT_REVISION, PIPELINE_REVISION } from '../src/cache/key';
+import { deriveKey, OUTPUT_REVISION, PIPELINE_REVISION, usesUnicodeBridge } from '../src/cache/key';
 import { legacyKey, md5Hex } from '../src/cache/legacy-key';
 import { sha256Hex } from '../src/cache/sha256';
 import type { BakedOptions, BlockOptions, KeyInputs, Presentation } from '../src/types';
@@ -236,7 +236,7 @@ describe('deriveKey', () => {
 	 * What 0.2.0 derived for these inputs from its engine's id, computed the same independent way as
 	 * the pin above. OUTPUT_REVISION took ENGINE_ID's place in the payload with ENGINE_ID's value, so
 	 * every diagram 0.2.0 cached is found under the key it was stored with, and updating recompiles
-	 * nothing (internal/DECISIONS.md D20).
+	 * nothing (internal/DECISIONS.md D20), but for a block the Unicode bridge draws in, below.
 	 *
 	 * Meant to fail when OUTPUT_REVISION moves: recompiling is then the point, and this goes.
 	 */
@@ -245,6 +245,45 @@ describe('deriveKey', () => {
 		expect(deriveKey({ ...INPUTS, outputRevision: OUTPUT_REVISION })).toBe(
 			'4eccbdf2d155bc36a84ea147b9a09a6d',
 		);
+		// Accented Latin, the TS1 shim's symbols and curly quotes are the engine's own: 0.2.0 drew them.
+		const native = '\\begin{tikzpicture}\\node {café 45° × £5 Dvořák};\\end{tikzpicture}';
+		expect(deriveKey({ ...INPUTS, outputRevision: OUTPUT_REVISION, normalizedSource: native })).toBe(
+			'bc3751b9ad277053ad19baf4dc361649',
+		);
+	});
+
+	/**
+	 * 0.2.0 left 开 and 始 out with an error and cached that drawing under 2cb04e5a…, computed the same
+	 * independent way; 0.2.1 draws them, so the block's key moves, with a field only such a block has
+	 * (internal/DECISIONS.md D26), and the diagram compiles once more. Every other key is 0.2.0's.
+	 */
+	it('moves the key of a block the Unicode bridge draws in, and no other', () => {
+		const bridged = '\\begin{tikzpicture}\\node {开始};\\end{tikzpicture}';
+		const key = deriveKey({ ...INPUTS, outputRevision: OUTPUT_REVISION, normalizedSource: bridged });
+		expect(key).not.toBe('2cb04e5a5e8ba78837abb19452b58965');
+		expect(key).toBe('bdc4c129f070392add7d7657def25090');
+	});
+
+	it('finds a bridged character wherever TeX reads one, and only there', () => {
+		const uses = (patch: Partial<KeyInputs>, baked: Partial<BakedOptions> = {}) =>
+			usesUnicodeBridge({ ...INPUTS, ...patch, baked: { ...BAKED, ...baked } });
+
+		expect(uses({})).toBe(false);
+		expect(uses({ normalizedSource: '\\node {Ωμέγα};' })).toBe(true);
+		expect(uses({}, { preamble: '\\newcommand\\city{北京}' })).toBe(true);
+		expect(uses({}, { packages: { ...BAKED.packages, babel: 'ελληνικά' } })).toBe(true);
+		expect(uses({}, { libraries: 'calc,中' })).toBe(true);
+		expect(uses({}, { border: '1pt中' })).toBe(true);
+		// A lone surrogate reaches TeX as U+FFFD, which the bridge declares.
+		expect(uses({ normalizedSource: `\\node {${String.fromCharCode(0xd800)}};` })).toBe(true);
+
+		// What the engine or the TS1 shim draws, and what TeX never reads.
+		expect(uses({ normalizedSource: '\\node {Grüße, Łódź, İstanbul, 2010–2020 … ° × ± µ £ €};' })).toBe(
+			false,
+		);
+		expect(
+			uses({ outputRevision: '开始', artifactRevision: '开始' }, { depHashes: ['笔记/a.tex:aaaa'] }),
+		).toBe(false);
 	});
 
 	it('changes when any single input changes', () => {

@@ -519,7 +519,8 @@ key = sha256Hex(
   field(normalizedSource) +
   field(stableStringify(baked)) + // preamble, packages, libraries, border, two-pass
   field(artifactRevision) +
-  field(stableStringify(pipeline)),
+  field(stableStringify(pipeline)) +
+  (usesUnicodeBridge ? field('unicode-bridge') : ''), // only a block the bridge draws in (D26)
 ).slice(0, 32);
 ```
 
@@ -539,7 +540,10 @@ worker's inputs, which left out the npm packages bundled into it and the content
 
 In 0.2.1 that field became **`OUTPUT_REVISION`**, a revision of what the engine draws, held to the
 golden corpus by `test/fixtures/golden/REVISION.json`, with 0.2.0's ENGINE_ID as its first value, so
-that an engine that only gets faster recompiles nothing (DECISIONS.md D20).
+that an engine that only gets faster recompiles nothing (DECISIONS.md D20). The last field is there
+only for a block whose TeX input has a character the Unicode bridge declares: 0.2.0 drew those
+blocks without the character and cached them, and the field moves their keys and no others
+(DECISIONS.md D26).
 
 `artifactRevision()` is **deliberately narrow and enumerated**:
 
@@ -720,7 +724,7 @@ Once L3 is retired, `showConsole` becomes a real per-job flag driven by the debu
 - no `\begin{document}` (#49's real cause);
 - `\usepackage{X}` where `X ∉ INVENTORY.files` (#17, #34, #40, #56, #88, #92, #99);
 - `\pgfplotsset{compat=…}` above 1.16 (#110);
-- characters above Latin-1 that the engine cannot typeset (#19, #36, #53). Not every one above U+00FF: the format builds Dvořák, Erdős, curly quotes, dashes and the ﬁ ligature itself. Which ones it does is measured from the committed engine into `source/native-unicode.ts` by `npm run scan:native`, and CI checks the two still agree;
+- ~~characters above Latin-1 that the engine cannot typeset (#19, #36, #53)~~ — retired in 0.2.1. The engine typesets what `npm run scan:native` measures native, the TS1 shim draws its symbols, and the worker draws every other character in a label over a box TeX sets for it, while names in any script work since 0.2.0 (DECISIONS D26). Every character draws, so the rule went by choice: a warning under a diagram that draws is what 0.1.5 removed for the characters the engine typesets. The one hint still true, that a Greek letter or maths symbol typed inside `$…$` is drawn upright in sans-serif where `$\alpha$` draws Computer Modern, is in the README's limitations instead;
 - `\pgfmathsetmacro` redefining a TeX/TikZ built-in such as `\epsilon` (#96 — a case that produces *no* TeX diagnostic at all, so a lint is the only possible mechanism).
 
 **Debug surface.** A Debug view (`ItemView`): last 100 renders with source preview, state, duration, engine, cache tier, log, retry; cache stats; engine capabilities; queue depth. A status-bar indicator **gated on `Platform.isDesktop`** (`addStatusBarItem` is documented as unavailable on mobile). And a documented Safari Web Inspector workflow in CONTRIBUTING (device Settings → Safari → Advanced → Web Inspector, then Develop over USB) — every mobile issue in the tracker is currently untriageable for want of that one paragraph. #82's reporter literally wrote *"I'm not sure if there's an easy way to get debug output from the plugin."*
@@ -1011,7 +1015,7 @@ Required work, none of it large: a `vendor/LICENSES/` directory carrying each up
 | `queue` | injected clock: priority ordering, dedup, refcounted cancel, depth cap → manual demotion, backpressure kill, no starvation, **every job settles** under randomised fault injection |
 | `machine` | exhaustive transition table; **property test: exactly one `settle()` on every path**, including randomised abort/timeout/throw interleavings |
 | `log-parse` | fixture transcripts: undefined control sequence with `l.NN`, missing file, `TeX capacity exceeded`, 79-column wrapped continuations, and — critically — that `Overfull \hbox` yields **no** error |
-| `preflight` | each of the six lint rules, and that a clean source yields zero warnings |
+| `preflight` | each of the lint rules, and that a clean source yields zero warnings |
 | `ids` | `url(#…)` inside `style`, `xlink:href`, markers, masks; nonce stamping produces one nonce per mount, not per match |
 | `colors` | all four emitters incl. unquoted `style="color: black"`; gradient stops untouched by default |
 | `geometry` | viewBox arithmetic |

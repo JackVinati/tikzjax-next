@@ -69,17 +69,16 @@ describe('preflight', () => {
 \\usepackage{siunitx}
 \\usetikzlibrary{arrows.meta}
 \\pgfplotsset{compat=1.18}
-\\pgfmathsetmacro{\\epsilon}{0.2}
-\\node {ζ};`;
+\\pgfmathsetmacro{\\epsilon}{0.2}`;
 		const found = preflight(source, baked(), caps());
 
-		expect(found.length).toBe(6);
+		expect(found.length).toBe(5);
 		for (const d of found) {
 			expect(d.kind).toBe('warning');
 			expect(d.hint).toBeTruthy();
 		}
 		// Sorted by position, so the strip reads in source order rather than rule order.
-		expect(found.map((d) => d.line)).toEqual([1, 2, 3, 4, 5, 6]);
+		expect(found.map((d) => d.line)).toEqual([1, 2, 3, 4, 5]);
 	});
 
 	it('counts lines the same way in a CRLF vault, where a comment ends at the \\r', () => {
@@ -300,134 +299,20 @@ describe('preflight', () => {
 		});
 	});
 
-	describe('characters the engine cannot typeset (#19 #36 #53)', () => {
-		it('reports the offending characters and where they start', () => {
-			const found = preflight('\\begin{document}\n\\node {Ω and ¥};', baked(), caps());
-			expect(found).toHaveLength(1);
-			expect(found[0]?.line).toBe(2);
-			expect(found[0]?.message).toContain('U+03A9');
-			expect(found[0]?.message).toContain('U+00A5');
-		});
-
-		// Latin-1 is measured like everything else: é renders natively.
-		it('accepts the Latin-1 letters the engine draws', () => {
-			expect(preflight('\\node {café à ça, résumé};', baked(), caps())).toEqual([]);
-		});
-
-		// ° and its kind are not native — the bare engine sets them in TS1, which the SVG converter
-		// cannot draw — but the worker redefines them to math-font glyphs (engine-src/ts1-shim.ts)
-		// for any block that uses one, so they render, and a warning would be false.
-		it.each(['45° and 2×3', 'a → b ← c', '±0.5', '5 µm', '§ 3, ¶ 2', '• item', '℃', '™', '†'])(
-			'says nothing about %s, which the worker draws from the math fonts',
-			(label) => {
-				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
-			},
-		);
-
-		// £, €, © and the rest have no math glyph either; the worker builds them from the Computer
-		// Modern text fonts instead, as LaTeX did before they moved to TS1.
-		it.each(['£5', '€5', '© 2026', 'Acme®', '1ª 2º', '\\pounds 5, \\copyright, \\$5'])(
-			'says nothing about %s, which the worker builds from the text fonts',
-			(label) => {
-				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
-			},
-		);
-
+	describe('characters beyond ASCII (#19 #36 #53)', () => {
+		// The engine typesets what scan:native measured native, the TS1 shim draws its symbols, the
+		// Unicode bridge draws every other character in a label, and since 0.2.0 a name in any script
+		// works: in a picture, cases like these draw through the worker with no TeX error (D26).
 		it.each([
-			['¥', 'U+00A5'],
-			['¢', 'U+00A2'],
-			['‰', 'U+2030'],
-		])('still warns about %s, which stays in TS1 and has no stand-in', (label, codepoint) => {
-			const found = preflight(`\\node {${label}};`, baked(), caps());
-			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain(codepoint);
-		});
-
-		// A dieresis used to lose the whole diagram: dvi2html's TFM reader stopped one character
-		// short of the end of every font, and in cmr10 that character is the accent. The build
-		// patches the reader (scripts/dvi2html-patch.mjs), and the scan measures them native now.
-		it.each(['Müller', 'Ärger', 'Grüße aus Köln', 'naïve', 'Zoë', 'Ÿ', 'n\\"aive \\"u'])(
-			'says nothing about %s, which renders since the converter was fixed',
-			(label) => {
-				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
-			},
-		);
-
-		// Ł and ł compiled cleanly and then lost the diagram inside the converter, whose glyph map
-		// had no entry for the stroke they are built with. The build gives it one, and the scan
-		// measures them native now.
-		it.each(['Łódź', 'Wrocław', 'Białystok', 'ŁUKASZ'])(
-			'says nothing about %s, which renders since the converter was fixed',
-			(label) => {
-				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
-			},
-		);
-
-		it('names a symbol it cannot draw with the math spelling that does render', () => {
-			const found = preflight('\\node {x ∈ ℝ, n → ∞};', baked(), caps());
-			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain('U+2208');
-			expect(found[0]?.message).toContain('U+211D');
-			expect(found[0]?.message).toContain('U+221E');
-			expect(found[0]?.message).not.toContain('U+2192');
-			expect(found[0]?.hint).toContain('$\\in$');
-			expect(found[0]?.hint).toContain('$\\infty$');
-			expect(found[0]?.hint).not.toContain('dieresis');
-		});
-
-		it('counts an astral character once, not as two surrogate halves', () => {
-			const found = preflight('\\node {\u{1F600}};', baked(), caps());
-			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain('U+1F600');
-			expect(found[0]?.message).not.toContain('U+D83D');
-		});
-
-		it('ignores characters inside a comment, which TeX discards', () => {
-			expect(preflight('% résumé — αβγ\n\\draw (0,0);', baked(), caps())).toEqual([]);
-		});
-
-		// Each of these was measured rendering cleanly on the committed engine. The curly quotes, the
-		// dash and the ellipsis are what iOS's smart punctuation types in place of the ASCII ones, so a
-		// warning on them sat under nearly every diagram written on a phone.
-		it.each(['Dvořák', 'Erdős', 'İstanbul', 'it’s “ok”', '2010–2020', 'wait…', 'ﬁ'])(
-			'says nothing about %s, which the engine typesets itself',
-			(label) => {
-				expect(preflight(`\\node {${label}};`, baked(), caps())).toEqual([]);
-			},
-		);
-
-		it.each([
-			['开始', 'U+5F00'],
-			['Привет', 'U+041F'],
-			['Ωμέγα', 'U+03A9'],
-		])('still warns about %s, which TeX leaves out with an error', (label, first) => {
-			const found = preflight(`\\node {${label}};`, baked(), caps());
-			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain(first);
-		});
-
-		it('names only the characters that fail, not the native or drawable ones beside them', () => {
-			const found = preflight('\\node {Dvořák ¥ Erdős → 90° €5 Łódź};', baked(), caps());
-			expect(found).toHaveLength(1);
-			expect(found[0]?.message).toContain('U+00A5');
-			expect(found[0]?.message).not.toContain('U+0159');
-			expect(found[0]?.message).not.toContain('U+0151');
-			expect(found[0]?.message).not.toContain('U+2192');
-			expect(found[0]?.message).not.toContain('U+00B0');
-			expect(found[0]?.message).not.toContain('U+20AC');
-			expect(found[0]?.message).not.toContain('U+0141');
-		});
-
-		// The old hint offered `\usepackage[utf8]{inputenc}` to "reassemble" the bytes, but the format
-		// already reads UTF-8 — what stops these characters is that nothing defines them. And it
-		// suggested \"o and \textdegree, neither of which renders on this engine.
-		it('suggests only rewrites that render here, and never inputenc', () => {
-			const withInputenc = caps({ files: new Set(['inputenc.sty']) });
-			const hint = preflight('\\node {Ω};', baked(), withInputenc)[0]?.hint ?? '';
-			expect(hint).toContain('$\\Omega$');
-			expect(hint).not.toContain('inputenc');
-			expect(hint).not.toContain('\\"o');
-			expect(hint).not.toContain('\\textdegree');
+			String.raw`\node {开始 Привет Ωμέγα مرحبا 😀 ¥5 ‰};`,
+			String.raw`\node {Dvořák it’s 2010–2020, Müller, Łódź, 45° 3×4 £5 €5};`,
+			String.raw`\node (开始) {中文}; \draw (开始.east) -- (1,1);`,
+			String.raw`\coordinate (中点) at (0,0); \node[below=of 中点, name=Ωμέγα] {a};`,
+			String.raw`\tikzset{强调/.style={draw}} \colorlet{深红}{red} \node[强调, text=深红] {a};`,
+			String.raw`\label{开始}\ref{开始} \csname 开始\endcsname \def\开始{x}`,
+			String.raw`\node {\verb|开始|};`,
+		])('says nothing about %s', (text) => {
+			expect(preflight(text, baked(), caps())).toEqual([]);
 		});
 	});
 

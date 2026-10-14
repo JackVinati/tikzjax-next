@@ -386,9 +386,10 @@ LuaTeX and `external` needs to run programs, and this engine has neither. What a
 `test/fixtures/tex` renders end to end through the shipped worker, on every CI run: plain TikZ,
 `pgfplots` including its libraries, `pgfplotstable`, `circuitikz`, `chemfig`, `tikz-cd`, `forest`,
 `mathtools`, `xparse`, `siunitx`, `tikz-feynhand`, `arrows.meta`, shadings, `~`, letters with a
-dieresis, `Ł` and `ł`, accented node and style names (`(café)`, `grün`), and `°` `×` `→` `±` `µ`
-`£` `€` `$` `©` `®` `ª` `º` with their text commands. The `patterns` library loads too, but see the
-limitations below.
+dieresis, `Ł` and `ł`, accented node and style names (`(café)`, `grün`), `°` `×` `→` `±` `µ`
+`£` `€` `$` `©` `®` `ª` `º` with their text commands, labels in Chinese, Greek and Cyrillic beside
+node, style and colour names in them, and Chinese and Japanese wrapped in a `text width` node. The
+`patterns` library loads too, but see the limitations below.
 
 ## Known limitations
 
@@ -398,8 +399,10 @@ limitations below.
 | `patterns` draws nothing | The driver emits the pattern reference but not the pattern definition. |
 | `chemfig`'s `\schemestart` loses bonds | The bonds are already missing in the DVI, before any JavaScript runs. |
 | `tikz-feynman` | LuaTeX only. `tikz-feynhand` is bundled and works. |
-| Greek, Cyrillic, CJK, IPA, emoji | Not set up in this engine's LaTeX format: TeX leaves them out with an error. Most accented Latin letters work as typed (Dvořák, Erdős, İstanbul, Łódź, café, Grüße, naïve), as do curly quotes, dashes and `…`; the exact set is measured from the engine and listed in `src/source/native-unicode.ts`. In typewriter type `Ł` and `ł` show a `␣` where the stroke should be, because that font has one in its place. |
-| `¥` `¢` `‰` `½` `№`, `\textcircled` | They come from the TS1 text companion font, which the SVG converter cannot draw, and the diagram fails. Pre-flight warns about the typed ones. `°` `×` `±` `µ` `·` `÷` `¬` `§` `¶` `†` `‡` `•` `™` `℃` `←` `↑` `→` `↓` `Ω` and `²` `³` `¹`, their `\text…` commands, siunitx's units (`\degree`, `\micro`, `\ohm` and the rest), `\S`, `\dag` and list bullets do render: they are drawn from the math fonts instead, so `µ` comes out as the italic math `μ`. So do `£` `€` `©` `®` `ª` `º`, their `\text…` commands, `\pounds`, `\copyright` and `\$`, built from the Computer Modern text fonts, mostly as older LaTeX releases built them: `€` is a C with a small `=` across it, LaTeX's own stand-in for a font without a euro, and in bold type `£` and `®` stay medium weight. |
+| Greek, Cyrillic, CJK, Arabic, Hebrew, IPA, emoji | Not in this engine's fonts, so TeX sets each such character in a label as a box one em wide, and the plugin writes it over the box in your system's sans-serif font. It renders, but not in Computer Modern. Most accented Latin letters are typeset by TeX itself (Dvořák, Erdős, İstanbul, Łódź, café, Grüße, naïve), as are curly quotes, dashes and `…`; the exact set is measured from the engine and listed in `src/source/native-unicode.ts`. Nodes, coordinates, styles, colours and `\label`s can be named in any script. In typewriter type `Ł` and `ł` show a `␣` where the stroke should be, because that font has one in its place. |
+| `\textyen`, `\textperthousand`, `\textcircled` and the rest of TS1 | They come from the TS1 text companion font, which the SVG converter cannot draw, and the diagram fails. Typed as `¥` `¢` `‰` `½` `№`, those characters are drawn in sans-serif like the scripts above. `°` `×` `±` `µ` `·` `÷` `¬` `§` `¶` `†` `‡` `•` `™` `℃` `←` `↑` `→` `↓` `Ω` and `²` `³` `¹`, their `\text…` commands, siunitx's units (`\degree`, `\micro`, `\ohm` and the rest), `\S`, `\dag` and list bullets do render: they are drawn from the math fonts instead, so `µ` comes out as the italic math `μ`. So do `£` `€` `©` `®` `ª` `º`, their `\text…` commands, `\pounds`, `\copyright` and `\$`, built from the Computer Modern text fonts, mostly as older LaTeX releases built them: `€` is a C with a small `=` across it, LaTeX's own stand-in for a font without a euro, and in bold type `£` and `®` stay medium weight. |
+| Text drawn in sans-serif | It sits in the space TeX set aside, one em for each character, so a word in Cyrillic or Greek takes more room than it needs, and a long one can stick out of a narrow `text width` node. In a `text width` node or a `\parbox`, a line breaks where a space is typed, and Chinese and Japanese also between two characters, though not before closing punctuation or a small kana, nor after an opening bracket. It keeps the size and colour TeX gave it, but not bold or italic, and in a sub- or superscript it is full size. In maths, a typed `α` `∈` `∞` is drawn the same way, upright; TeX's own `$\alpha$` `$\in$` `$\infty$` give Computer Modern's. Characters set side by side, or with only spaces between them, are drawn as one piece of text, so a phrase in Arabic or Hebrew reads in the right order, unless a number or a Latin word in it splits it. An accent typed as a separate combining character after its letter is drawn beside it, so type the accented letter itself. With Source handling at Corrected, the default, the plugin removes invisible characters from every block, the zero-width joiner and non-joiner among them: an emoji built with joiners comes out as its parts, and a Persian, Urdu or Indic word spelled with a non-joiner is joined where it should not be. Text outside the picture, such as `\chemname`'s name under a molecule, is not drawn. |
+| Sans-serif text in a copied or saved SVG | The SVG names the font `sans-serif` and does not embed it, so another program draws that text in its own. |
 | Obsidian Sync Standard does not sync `main.js` | It is 12.2 MB (11.7 MiB), and that plan caps a file at 5 MB. The plugin still installs from the community browser or a release on every device; only syncing the plugin folder itself is affected. The size is the TeX engine (the 22 MiB of its 156 MiB core dump that holds anything, gzipped and base64'd), and shrinking it means a smaller engine, not tighter code. TeX Live 2026 in 0.3.0 should bring it to about 8.3 MB, still over the limit. |
 | Obsidian Publish | Publish runs no community plugins. Save the diagram as an SVG attachment, or finalize the note, and the result publishes as ordinary content. |
 
@@ -470,9 +473,9 @@ change with what people ask for.
   files in a way that needs a fix 0.2.0 makes.
 - **After that, features one at a time**, in an order set by votes: `![[file.tex]]` embeds rendered
   in place (planned, [issue #1](https://github.com/JackVinati/tikzjax-next/issues/1)), `.sty` and
-  `.csv` files from the vault, Copy as PNG, syntax highlighting in `tikz` blocks, and CJK and other
-  Unicode labels through [pull request #2](https://github.com/JackVinati/tikzjax-next/pull/2), which
-  is under review.
+  `.csv` files from the vault, Copy as PNG and syntax highlighting in `tikz` blocks. CJK and other
+  Unicode labels, which were on this list, come in 0.2.1, from
+  [pull request #2](https://github.com/JackVinati/tikzjax-next/pull/2).
 
 The plan in full is on the wiki's [Roadmap](https://github.com/JackVinati/tikzjax-next/wiki/Roadmap).
 To ask for something, or vote for what is already there, use
