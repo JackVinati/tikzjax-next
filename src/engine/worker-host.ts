@@ -26,6 +26,46 @@ function capabilitiesOf(inventory: EngineInventory | null): EngineCapabilities {
 	};
 }
 
+/**
+ * Why an engine was stopped, for the diagnostics view.
+ *
+ * `idle` its idle teardown · `background` the app went to the background (mobile) · `timeout` a job
+ * outlived its time budget in it · `restart` Restart the TeX engine · `error` it crashed, or never
+ * finished starting · `unload` the plugin was unloaded.
+ */
+export type EngineStop = 'idle' | 'background' | 'timeout' | 'restart' | 'error' | 'unload';
+
+/** One engine's life: how long it took to start, and why it stopped. */
+export interface EngineLife {
+	/**
+	 * From created to ready, by the host's clock, rounded. Null until it is ready, and for good if it
+	 * never was.
+	 */
+	startMs: number | null;
+	/** Null while it runs. */
+	stop: EngineStop | null;
+}
+
+/** What the diagnostics view says about the engines: how often one started, and how each went. */
+export interface EngineReport {
+	/** Engines started this session. */
+	starts: number;
+	/** The most recent of them, oldest first: at most ENGINE_LIVES. */
+	lives: readonly EngineLife[];
+	/** Why an engine last stopped; null if none has. */
+	lastStop: EngineStop | null;
+}
+
+/** How many engines' lives the report keeps. A phone stops its engine every time it is backgrounded. */
+const ENGINE_LIVES = 20;
+
+/** What an interrupted job is told, for each reason the engine can be stopped under it. */
+const INTERRUPTED: Record<'restart' | 'background' | 'unload', string> = {
+	restart: 'the engine was restarted',
+	background: 'the app was backgrounded',
+	unload: 'the plugin was unloaded',
+};
+
 /** The timer seam, as the queue has it, so the idle teardown is testable without a clock. */
 export interface HostTimers {
 	setTimeout(fn: () => void, ms: number): number;
@@ -80,6 +120,8 @@ interface Engine {
 	readonly ready: Promise<void>;
 	readonly resolveReady: () => void;
 	readonly rejectReady: (error: Error) => void;
+	/** Its entry in the report. */
+	readonly life: EngineLife;
 }
 
 /**
@@ -110,6 +152,11 @@ export class WorkerHost implements TexHost {
 	private idleTimer: number | null = null;
 	private inventory: EngineInventory | null = ENGINE_INVENTORY;
 	private nextId = 1;
+
+	/** For the diagnostics view: see EngineReport. */
+	private starts = 0;
+	private readonly lives: EngineLife[] = [];
+	private lastStop: EngineStop | null = null;
 
 	private readonly onLog: ((jobKey: string, line: string) => void) | undefined;
 	private readonly idleTeardownMs: number | undefined;
@@ -145,6 +192,15 @@ export class WorkerHost implements TexHost {
 
 	get engineInventory(): EngineInventory | null {
 		return this.inventory;
+	}
+
+	/** How often an engine started this session, how long each start took and why each stopped. */
+	report(): EngineReport {
+		return {
+			starts: this.starts,
+			lives: this.lives.map((life) => ({ ...life })),
+			lastStop: this.lastStop,
+		};
 	}
 
 	async ready(): Promise<void> {
@@ -196,9 +252,9 @@ export class WorkerHost implements TexHost {
 	 * another behind their back would undo exactly that. Whoever wants the work still done
 	 * resubmits it, when it suits them.
 	 */
-	kill(reason = 'the engine was restarted'): void {
-		const error = new InterruptedError(reason);
-		this.teardown(error);
+	kill(why: 'restart' | 'background' | 'unload' = 'restart'): void {
+		const error = new InterruptedError(INTERRUPTED[why]);
+		this.teardown(error, why);
 		const victims = this.waiting.splice(0);
 		if (this.current !== null) victims.unshift(this.current);
 		this.current = null;
@@ -207,7 +263,7 @@ export class WorkerHost implements TexHost {
 
 	dispose(): void {
 		this.disposed = true;
-		this.kill('the plugin was unloaded');
+		this.kill('unload');
 	}
 
 	// -------------------------------------------------------------------------------------------
@@ -275,6 +331,11 @@ export class WorkerHost implements TexHost {
 		// no one awaiting `ready()` must not surface as an unhandled rejection.
 		ready.catch(() => undefined);
 
+		const life: EngineLife = { startMs: null, stop: null };
+		this.starts++;
+		this.lives.push(life);
+		if (this.lives.length > ENGINE_LIVES) this.lives.shift();
+
 		const engine: Engine = {
 			worker,
 			blobUrl,
@@ -284,6 +345,7 @@ export class WorkerHost implements TexHost {
 			ready,
 			resolveReady,
 			rejectReady,
+			life,
 		};
 		worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
 			if (this.engine === engine) this.receive(engine, event.data);
@@ -299,6 +361,7 @@ export class WorkerHost implements TexHost {
 		if (message.type === 'ready') {
 			engine.up = true;
 			engine.readyAt = this.now();
+			engine.life.startMs = Math.round(engine.readyAt - engine.spawnedAt);
 			this.inventory = message.inventory;
 			this.caps = capabilitiesOf(message.inventory);
 			// The blob URL has done its job the moment the worker is running. Upstream never revokes
@@ -350,7 +413,7 @@ export class WorkerHost implements TexHost {
 	private crashed(engine: Engine, message: string): void {
 		const error = new TexError('engine-unavailable', [], undefined, undefined, message);
 		const booting = !engine.up;
-		this.teardown(error);
+		this.teardown(error, 'error');
 
 		const victims = booting ? this.waiting.splice(0) : [];
 		if (this.current !== null) victims.unshift(this.current);
@@ -371,7 +434,7 @@ export class WorkerHost implements TexHost {
 	private abandon(job: Job): void {
 		if (this.current === job) {
 			this.current = null;
-			this.teardown(new TexError('timeout', job.log));
+			this.teardown(new TexError('timeout', job.log), 'timeout');
 			this.settle(job, () => job.reject(new TexError('timeout', job.log)));
 			this.pump();
 			return;
@@ -388,6 +451,7 @@ export class WorkerHost implements TexHost {
 		if (engine !== null && !engine.up && this.current === null && this.waiting.length === 0) {
 			this.teardown(
 				new TexError('engine-unavailable', [], undefined, undefined, 'the engine did not start'),
+				'error',
 			);
 		}
 	}
@@ -403,11 +467,13 @@ export class WorkerHost implements TexHost {
 	}
 
 	/** Stop the current worker, if there is one. Jobs are the caller's to settle. */
-	private teardown(error: Error): void {
+	private teardown(error: Error, why: EngineStop): void {
 		this.cancelIdleTeardown();
 		const engine = this.engine;
 		if (engine === null) return;
 		this.engine = null;
+		engine.life.stop = why;
+		this.lastStop = why;
 		engine.worker.terminate();
 		if (engine.blobUrl) {
 			URL.revokeObjectURL(engine.blobUrl);
@@ -423,7 +489,10 @@ export class WorkerHost implements TexHost {
 		this.idleTimer = this.timers.setTimeout(() => {
 			this.idleTimer = null;
 			if (this.current !== null || this.waiting.length > 0) return;
-			this.teardown(new TexError('engine-unavailable', [], undefined, undefined, 'stopped while idle'));
+			this.teardown(
+				new TexError('engine-unavailable', [], undefined, undefined, 'stopped while idle'),
+				'idle',
+			);
 		}, this.idleTeardownMs);
 	}
 

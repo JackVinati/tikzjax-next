@@ -1,24 +1,13 @@
-import { ItemView, type WorkspaceLeaf } from 'obsidian';
+import { ItemView, Notice, type WorkspaceLeaf } from 'obsidian';
 import type { EngineInventory } from '../../engine-src/protocol';
-import type { BlockOutcome } from '../block/render-child';
+import type { EngineReport } from '../engine/worker-host';
 import type { CompileTimings } from '../types';
+import { diagnosticsText, engineLife, timingSteps, type About, type RenderRecord } from './report';
 import { STRINGS } from './strings';
 
-export const DEBUG_VIEW_TYPE = 'tikzjax-debug';
+export type { RenderRecord } from './report';
 
-/** One block, from when it was processed: `rendering` until it reports how it came to rest. */
-export interface RenderRecord {
-	key: string;
-	sourcePreview: string;
-	state: 'rendering' | BlockOutcome['state'];
-	tier?: BlockOutcome['tier'];
-	durationMs?: number | undefined;
-	/** Where the time went, for a diagram compiled this time. */
-	timings?: CompileTimings | undefined;
-	message?: string | undefined;
-	log?: string[] | undefined;
-	at: number;
-}
+export const DEBUG_VIEW_TYPE = 'tikzjax-debug';
 
 export interface DebugSource {
 	records(): readonly RenderRecord[];
@@ -26,6 +15,12 @@ export interface DebugSource {
 	cacheStats(): Promise<{ entries: number; bytes: number }>;
 	memoryStats(): { entries: number; bytes: number };
 	queueDepth(): number;
+	/** How often the engine started this session, and why it last stopped. */
+	engine(): EngineReport;
+	/** The plugin, Obsidian and the device, for the copied text. */
+	about(): About;
+	/** The wall clock. Omitted: Date.now(). */
+	now?: (() => number) | undefined;
 }
 
 /**
@@ -35,10 +30,19 @@ export interface DebugSource {
  * "I'm not sure if there's an easy way to get debug output from the plugin", and there wasn't. The
  * only diagnostic the old plugin produced was a broken-image icon, so a bad diagram, a missing
  * package and a wedged engine were indistinguishable to the person who had to report them.
+ *
+ * Its Copy button puts all of it on the clipboard as plain text (ui/report.ts), so a phone, which
+ * has no devtools, can report what it saw, and the same procedure can be repeated release after
+ * release.
  */
 export class DebugView extends ItemView {
 	private readonly source: DebugSource;
 	private timer: number | null = null;
+	/** What the refresh redraws. The Copy button and the text to copy by hand stay put. */
+	private live: HTMLElement | null = null;
+	private byHand: HTMLElement | null = null;
+	/** The last answer IndexedDB gave, so that Copy can build its text inside the click. */
+	private stored: { entries: number; bytes: number } | null = null;
 
 	constructor(leaf: WorkspaceLeaf, source: DebugSource) {
 		super(leaf);
@@ -58,6 +62,17 @@ export class DebugView extends ItemView {
 	}
 
 	override async onOpen(): Promise<void> {
+		const root = this.contentEl;
+		root.empty();
+		root.addClass('tikzjax-debug');
+
+		const actions = root.createDiv({ cls: 'tikzjax-debug-actions' });
+		const copy = actions.createEl('button', { text: STRINGS.copyDiagnostics });
+		copy.addEventListener('click', () => this.copy());
+		this.byHand = root.createDiv({ cls: 'tikzjax-debug-by-hand' });
+		this.byHand.hidden = true;
+		this.live = root.createDiv();
+
 		await this.render();
 		// Polling rather than an event stream: the records are a plain ring buffer written from the
 		// render path, and putting an observer on that path to feed a panel nobody has open would
@@ -68,10 +83,76 @@ export class DebugView extends ItemView {
 		});
 	}
 
+	/** Everything the view knows, as it is now, for the copied text. */
+	private snapshot(): Parameters<typeof diagnosticsText>[0] {
+		return {
+			about: this.source.about(),
+			engine: this.source.engine(),
+			memory: this.source.memoryStats(),
+			stored: this.stored,
+			queueDepth: this.source.queueDepth(),
+			records: this.source.records(),
+			now: (this.source.now ?? Date.now)(),
+		};
+	}
+
+	/**
+	 * Put the whole view on the clipboard as plain text.
+	 *
+	 * The text is built and handed to the clipboard inside the click, which is what WebKit asks of a
+	 * page writing to it. Where the clipboard is missing or says no — an older iOS WebKit, a
+	 * WebView that withholds it — the text is shown below the button, selected, to copy by hand.
+	 */
+	private copy(): void {
+		const text = diagnosticsText(this.snapshot());
+		const byHand = (): void => this.showByHand(text);
+		let writing: Promise<void>;
+		try {
+			const clipboard = (navigator as { clipboard?: Clipboard }).clipboard;
+			if (typeof clipboard?.writeText !== 'function') {
+				byHand();
+				return;
+			}
+			writing = clipboard.writeText(text);
+		} catch {
+			byHand();
+			return;
+		}
+		void writing.then(() => {
+			if (this.byHand) this.byHand.hidden = true;
+			new Notice(STRINGS.diagnosticsCopied);
+		}, byHand);
+	}
+
+	private showByHand(text: string): void {
+		const box = this.byHand;
+		if (!box) return;
+		box.empty();
+		box.hidden = false;
+		box.createDiv({ cls: 'tikzjax-debug-by-hand-hint', text: STRINGS.diagnosticsCopyByHand });
+		const area = box.createEl('textarea', { cls: 'tikzjax-debug-by-hand-text' });
+		area.readOnly = true;
+		area.value = text;
+		area.rows = 12;
+		try {
+			area.focus();
+			area.setSelectionRange(0, text.length);
+		} catch {
+			// Selecting is a convenience: the text is there to select by hand either way.
+		}
+	}
+
 	private async render(): Promise<void> {
-		const root = this.contentEl;
+		const root = this.live;
+		if (!root) return;
+
+		// Asked first, so that what is drawn below is all of one moment.
+		try {
+			this.stored = await this.source.cacheStats();
+		} catch {
+			this.stored = null;
+		}
 		root.empty();
-		root.addClass('tikzjax-debug');
 
 		const inventory = this.source.inventory();
 		const engine = root.createDiv({ cls: 'tikzjax-debug-section' });
@@ -86,6 +167,7 @@ export class DebugView extends ItemView {
 		} else {
 			engine.createDiv({ text: 'Not started. It boots with the first diagram.' });
 		}
+		this.starts(engine, this.source.engine());
 
 		const cache = root.createDiv({ cls: 'tikzjax-debug-section' });
 		cache.createEl('h3', { text: 'Cache' });
@@ -93,12 +175,11 @@ export class DebugView extends ItemView {
 		const facts = cache.createDiv({ cls: 'tikzjax-debug-facts' });
 		this.fact(facts, 'In memory', `${memory.entries} diagrams, ${mb(memory.bytes)}`);
 		this.fact(facts, 'Queue depth', String(this.source.queueDepth()));
-		try {
-			const stored = await this.source.cacheStats();
-			this.fact(facts, 'On disk', `${stored.entries} diagrams, ${mb(stored.bytes)}`);
-		} catch {
-			this.fact(facts, 'On disk', 'unavailable');
-		}
+		this.fact(
+			facts,
+			'On disk',
+			this.stored ? `${this.stored.entries} diagrams, ${mb(this.stored.bytes)}` : 'unavailable',
+		);
 
 		const recent = root.createDiv({ cls: 'tikzjax-debug-section' });
 		recent.createEl('h3', { text: 'Recent renders' });
@@ -127,21 +208,28 @@ export class DebugView extends ItemView {
 	}
 
 	/**
+	 * How often the engine started, how long each start took and why each stopped. On a phone it
+	 * stops when it has been idle and whenever the app goes to the background, and each start is
+	 * paid by the next diagram that is not cached.
+	 */
+	private starts(section: HTMLElement, report: EngineReport): void {
+		const starts = section.createDiv({ cls: 'tikzjax-debug-starts' });
+		starts.createDiv({ text: STRINGS.engineStarts(report.starts) });
+		const list = starts.createEl('ol', { cls: 'tikzjax-debug-lives' });
+		list.start = report.starts - report.lives.length + 1;
+		for (const life of report.lives) list.createEl('li', { text: engineLife(life) });
+		if (report.lastStop !== null) starts.createDiv({ text: STRINGS.engineLastStop(report.lastStop) });
+	}
+
+	/**
 	 * Where a compile's time went, a step to a span, in the order the steps happen, so a slow
-	 * diagram can be reported with where it was slow: behind other diagrams, waiting for the engine
-	 * to start, in TeX, or in the SVG work on either side of it. A step nobody timed is left out.
+	 * diagram can be reported with where it was slow: waiting to be asked for, behind other
+	 * diagrams, waiting for the engine to start, in TeX, in the SVG work on either side of it, or
+	 * being drawn in the note. A step nobody timed is left out.
 	 */
 	private timings(row: HTMLElement, timings: CompileTimings): void {
-		const steps = [
-			STRINGS.timingQueue(timings.queueMs),
-			timings.startMs === undefined ? null : STRINGS.timingStart(timings.startMs),
-			timings.resetMs === undefined ? null : STRINGS.timingReset(timings.resetMs),
-			timings.texMs === undefined ? null : STRINGS.timingTex(timings.texMs, timings.passes ?? 1),
-			timings.svgMs === undefined ? null : STRINGS.timingSvg(timings.svgMs),
-			STRINGS.timingPost(timings.postMs),
-		];
 		const line = row.createDiv({ cls: 'tikzjax-debug-timings' });
-		for (const step of steps) if (step !== null) line.createSpan({ text: step });
+		for (const step of timingSteps(timings)) line.createSpan({ text: step });
 	}
 
 	private fact(parent: HTMLElement, label: string, value: string): void {

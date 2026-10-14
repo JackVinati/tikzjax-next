@@ -165,10 +165,24 @@ export interface TexTimings extends RenderTimings {
  * them, and around them the block's own waiting for the queue and the SVG pipeline it ran after.
  */
 export interface CompileTimings extends Partial<TexTimings> {
+	/**
+	 * From the block being seen to its asking for a compile: past the viewport gate, through the
+	 * debounce. "Seen" is the gate letting it through, or, for a block that skips the gate (an
+	 * export, `lazy=off`, one the gate gave up waiting for), the cache saying it has no copy; for a
+	 * Retry or a "Render diagram" press, the press.
+	 */
+	waitedMs?: number | undefined;
 	/** From the block asking for a compile to the queue starting it. */
 	queueMs: number;
 	/** The SVG pipeline, from the engine's output to what is mounted. */
 	postMs: number;
+	/**
+	 * From the end of the SVG pipeline to the diagram drawn in the note: fonts, inserting it, and the
+	 * first measurement, which waits for the fonts and reframes it. Unknown until it has been drawn.
+	 */
+	mountMs?: number | undefined;
+	/** From seen to drawn: what the reader waited for, end to end. */
+	totalMs?: number | undefined;
 }
 
 export class TexError extends Error {

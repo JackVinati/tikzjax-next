@@ -377,6 +377,36 @@ The fonts are converted from the BaKoMa Fonts Collection, whose licence follows.
 	margin-bottom: 1.25em;
 }
 
+.tikzjax-debug-actions {
+	display: flex;
+	justify-content: flex-end;
+	margin-bottom: 0.75em;
+}
+
+/* The copied text, shown where the clipboard said no, to be selected and copied by hand. */
+.tikzjax-debug-by-hand {
+	margin-bottom: 1.25em;
+}
+
+.tikzjax-debug-by-hand-hint {
+	margin-bottom: 0.5em;
+	color: var(--text-muted);
+}
+
+.tikzjax-debug-by-hand-text {
+	width: 100%;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+}
+
+/* The engine's starts this session, numbered from the first one still listed. */
+.tikzjax-debug-lives {
+	margin: 0.35em 0;
+	padding-left: 2em;
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+}
+
 .tikzjax-debug-section h3 {
 	margin: 0 0 0.5em;
 	font-size: var(--font-ui-small);

@@ -1081,7 +1081,12 @@ describe('what a block reports when it comes to rest', () => {
 		);
 		child.onload();
 		await child.settled;
-		expect(reports).toEqual([{ state: 'ok', durationMs: 42, timings: { queueMs: 0, postMs: 0 } }]);
+		await vi.waitFor(() => expect(reports).toHaveLength(2));
+		const timings = { waitedMs: 0, queueMs: 0, postMs: 0 };
+		expect(reports).toEqual([
+			{ state: 'ok', durationMs: 42, timings },
+			{ state: 'ok', durationMs: 42, timings: { ...timings, mountMs: 0, totalMs: 0 } },
+		]);
 	});
 
 	it('a compiled diagram: where its time went, before the engine, in it and after it', async () => {
@@ -1098,16 +1103,40 @@ describe('what a block reports when it comes to rest', () => {
 			release: () => undefined,
 		} as unknown as BlockDeps['queue'];
 		pipeline.during = () => void (now += 7);
+		const restore = measurable();
+		// The measurement, which waits for the fonts and reframes the diagram, takes 25 ms.
+		(window.SVGSVGElement.prototype as unknown as { getBBox: () => DOMRect }).getBBox = () => {
+			now += 25;
+			return { x: 0, y: 0, width: 40, height: 20 } as DOMRect;
+		};
 		try {
-			const child = new TikzBlock(container(), spec(), deps({ queue, now: () => now, report }));
+			const child = new TikzBlock(
+				container(),
+				spec(),
+				deps({
+					queue,
+					now: () => now,
+					report,
+					// Seen at 100, and asked for 300 ms later, after its debounce.
+					observe: (_el, onChange) => {
+						onChange(true);
+						now += 300;
+					},
+				}),
+			);
 			child.onload();
 			await child.settled;
+			await vi.waitFor(() => expect(reports).toHaveLength(2));
 		} finally {
 			pipeline.during = null;
+			restore();
 		}
 
+		// When it came to rest, and again once it had been drawn, with the mount and the whole wait.
+		const atRest = { ...engine, waitedMs: 300, queueMs: 30, postMs: 7 };
 		expect(reports).toEqual([
-			{ state: 'ok', durationMs: 80, timings: { ...engine, queueMs: 30, postMs: 7 } },
+			{ state: 'ok', durationMs: 80, timings: atRest },
+			{ state: 'ok', durationMs: 80, timings: { ...atRest, mountMs: 25, totalMs: 362 } },
 		]);
 	});
 
@@ -1131,6 +1160,7 @@ describe('what a block reports when it comes to rest', () => {
 		expect(reports).toEqual([
 			{
 				state: 'error',
+				reason: 'missing-file',
 				message: 'siunitx.sty is not bundled with this TeX engine.',
 				log: ['! LaTeX Error'],
 			},
@@ -1170,7 +1200,8 @@ describe('what a block reports when it comes to rest', () => {
 		press(el, 'Retry');
 		await vi.waitFor(() => expect(runs).toHaveLength(2));
 		runs[1]?.resolve(RESULT);
-		await vi.waitFor(() => expect(reports).toHaveLength(2));
-		expect(reports.map((r) => r.state)).toEqual(['error', 'ok']);
+		// At rest, and once drawn.
+		await vi.waitFor(() => expect(reports).toHaveLength(3));
+		expect(reports.map((r) => r.state)).toEqual(['error', 'ok', 'ok']);
 	});
 });

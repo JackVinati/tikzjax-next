@@ -6,6 +6,7 @@ import type { EngineInventory } from '../engine-src/protocol';
 import { WorkerHost } from './engine/worker-host';
 import { budgetsFor } from './platform/budgets';
 import { ensureFonts } from './platform/context';
+import { device } from './platform/device';
 import { DiagramCache } from './cache';
 import { RenderQueue } from './queue/queue';
 import { ViewportGate } from './block/viewport';
@@ -22,6 +23,7 @@ import { PreambleService } from './preamble/vault';
 import { registerCommands } from './ui/commands';
 import { DebugView, DEBUG_VIEW_TYPE, type RenderRecord } from './ui/debug-view';
 import { sha256Hex } from './cache/sha256';
+import { OUTPUT_REVISION } from './cache/key';
 import { Component, MarkdownRenderer, TFile, type WorkspaceLeaf } from 'obsidian';
 import { TikzSettingTab } from './settings/tab';
 import { STRINGS } from './ui/strings';
@@ -161,6 +163,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 					return (outcome) => {
 						record.state = outcome.state;
 						record.tier = outcome.tier;
+						record.reason = outcome.reason;
 						record.durationMs = outcome.durationMs;
 						record.timings = outcome.timings;
 						record.message = outcome.message;
@@ -180,6 +183,13 @@ export default class TikzjaxNextPlugin extends Plugin {
 					cacheStats: () => this.cache?.stats() ?? Promise.resolve({ entries: 0, bytes: 0 }),
 					memoryStats: () => this.cache?.memoryStats() ?? { entries: 0, bytes: 0 },
 					queueDepth: () => this.queue?.size() ?? 0,
+					engine: () => this.host?.report() ?? { starts: 0, lives: [], lastStop: null },
+					about: () => ({
+						...device(),
+						plugin: this.manifest.version,
+						engineId: this.host?.id ?? '',
+						outputRevision: OUTPUT_REVISION,
+					}),
 				}),
 		);
 
@@ -395,7 +405,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 			id: 'restart-engine',
 			name: 'Restart the TeX engine',
 			callback: () => {
-				this.host?.kill('restarted from the command palette');
+				this.host?.kill('restart');
 				this.queue?.clearPoison();
 				new Notice('TeX engine restarted.');
 			},
@@ -422,7 +432,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 				return;
 			}
 			this.queue?.pause();
-			this.host?.kill('the app was backgrounded');
+			this.host?.kill('background');
 			this.cache?.dropMemory();
 		});
 	}

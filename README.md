@@ -311,7 +311,7 @@ Preview. When TeX stops on a line of a preamble file, the error card names the f
 | Un-finalize the diagrams in this note | The exact inverse. The source was never thrown away. |
 | Render all diagrams in this note | Ignores lazy rendering and compiles everything now, with a Stop button, and says how many rendered. |
 | Open the diagram at the cursor in a zoom view | A scrollable, zoomable view of one diagram. |
-| Open TikZ diagnostics | The TeX log, the cache key, and where each recent compile's time went. Start here when a diagram does something inexplicable. |
+| Open TikZ diagnostics | The TeX log, the cache key, where each recent compile's time went from coming into view to drawn, and how often the engine started. Its Copy button copies it all as text for a bug report, without your diagrams' code or note names. Start here when a diagram does something inexplicable. |
 | Clear the diagram cache | Forgets every diagram this plugin has rendered; each compiles again when it is next shown. |
 | Restart the TeX engine | Stops the engine, which starts again with the next diagram, and lets diagrams that failed in this session try again. |
 

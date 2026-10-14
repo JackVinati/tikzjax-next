@@ -1152,6 +1152,44 @@ needs a revision of its own in the key, as ENGINE_ID gave it for free.
 
 ---
 
+## D21 — The diagnostics view times the whole wait, and copies as text without the diagrams
+
+**Extends D18's diagnostics, which time a compile from the queue to the end of the SVG pipeline.
+Date of record: 2026-10-14.**
+
+Every figure 0.2.0 claims was measured in V8 on a desktop, and the device the plugin is slowest on
+has no devtools. What the view showed left out the two waits around a compile: the time a diagram
+spent between coming into view and being handed to the queue (the viewport gate and the debounce,
+500 ms on a phone by configuration), and the time from the SVG pipeline to the diagram drawn in the
+note (fonts, inserting it, the measurement that reframes it). It also said nothing of how often the
+engine started, which on a phone is after every 30 s idle and every time the app goes to the
+background.
+
+- **Per diagram** (`CompileTimings`): `waited` from seen to asked, `mount` from the end of the
+  pipeline to drawn, and `seen to drawn`. "Seen" is the viewport gate letting the block through, or
+  the cache missing for a block that skips the gate (an export, `lazy=off`, one the gate gave up
+  on), or the press of Retry or "Render diagram". A block is reported when it comes to rest, as
+  before, because "Render all diagrams in this note" counts it then, and again once it is drawn.
+- **Per engine** (`WorkerHost.report`): the starts this session, each start's time from created to
+  ready, and why each engine stopped: idle, background, timeout, restart, error or unload.
+- **Copy** puts the whole view on the clipboard as plain text (`src/ui/report.ts`), from inside the
+  click, as WebKit wants; where the clipboard is missing or refuses, the text is shown selected, to
+  copy by hand. It carries the plugin version, Obsidian's `apiVersion`, desktop, phone or tablet and
+  the OS family from `Platform`, ENGINE_ID and OUTPUT_REVISION, the engine starts, the cache and
+  queue figures, and the recent renders with their steps. It never carries a diagram's source, an
+  error card's text (which quotes the source and names preamble files by path), the transcript or a
+  note: a render is named by its place in the list and the first eight characters of its cache
+  key. `test/report.test.ts` holds it to that.
+
+The user agent was meant to be in it, for the iOS version and the WebKit build. The store's rules
+forbid reading `navigator.userAgent` (`obsidianmd/platform`) and forbid disabling that rule, so it
+is left out: `lint:store` reports the read as an error, and the store's review would too. What the
+user agent would have said about the WebView is asked of it instead, by feature check:
+`DecompressionStream` and `Uint8Array.fromBase64`, which decide what 0.2.2's faster start can use,
+and the cores and memory it reports. The iOS version is written down by whoever measures.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

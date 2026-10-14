@@ -188,7 +188,7 @@ describe('kill()', () => {
 		const host = new WorkerHost();
 		const a = render(host, 'a');
 
-		host.kill('the app was backgrounded');
+		host.kill('background');
 		await tick();
 
 		expect(a.result.status).toBe('rejected');
@@ -202,13 +202,13 @@ describe('kill()', () => {
 		const b = render(host, 'b');
 		worker(0).boot();
 
-		host.kill('restarted from the command palette');
+		host.kill('restart');
 		await tick();
 
 		for (const r of [a, b]) {
 			expect(r.result.error).toBeInstanceOf(InterruptedError);
 			expect(r.result.error).not.toBeInstanceOf(TexError);
-			expect((r.result.error as Error).message).toBe('restarted from the command palette');
+			expect((r.result.error as Error).message).toBe('the engine was restarted');
 		}
 	});
 
@@ -364,6 +364,78 @@ describe('dispose()', () => {
 		expect(late.result.error).toBeInstanceOf(TexError);
 		expect((late.result.error as TexError).kind).toBe('engine-unavailable');
 		expect(FakeWorker.spawned).toHaveLength(1);
+	});
+});
+
+describe('what the diagnostics view is told about the engine', () => {
+	/**
+	 * On a phone the engine stops after 30 s with nothing to do and whenever the app goes to the
+	 * background, and the next diagram that is not cached pays for a new start. The view says how
+	 * often that happened, how long each start took, and why each engine stopped.
+	 */
+	it('counts the starts, times each, and says why each one stopped', async () => {
+		let now = 0;
+		const timers = new FakeTimers();
+		const host = new WorkerHost({ idleTeardownMs: 1000, timers, now: () => now });
+		expect(host.report()).toEqual({ starts: 0, lives: [], lastStop: null });
+
+		render(host, 'a');
+		now = 212;
+		worker(0).boot();
+		worker(0).reply(worker(0).renders[0] ?? -1);
+		await tick();
+		timers.advance(1000);
+
+		const stop = new AbortController();
+		render(host, 'b', stop.signal);
+		now = 400;
+		worker(1).boot();
+		stop.abort();
+		await tick();
+
+		render(host, 'c');
+		host.kill('background');
+		await tick();
+
+		render(host, 'd');
+		worker(3).crash('out of memory');
+		await tick();
+
+		expect(host.report()).toEqual({
+			starts: 4,
+			lives: [
+				{ startMs: 212, stop: 'idle' },
+				{ startMs: 188, stop: 'timeout' },
+				{ startMs: null, stop: 'background' },
+				{ startMs: null, stop: 'error' },
+			],
+			lastStop: 'error',
+		});
+	});
+
+	it('says an engine that is up is running, and a restart is a restart', async () => {
+		const host = new WorkerHost({ now: () => 0 });
+		void host.ready();
+		worker(0).boot();
+		await tick();
+		expect(host.report().lives).toEqual([{ startMs: 0, stop: null }]);
+
+		host.kill();
+		expect(host.report()).toMatchObject({ lives: [{ stop: 'restart' }], lastStop: 'restart' });
+		host.dispose();
+		expect(host.report().lastStop).toBe('restart');
+	});
+
+	it('keeps the last twenty, and counts them all', () => {
+		const host = new WorkerHost();
+		for (let i = 0; i < 25; i++) {
+			// Each start is cut short, which is what `ready()` says, and nothing here asks.
+			host.ready().catch(() => undefined);
+			host.kill();
+		}
+		const report = host.report();
+		expect(report.starts).toBe(25);
+		expect(report.lives).toHaveLength(20);
 	});
 });
 

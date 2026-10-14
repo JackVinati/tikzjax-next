@@ -9,6 +9,14 @@ top of its notes on GitHub, and will not publish a version that has none.
   From this release on, the cache is tied to what the engine draws rather than to the exact build of
   it, so a release that only makes the engine faster no longer compiles every cached diagram once
   more. A release that changes what diagrams look like still does, and says so here.
+- The diagnostics view shows the rest of a diagram's wait: how long it waited between coming into
+  view and being handed to the engine, how long it took to be drawn in the note once its SVG was
+  ready, and the whole time from coming into view to drawn. It also says how many times the engine
+  started this session, how long each start took, and why it stopped. A Copy button copies the
+  whole view as text, for a bug report: the plugin and Obsidian versions, the kind of device, what
+  its WebView supports, the engine, and every step's time, and none of your diagrams' code, error
+  messages or note names. Where the device does not let the plugin copy, the text appears
+  selected, to copy by hand.
 
 ## 0.2.0 — 2026-10-13
 
