@@ -2431,11 +2431,11 @@ review's.
 **Not done, and open.** Saved runs do not survive the engine's stop; keeping them in IndexedDB,
 keyed by ENGINE_ID, is the 0.2.4 plan's, and on a phone, where the engine stops after 30 s idle and
 in the background, they matter most (S3); D36 keeps them, in 0.2.1-beta.4.
-`\ShowHook{begindocument/end}` and `\tracingmacros` show the command, and a diagram that calls `\tikzjaxsnapshot` itself saves where it calls it, which
-stands for the text read up to there as well as any other point; one that redefines it saves
-nothing. TeX Live 2026 (0.3.0) has to apply `snapshot.ch` (tie stops the build otherwise), keep
-`\document`'s `begindocument/end` hook and its top-level code last, and pass `verify:snapshot`
-before the corpus is recorded again (S9).
+`\ShowHook{begindocument/end}` and `\tracingmacros` show the command, and a diagram that calls
+`\tikzjaxsnapshot` itself saves where it calls it, which stands for the text read up to there as
+well as any other point; one that redefines it saves nothing. TeX Live 2026 (0.3.0) has to apply
+`snapshot.ch` (tie stops the build otherwise), keep `\document`'s `begindocument/end` hook and its
+top-level code last, and pass `verify:snapshot` before the corpus is recorded again (S9).
 
 ---
 
@@ -2711,7 +2711,8 @@ checks above.
 ## D36 — Saved preambles are kept in the device's own storage, and outlive the engine
 
 **Amends D32, whose runs went with the engine that saved them ("Not done, and open"), and DESIGN.md
-§4.7, §5.4 and §6.2. The 0.2.x plan's 0.2.4, built into 0.2.1-beta.4. Date of record: 2026-10-14.**
+§4.7, §5.4 and §6.2. The 0.2.x plan's 0.2.4, built into 0.2.1-beta.4. Date of record: 2026-10-14;
+the changes its review asked for, and the figures below, 2026-10-15.**
 
 A saved run lived in the engine that saved it (D32), and went with it: at Restart the TeX engine, at
 the idle stop, and on a phone whenever Obsidian went to the background. On a phone, where the engine
@@ -2725,87 +2726,149 @@ by ENGINE_ID, and measured reading back runs of 0.6, 2.6 and 8.9 MiB in 3 to 21 
 out as bytes: TeX's globals where they differ from the core dump, the host's table of files and its
 terminal, what TeX had said and failed to find by then, the text the run stands for, whether the log
 was kept, and the ENGINE_ID of the worker that saved it. A fixed head, a header of JSON and the
-blobs it points at, each on 8 bytes, with a checksum of all but the head. The files of the worker's
-own that TeX read, a bundled TeX file, which openSync hands TeX as the very array it keeps inflated,
-or dvi2html's metrics for a font, are named and not copied, and put back from the reading worker's
-own, which are the same bytes in every worker of one ENGINE_ID. Most of what a preamble reads TeX
-has closed by its `\begin{document}`, and TeX never reads a closed file again, as a file opened
-again is an entry of its own: the host now notes a close (`library.ts` change 14), and a run read
-back finds the bytes of a closed file of the worker's own only if something asks for them. Read
-whole, they cost a fresh worker the inflating of every file the preamble had read: in Chromium on
-the desktop, siunitx's run took 16 ms to put back that way and 8 ms with the closed files left alone
-(two probes on 2026-10-14). Leaving their bytes out altogether, which was tried first, is not the
-same state: `verify:snapshot` read `eufm10.tfm` back as the body's file where a run from the start
-reads the font, in the `font-metrics-written` hazard. A file TeX wrote is always copied.
+blobs it points at, each on 8 bytes, and, in a run kept uncompressed, a checksum of all but the head
+(below). The files of the worker's own that TeX read, a bundled TeX file, which openSync hands TeX
+as the very array it keeps inflated, or dvi2html's metrics for a font, are named and not copied, and
+put back from the reading worker's own, which are the same bytes in every worker of one ENGINE_ID.
+Most of what a preamble reads TeX has closed by its `\begin{document}`, and TeX never reads a closed
+file again, as a file opened again is an entry of its own: the host now notes a close (`library.ts`
+change 14), and a run read back finds the bytes of a closed file of the worker's own only if
+something asks for them. Read whole, they cost a fresh worker the inflating of every file the
+preamble had read: in Chromium on the desktop, siunitx's run took 16 ms to put back that way and 8
+ms with the closed files left alone (two probes on 2026-10-14). Leaving their bytes out altogether,
+which was tried first, is not the same state: `verify:snapshot` read `eufm10.tfm` back as the body's
+file where a run from the start reads the font, in the `font-metrics-written` hazard. A file TeX
+wrote is always copied.
 
 **When.** Writing a run out and gzipping it is the worker's own time, on its own thread, which
-`CompressionStream` is too: for circuitikz's run of 8.9 MiB, 110 to 123 ms of the worker's time in
-WebKit and 277 to 310 in Chromium, in the campaign below. Spent right after the reply, it held the
+`CompressionStream` is too: for circuitikz's run of 8.9 MiB, 77 to 81 ms of the worker's time in
+WebKit and 225 to 230 in Chromium, in the campaign below. Spent right after the reply, it held the
 next diagram up by as much. So the worker hands a run over only once no render has been under way
 for 100 ms, which is when the host has nothing more for it (the queue posts the next job as the
 reply comes in), and gzips it 256 KiB at a time, each slice in a task of its own once the worker is
-idle again: a render posted meanwhile starts first and waits at most for the slice under way. The
-next diagram of a preamble, handed over at once after the first, took what beta.3's did (below). The
-runs waiting hold at most the worker's budget of saved runs between them, the newest always: in a
-note of many preambles the worker is idle only at its end, and a run waiting is memory a run let go
-would give back.
+idle again: a render posted meanwhile starts first, and waits at most for the slice under way, or
+for the writing out, which is one step before the slices, and took 0 to 3 ms for every run of the
+campaign below, circuitikz's included, in WebKit with the JIT and without it and in Chromium
+(`SavedRunMessage.writeMs`). Until the review of this release the writing out also took a checksum
+of the whole run, which only a run kept uncompressed needs, and without a JIT that was most of the
+step: writing out and gzipping circuitikz's run took 110 to 123 ms of the worker's time in WebKit
+with the JIT and 232 to 256 without it, gzip being native in both (the campaign of 2026-10-14). The
+next diagram of a preamble, handed over at once after the first, took what beta.3's did (below).
+
+The runs waiting cost memory once the worker no longer keeps them itself: in a note of many
+preambles the worker is idle only at its end, and a run it has let go is held by the queue alone. So
+the runs waiting that it no longer keeps hold at most its budget of saved runs between them, the
+oldest of them let go first, the newest always kept; one it still keeps waits at no cost. Until the
+review they held that budget between them all, kept or not. In WebKit on 2026-10-15, the 37 fixtures
+drawn once each, two rounds of each build: at a computer's budgets 20 runs were handed over, 16.01
+MiB, where the build before the change handed over 13, 9.64 MiB; at a phone's, 7 runs, 4.34 MiB,
+plain TikZ's among them, against 6, 4.09 MiB, without it. D37's trial, with a build before both,
+ended with 9 runs stored and plain TikZ's not among them, which is why its next diagram after the
+stop compiled its preamble. A phone's 12 MiB of runs waiting still leaves its 16 MiB store far from
+full after a busy first session: filling it would take holding more in memory.
 
 **Gzipped where the platform has its own gzip** (iOS and Safari 16.4, Chrome 80), and as they are
 where it has none, iOS 14.5 to 16.3: the host counts its budget in bytes stored, so there fewer runs
-fit, and the run's own checksum guards bytes no CRC covers. Not skipped there, as the alternative
-was: storing costs those devices nothing but room, and reading back the stretches is a copy. Not
-pako's deflate either, which is JavaScript, at an interpreter's pace where there is no JIT (D33),
-and more code for the worker to carry. Gzip's CRC-32 is checked by the inflate, which both browsers
-were seen to do on 2026-10-14 (a changed byte in the middle, in the CRC and in the length, and a cut
-stream, all refused by `DecompressionStream` in WebKit 26.6 and Chromium 153), so the checksum is
-checked on uncompressed runs only. Sizes over the fixtures, gzipped/written out, in MiB: TikZ alone
-0.24/0.64, `tikz-cd` 0.40/1.26, `siunitx` 0.78/2.72, `feynhand` 0.81/2.72, `pgfplots-axis` 2.03/6.50
-and `circuitikz` 2.83/8.88 in WebKit, and within 0.03 MiB of those in Chromium.
+fit, and the run's own checksum, taken there a slice at a time as the gzip is elsewhere, guards
+bytes no CRC covers. Not skipped there, as the alternative was: storing costs those devices nothing
+but room, and reading back the stretches is a copy. Not pako's deflate either, which is JavaScript,
+at an interpreter's pace where there is no JIT (D33), and more code for the worker to carry. Gzip's
+CRC-32 is checked by the inflate, which both browsers were seen to do on 2026-10-14 (a changed byte
+in the middle, in the CRC and in the length, and a cut stream, all refused by `DecompressionStream`
+in WebKit 26.6 and Chromium 153), so the checksum is taken and checked on uncompressed runs only.
+Sizes over the fixtures, gzipped/written out, in MiB: TikZ alone 0.24/0.64, `tikz-cd` 0.40/1.26,
+`siunitx` 0.78/2.72, `feynhand` 0.81/2.72, `pgfplots-axis` 2.03/6.50 and `circuitikz` 2.83/8.88 in
+WebKit, and within 0.03 MiB of those in Chromium.
 
 **What the host keeps** (`src/cache/runs.ts`). In the app's IndexedDB, in a database of its own
 beside the diagram cache's, `tikzjax-next-<appId>-preambles`, so that neither's schema or failures
-reach the other, and never in the vault or the plugin's folder, which Obsidian Sync and iCloud copy
-to every device: a run is megabytes of one build's memory. Two stores: `runs` with the bytes, read
-only to send one, and `index`, a small record per run, read whole once a session when the engine
-first starts (D23's early start), so that whether a run is stored is known without touching its
-bytes; a put, a delete and an eviction write both in one transaction. The key is
-`<ENGINE_ID>/<route>`, the run's name the host routes by (`engine-src/document.ts` routeKey, a hash
-of the text it stands for and of the log flag): at that first read every record of another ENGINE_ID
-is deleted, unread, and the worker checks the ENGINE_ID inside the bytes and the text again. The
+reach the other, and never in the vault or the plugin's folder, which Obsidian Sync and a vault in
+iCloud Drive copy to every device: a run is megabytes of one build's memory. One database per vault,
+as the diagram cache has, since every vault of a desktop install shares one origin: the budget below
+is a vault's, and a vault not opened again keeps what it stored until it is opened and cleared. Two
+stores: `runs` with the bytes, read only to send one, and `index`, a small record per run, read
+whole once a session when the engine first starts (D23's early start), so that whether a run is
+stored is known without touching its bytes; a put, a delete and an eviction write both in one
+transaction. The key is `<ENGINE_ID>/<route>`, the run's name the host routes by
+(`engine-src/document.ts` routeKey, a hash of the text it stands for and of the log flag): at that
+first read every record of another ENGINE_ID is deleted, unread, and the worker checks the ENGINE_ID
+inside the bytes and the text again. Nothing waits for that delete. Until the review the index was
+set only once it had committed, so the first diagram after an update that changed the engine waited
+for every byte of the old engine's runs to be deleted, when nothing of the new engine's could be
+stored yet. With 13 runs of another build stored, 9.6 MiB, the first diagram after a fresh start of
+the browser took 487 (476–488) ms in WebKit with the delete waited for and 130 (124–131) without,
+and in Chromium, where the delete was done before the engine was up, 91 (90–93) and 92 (91–95)
+(three rounds each on 2026-10-15, the same worker under the host before and after the change). The
 budget is in bytes stored: 64 MiB on a computer, 16 MiB on a phone or a tablet and on a computer
 that reports less than 8 GiB of memory (`platform/budgets.ts` storedRunBytes), least recently used
-out; a run larger than the whole budget is not kept and evicts nothing.
+out; a run larger than the whole budget is not kept and evicts nothing. Keeps run one after another,
+so that two at once, from two engines, cannot both fit the budget and together pass it.
 
-**Sending one.** A job whose run no engine holds, when one is stored, is not posted until the run's
-bytes are read: the read starts when the job reaches the host, so when the engine is starting it
-runs meanwhile, and the job is then sent with the bytes, transferred, to an engine that does not
-hold the run. The worker inflates and checks them, reads the run back, keeps it as if it had saved
-it where its budget has room, so that the diagrams after it resume from memory, and resumes from it
-either way. A run the worker cannot keep beside the ones it is using, as circuitikz's 8.9 MiB could
-not at a phone's 12 (D32), is started from all the same, at every diagram of its preamble that finds
-it stored, where until now each compiled the preamble. Bytes that do not read back are reported, and
-the host deletes them; a run that stands for other text under the same name, which a hash or a
-`\begin{document}` the host guessed wrong can give, is not used, and the diagram saves its own,
-which replaces it.
+**Sending one.** A job whose run is stored is not posted, while the run's bytes are read, to an
+engine that does not hold the run: the read starts when the job reaches the host, so when the engine
+is starting it runs meanwhile, and the job is then sent with the bytes, transferred. Meanwhile it
+goes at once to an idle engine that turns out to hold its run, and the jobs behind it go first, as
+an engine left idle while a job could run costs more than the read. It waits for the read at most
+250 ms once an engine is idle for it, and then goes without the run, as with nothing stored; with
+the engine up a read took 9 to 13 ms in WebKit and 1 to 3 in Chromium on the desktop (2026-10-14).
+While a read a job stopped waiting for has not settled, no other is begun: storage is not answering.
+Until the review a job whose run was being read held every job behind it, also one for another
+engine, and the read had no limit, so a read that never settled held them all until the first one's
+startup allowance ran out, 20 s on a computer and 30 on a phone, and failed it as an engine that
+would not start. The run is read unless an engine that holds it will take the job, one that is idle,
+or the only engine there can be. With two engines, the computer's default (D24), a job never waits
+for a busy engine, and until the review one whose run only a busy engine held went to the other
+without it, which compiled the preamble, saved it and stored it again. A job is asked to hand its
+run over only when none is stored under its name or one was sent with it, so that the worker does
+not write out and gzip again a run the store has.
+
+The worker inflates and checks the bytes, reads the run back, keeps it as if it had saved it where
+its budget has room, so that the diagrams after it resume from memory, and resumes from it either
+way. A run the worker cannot keep beside the ones it is using, as circuitikz's 8.9 MiB could not at
+a phone's 12 (D32), is started from all the same, at every diagram of its preamble that finds it
+stored, where until now each compiled the preamble. Bytes that do not read back, refused by the
+inflate or by the format, are reported, and the host deletes them and counts a storage error; a run
+that could not be put back for want of memory, a RangeError, as inflating 8.9 MiB can on a phone
+short of it, is kept for the next session and not sent again in this one, where until the review it
+was deleted as if its bytes were wrong. A run that stands for other text under the same name, which
+a hash or a `\begin{document}` the host guessed wrong can give, is not used, and the diagram saves
+its own, which replaces it.
 
 **Only when it is cheaper.** A run is sent, and kept at all, only when putting it back is likely to
 cost less than its preamble and its save did in the engine that saved it, which the worker measures
 and hands over with it. Putting back is estimated as a time to read anything from IndexedDB, 12 ms,
 1 ms a MiB stored and 2.5 ms a MiB of the run, the slower of WebKit and Chromium on the desktop
-(below), and then by what it took on the device, a quarter at a time, leaving out a read made while
-the engine was starting. Over the fixtures on the desktop every run was worth it, the smallest, TikZ
-alone, whose preamble took 28 to 36 ms to reach and 11 to 23 to save, where putting it back took 3
-to 4 ms and reading it ran while the engine started.
+(below). For sending, the estimate then leans on what it took on the device, a quarter at a time,
+leaving out a read made while the engine was starting; a read is timed on the main thread, behind
+other transactions and whatever the thread was doing, so a sample counts for at most four times the
+larger of the estimate and the starting figure, and one slow read moves the estimate by 1.75 times
+at most, and each run not sent for its cost moves it a quarter of the way back, so that one is sent,
+and measured, again after a few. Until the review a sample counted as it came: one read of 300 ms of
+`tikz-cd`'s 0.40 MiB, a case the review built in a test, raised the read cost from 1 ms a MiB to
+181, after which circuitikz's run was estimated at 546 ms and sent no more that session, nor kept.
+Whether a run is kept goes by the starting figures alone: it is for later sessions, which start from
+them. Over the fixtures on the desktop every run was worth it, the smallest, TikZ alone, whose
+preamble took 20 to 21 ms to reach in WebKit and its save 8 to 10 more, where putting it back took 3
+ms and reading it ran while the engine started.
 
 **Storage that will not.** IndexedDB missing or refusing to open (a private window, blocked site
-data, a WebView that keeps none) turns this off for the session; a write refused for want of room
-stops writing for the session, and clearing tries again; another failure costs that one run; each
-counts as a storage error, which the diagnostics view shows. A diagram is drawn either way.
+data, a WebView that keeps none) turns this off for the session. A write refused for want of room is
+tried once more after as much again as the run has been freed from the least recently used runs, in
+a transaction of its own, as the diagram cache makes room (`cache/idb.ts`); refused again, nothing
+more is written that session, and what is stored is still read and sent. Until the review the first
+refusal stopped the reading too, so that a phone nearly out of room, where the browser refuses most
+often and a stored run helps most, used none for the rest of the session. Clearing tries again.
+Another failure costs that one run. Each run lost, and each whose bytes did not read back, counts as
+a storage error, which the diagnostics view shows. A diagram is drawn either way.
 
 **The switch.** Settings → Saved preambles covers stored runs too: off, the host sends no budget, so
 nothing is saved, handed over, read or sent, and what was stored is deleted, at the change, also one
 that comes through Sync, and at the next start if it was turned off elsewhere (without creating the
-database where there is none). Clearing the diagram cache clears them.
+database where there is none); the diagnostics view then says "Stored preambles: off". Clearing the
+diagram cache clears them. A worker hands its runs over up to its budget after a note, so a run
+saved before a clear could reach the store after it and be kept, which until the review it was: each
+render now carries where the store stood when it was posted, an epoch every clear moves, the worker
+hands it back with the run, and the store keeps no run saved under an earlier one.
 
 **The proof.** `npm run verify:snapshot` gains a third way to resume. In the engine, each saved run
 of every fixture and hazard is written out, gzipped, gunzipped, read back and resumed from, and must
@@ -2813,94 +2876,123 @@ give what the run from the start gives, byte for byte. In the shipped worker, th
 over for each run it saves are sent back with the same diagram to a second worker that holds none,
 as after a stop, which must resume from them, then the other body, which must resume from the run it
 kept, then the other body again, sent the stored run, which must resume from it where the two share
-their preamble and refuse it where not; every reply as from the start. And a stored run kept
-uncompressed is resumed from, and one with a byte changed, gzipped or not, or cut short, is refused
-and the diagram drawn as from the start. A stored run larger than the worker's budget is started
-from all the same, and not kept. On 2026-10-14, on the build that ships: 77 cases, 1,166 runs in the
-engine, 858 of them resumed and 286 of those through storage, and in the worker 292 renders that
-saved and 428 that resumed, 282 of them from a run sent back from storage, every one as from the
-start, in 224 s, where it took two minutes before. `verify:worker` asks for the runs as the plugin
-does, and with `--legacy` hides `CompressionStream` too, and the runs come back uncompressed. Unit
-tests hold the format (`test/stored-run.test.ts`), the store (`test/runs.test.ts`: another engine's
-runs never read and deleted, bytes that do not read back deleted, a refused write, storage that will
-not open, the budget, clearing), the host's sending and keeping (`test/worker-host.test.ts`), the
-closed files (`test/library.test.ts`) and the switch's text.
+their preamble and refuse it where not; every reply as from the start. A worker without
+`CompressionStream` hands the same run over uncompressed, its checksum taken a slice at a time,
+which must be byte for byte the gzipped run's bytes sealed whole, and is resumed from; one with a
+byte changed, gzipped or not, or cut short, is refused and the diagram drawn as from the start. A
+stored run larger than the worker's budget is started from all the same, and not kept. On
+2026-10-15, on the build that ships: 77 cases, 1,166 runs in the engine, 858 of them resumed and 286
+of those through storage, and in the worker 292 renders that saved and 428 that resumed, 282 of them
+from a run sent back from storage, every one as from the start, in 217 s. `verify:worker` asks for
+the runs as the plugin does, and with `--legacy` hides `CompressionStream` too, and the runs come
+back uncompressed. Unit tests hold the format and the checksum in slices
+(`test/stored-run.test.ts`), the store (`test/runs.test.ts`: another engine's runs never read and
+deleted without being waited for, bytes that do not read back deleted and counted, a write refused
+for room, once and twice, reading on after it, storage that will not open, the budget, keeps at
+once, clearing and its epoch, the estimates' bounds), the host's sending and keeping
+(`test/worker-host.test.ts`: the wait limit, the jobs that go first, a busy holder, the runs not
+asked for again, a run that could not be put back), the closed files (`test/library.test.ts`), the
+runs a worker still holds (`test/snapshot.test.ts`) and the switch's text.
 
-**What it gains.** Measured on the desktop of D27 on 2026-10-14, with Playwright 1.63's headless
+**What it gains.** Measured on the desktop of D27 on 2026-10-15, with Playwright 1.63's headless
 WebKit 26.6 and Chromium 153 and the 0.2.x study's harness, extended so that each build runs its own
 WorkerHost, and RunStore, driving the worker its `main.js` ships, on a persistent profile: this
 release's build against 0.2.1-beta.3's `main.js` as published. Each fixture in two sessions, each a
 fresh browser on one profile, the first on an empty profile and the second on what the first left;
 the engine started and the diagram handed to the host at the same moment, as at a cache miss (D23),
 and timed from there to its reply. Three rounds, the builds interleaved, saved preambles at a
-computer's 32 MiB and 64 MiB stored; every SVG as smoke draws it. The desktop was busy with other
-work, which these runs did not control, so only figures of one campaign are compared. The first
-diagram after a fresh start of the browser, in ms, median (range):
+computer's 32 MiB and 64 MiB stored; every SVG as smoke draws it. These figures replace those of the
+campaign of 2026-10-14, made before the review's changes on a desktop busier with other work; only
+figures of one campaign are compared. The first diagram after a fresh start of the browser, in ms,
+median (range):
 
 | | WebKit, beta.3 | WebKit, stored | Chromium, beta.3 | Chromium, stored |
 |---|---:|---:|---:|---:|
-| `basic` | 155 (141–156) | 133 (123–138) | 122 (121–141) | 96 (90–99) |
-| `siunitx` | 338 (324–351) | 167 (146–169) | 260 (244–269) | 117 (104–135) |
-| `tikz-cd` | 297 (288–346) | 211 (201–213) | 228 (215–238) | 142 (137–164) |
-| `circuitikz` | 623 (610–692) | 331 (327–336) | 437 (352–492) | 221 (217–242) |
-| `pgfplots-axis` | 626 (615–633) | 353 (352–366) | 483 (439–492) | 271 (239–274) |
-| `feynhand` | 716 (712–762) | 540 (538–602) | 502 (388–520) | 359 (355–412) |
+| `basic` | 104 (104–111) | 97 (90–97) | 92 (91–92) | 72 (72–77) |
+| `siunitx` | 225 (225–231) | 103 (99–104) | 187 (185–188) | 88 (85–89) |
+| `tikz-cd` | 210 (209–220) | 151 (150–153) | 164 (163–165) | 112 (111–127) |
+| `circuitikz` | 434 (428–494) | 223 (219–296) | 336 (332–338) | 170 (170–174) |
+| `pgfplots-axis` | 425 (424–430) | 246 (242–252) | 328 (327–331) | 182 (180–185) |
+| `feynhand` | 495 (492–497) | 393 (381–416) | 383 (379–389) | 277 (276–280) |
 
-Reading the run took 23 to 37 ms in WebKit and 6 to 13 in Chromium, while the engine started, which
-took 82 to 104 and 62 to 80, so it added nothing; putting it back took 4 to 18 ms in WebKit and 3 to
-20 in Chromium, for runs of 0.64 to 8.88 MiB, gzipped to 0.24 to 2.83. The second diagram, handed
-over at once after the first in the first session, took what beta.3's did: `circuitikz` 160
-(156–168) against 157 (153–164) ms in WebKit, 105 (87–110) against 100 (76–104) in Chromium, while
-writing the run out and gzipping it took 10 to 123 ms of the worker's idle time in WebKit and 20 to
-310 in Chromium.
+Reading the run took 21 to 34 ms in WebKit and 4 to 10 in Chromium, while the engine started, which
+took 60 to 137 and 52 to 68, so it added nothing; putting it back took 3 to 14 ms in WebKit and 2 to
+15 in Chromium, for runs of 0.64 to 8.88 MiB, gzipped to 0.24 to 2.83. The second diagram, handed
+over at once after the first in the first session, took what beta.3's did: `circuitikz` 112
+(109–116) against 111 (109–112) ms in WebKit, 69 (68–69) against 69 (68–73) in Chromium, while
+writing the run out and gzipping it took 8 to 81 ms of the worker's idle time in WebKit and 15 to
+230 in Chromium.
 
 Without the JIT, WebKit with `JSC_useJIT=false`, as Lockdown Mode runs it, at a phone's 12 MiB and
-16 stored, two rounds: the first diagram after a fresh start took 336 (327–344) ms for `basic`
-against beta.3's 860 (823–897), 669 (663–675) for `siunitx` against 4,787 (4,689–4,884), and 3,861
-(3,751–3,971) for `circuitikz` against 11,395 (11,376–11,413). Reading the run took 22 to 38 ms and
-putting it back 4 to 23, much as with the JIT, as the platform's inflate and a copy do that work,
-against 383 to 7,736 ms for TeX to reach the point the run stands for; writing it out took 21 to 256
-ms after the reply.
+16 stored, two rounds: the first diagram after a fresh start took 233 (229–237) ms for `basic`
+against beta.3's 600 (596–604), 464 (456–471) for `siunitx` against 3,426 (3,424–3,428), and 2,750
+(2,671–2,828) for `circuitikz` against 8,202 (8,118–8,286). Reading the run took 25 to 34 ms and
+putting it back 3 to 19, much as with the JIT, as the platform's inflate and a copy do that work,
+against 260 to 5,437 ms for TeX to reach the point the run stands for; writing it out and gzipping
+it took 7 to 82 ms after the reply, where it took 21 to 256 before the review, most of that the
+checksum, and of it the writing out, the one step not sliced, 1 to 3.
 
-A note of 74 diagrams, the 37 of 0.2.0's corpus twice each, in the same two sessions, one engine, a
-job at a time as the queue hands them over, from the first job to the last reply, median (range) of
-three rounds, in ms:
+A note of 74 diagrams, the 37 of 0.2.0's corpus twice each, in the same two sessions, a job at a
+time as the queue hands them over, or two with two engines, from the first job to the last reply,
+median (range) of three rounds, in ms:
 
 | | beta.3, 2nd session | stored, 1st session | stored, 2nd session |
 |---|---:|---:|---:|
-| WebKit, each twice in a row, 32 MiB | 6,538 (6,299–6,549) | 6,445 (6,294–6,478) | 5,404 (5,394–5,506) (−17%) |
-| Chromium, the same | 4,513 (4,338–4,570) | 4,095 (4,030–4,494) | 3,204 (3,167–3,564) (−29%) |
-| WebKit, each twice in a row, a phone's 12 MiB and 16 stored | 7,177 (7,138–7,645) | 7,381 (6,676–7,775) | 6,168 (6,034–6,817) (−14%) |
-| WebKit, every one and then every one again, 12 and 16 MiB | 8,216 (8,100–8,907) | 9,018 (8,785–9,751) | 7,871 (7,299–7,954) (−4%) |
+| WebKit, each twice in a row, 32 MiB, one engine | 4,541 (4,478–4,593) | 4,406 (4,401–4,570) | 3,460 (3,453–3,562) (−24%) |
+| Chromium, the same | 2,926 (2,893–3,006) | 2,894 (2,890–2,917) | 1,892 (1,889–1,912) (−35%) |
+| Chromium, the same with two engines, as the desktop app runs | 2,072 (2,061–2,077) | 2,092 (2,059–2,100) | 1,079 (1,069–1,089) (−48%) |
+| WebKit, each twice in a row, a phone's 12 MiB and 16 stored | 5,012 (4,996–5,159) | 4,963 (4,962–5,087) | 4,512 (4,506–4,577) (−10%) |
+| WebKit, every one and then every one again, 12 and 16 MiB | 5,866 (5,860–5,982) | 5,896 (5,865–5,962) | 5,249 (5,224–5,276) (−11%) |
 
-beta.3's first sessions took 6,351, 4,178, 7,191 and 8,058 ms. In the first session nothing is
-stored before the note is over: the worker hands runs over only when it is idle, and in a note it is
-idle only at the end, when the runs waiting within its budget go, 13 of the 18 a note at 32 MiB and
-6 of 17 at 12. So the first session takes what beta.3 takes, within this desktop's noise: the spread
-note's TeX alone, the same code in both builds, took 6,790 to 8,210 ms over its six first sessions.
-In the second, 11 diagrams a note started from a stored run at 32 MiB, and 7 and 12 at the phone's
-budgets, the first among them: `arrows-meta`, 65 (64–67) ms against 127 (117–140) in WebKit.
+beta.3's first sessions took 4,440, 2,884, 2,072, 4,999 and 5,865 ms. In the first session nothing
+is stored before the note is over: the worker hands runs over only when it is idle, and in a note it
+is idle only at the end, when the runs waiting go, 20 runs, 16 MiB, a note at 32 MiB, and 7, 4.3
+MiB, at 12 (above). So the first session takes what beta.3 takes. In the second, 18 diagrams a note
+started from a stored run at 32 MiB with one engine, 35 with two, and 8 and 13 at the phone's
+budgets, the first among them: `arrows-meta`, 47 (45–54) ms against 80 (74–84) in WebKit and 27
+(27–28) against 66 (63–67) in Chromium, with one engine. With two engines, until the review, a job
+whose run only the busy engine held went to the other without it (Sending one, above).
 
-**What it costs.** `main.js` is 12,217,611 bytes, 15,278 more than beta.3's: the worker's code by
-6,895 characters, and the host the rest.
+The worker by itself, sent no stored runs and asked for none, against beta.3's, through the 0.2.x
+study's bench, which drives a worker without the host (three rounds each, saved preambles at 32
+MiB): TeX's time over the fixtures, each drawn twice, 5,268 and 3,739 ms against 5,250 and 3,758 in
+WebKit, 3,572 and 2,545 against 3,599 and 2,546 in Chromium, and the note of 74 drawn in 4,332 and
+2,924 ms against 4,398 and 2,954, its peak memory as beta.3's; within this desktop's noise, as they
+should be.
 
-The store costs WebKit's engine start some milliseconds on this desktop. The same build with and
-without its RunStore, five rounds on an empty profile, started in 106 and 109 ms against 91 and drew
-the first diagram in 183 and 367 against 173 and 351 (medians, `basic` and `siunitx`); starting the
-store's read only once the worker had its payload, tried, did not change it (103 and 99 against 83
-and 92). In Chromium the starts were the same, 68 and 70 ms against 71 and 69 in the campaign above.
-Where the time goes was not found. WebKit on Windows delivers a worker's messages on a timer: an
-empty message's round trip to a worker took 14 to 16 ms in 31 of 32 tries, against 0.2 ms at most in
-Chromium, so a little more work on the main thread can push a delivery to the next tick; an iPhone's
-WebKit is another port. So on an empty profile the first diagram took 165, 334 and 327 ms in WebKit
-for `basic`, `siunitx` and `tikz-cd`, against beta.3's 143, 318 and 290, and 625, 628 and 688 for
-the other three, against 607, 607 and 719; in Chromium, nothing beyond the noise.
+**What it costs.** `main.js` is 12,220,706 bytes, 18,373 more than beta.3's: the worker's code by
+7,640 characters, and the host the rest.
 
-Memory, with runs restored, which this campaign did not break down: the second session of the note
-peaked higher, in Chromium at a working set of 355 (302–375) MiB against beta.3's 286 (276–323), in
-WebKit at 32 MiB at 530 (520–582) against 521 (482–549), at 12 MiB at 513 (461–539) against 483
-(482–486), and spread at 558 (558–560) against 529 (526–571); WebKit's peak private commit was no
-higher, 1,680 against 1,983 MiB at 32. Storage: up to 64 MiB on a computer and 16 on a phone.
+The store costs WebKit's engine start a few milliseconds on this desktop. The same build with and
+without its RunStore, five rounds on an empty profile, started in 60 and 61 ms against 56 and 58, by
+the host's clock, and drew the first diagram in 113 and 232 against 106 and 230 (medians, `basic`
+and `siunitx`). The worker's own start, from its payload to its reply that it is ready, took the
+same either way, 39 and 37 ms against 37 and 39 (`BootTimings.totalMs`), so the difference is
+outside the worker: starting its thread, delivering the payload or the reply, or the main thread's
+work meanwhile, which was not broken down further. WebKit on Windows delivers a worker's messages on
+a timer: an empty message's round trip to a worker took 14 to 16 ms in 31 of 32 tries, against 0.2
+ms at most in Chromium (a probe of 2026-10-14), so a little more work on the main thread can push a
+delivery to the next tick; an iPhone's WebKit is another port. In the campaign above, on an empty
+profile, the first diagram took 108, 232 and 218 ms in WebKit for `basic`, `siunitx` and `tikz-cd`
+against beta.3's 107, 226 and 216; in Chromium, nothing beyond the noise. With a run stored, read
+while the engine started, the start took 62 to 74 ms in WebKit (medians by fixture) against beta.3's
+58 to 61, the worker's own start 37 ms against 38 (medians), and in Chromium 53 to 54 against 52 to
+53.
+
+Memory, which this campaign did not break down. The peaks, reached while the note compiled, in
+working set: in WebKit at 32 MiB 494 (483–513) MiB in the first session and 502 (482–534) in the
+second against beta.3's 487 (482–509) and 492 (479–506), at the phone's budgets 488 and 486 against
+486 and 481; in Chromium 345 (326–347) and 300 (297–308) against 285 (285–288) and 290 (286–291)
+with one engine, and 535 (518–576) and 469 (444–512) against 445 (437–453) and 440 (426–479) with
+two. At the end of the note, once every run handed over had been stored, the working set was higher
+than beta.3's, and 5 s later still, so it was held, not hand-overs under way: in WebKit at 32 MiB
+455 (453–498) and 463 (385–516) MiB against 404 (370–442) and 435 (388–443), 5 s later 454 and 462
+against 403 and 434; at the phone's budgets 463 and 402 against 370 and 364, 5 s later 430 and 399
+against 369 and 363; in Chromium's first session 302 (299–324) against 252 (251–253), and in its
+second, when nothing is handed over, 254 against 255. WebKit's private commit at the end was much
+the same, 1,129 and 1,405 MiB against 1,229 and 1,382 at 32 MiB. A phone's engine stops after 15 s
+idle (D37), which gives this back with the rest. Storage: up to 64 MiB a vault on a computer and 16
+on a phone.
 
 **Not measured on a phone.** The maintainer's iPhone 16 Pro, Obsidian 1.14.5, with Obsidian excluded
 from Lockdown Mode, read a start of 48 ms and circuitikz's TeX at 237 ms with 0.2.1-beta.2 in the
@@ -2912,7 +3004,7 @@ the files no longer in the system's cache, is `TODO.md` §9's check, and so is t
 ## D37 — A phone's idle engine stops after 15 s, and keeps its Memory until then
 
 **Amends DESIGN.md §5.4's 30 s, and answers what D31 left unmeasured: what an idle engine holds.
-Date of record: 2026-10-14.**
+Date of record: 2026-10-14; corrected after the review of 0.2.1-beta.4, 2026-10-15.**
 
 Until 0.2.1-beta.4 a phone's engine stopped after 30 s without a diagram, and at once when Obsidian
 went to the background. D31 recorded that WebKit, the engine of every iPhone, held more at the end
@@ -2945,13 +3037,23 @@ Memory let go was given back only by a collection about 30 s after the round, wh
 round that let nothing go too: private commit 327 and 339 MiB at 21 s, 122 and 120 at 31 s, against
 279 and 277 with nothing done and 73 and 71 stopped, where stopping gave 100 back within 4 s.
 
-What the stop cost the next diagram, on the same desktop: after 37 fixtures, `basic`, whose run the
-16 MiB store had already let go for later ones, 108 to 123 ms against 10 to 13 kept, of which the
-engine's start 57 to 62 and TeX from the start 27 to 32; after 6 fixtures, `siunitx`, stored, 143 to
-155 ms against 21 to 32 kept, of which the start 81 to 88, putting its preamble back 7, and TeX
-resumed 32 to 34 (these rounds shared the desktop with verification runs of this release, which
-slowed the starts); and without the JIT, `siunitx`, 577 to 613 ms against 434 to 437, the start 105
-to 108 and putting back 9 to 11.
+What the stop cost the next diagram, on the same desktop: after 37 fixtures, `basic`, whose run had
+never been stored, 108 to 123 ms against 10 to 13 kept, of which the engine's start 57 to 62 and TeX
+from the start 27 to 32; after 6 fixtures, `siunitx`, stored, 143 to 155 ms against 21 to 32 kept,
+of which the start 81 to 88, putting its preamble back 7, and TeX resumed 32 to 34 (these rounds
+shared the desktop with verification runs of this release, which slowed the starts); and without the
+JIT, `siunitx`, 577 to 613 ms against 434 to 437, the start 105 to 108 and putting back 9 to 11.
+
+`basic`'s run was not let go by the store, as this record first said: the store held 9 runs, 8.45
+MiB of its 16, at the end of every round that kept the engine, and never filled. The worker had let
+it go from the runs waiting to be handed over, which it hands over only once idle, at the end of the
+round, and which held at most its 12 MiB between them, the newest kept. Since the review of this
+release only the runs the worker no longer keeps count against that (D36). With this release's
+build, on 2026-10-15, three rounds of the same trial: plain TikZ's run was among the 7 stored, 4.3
+MiB, and `basic` after the stop took 104 to 106 ms against 11 kept, of which the start 68 to 71,
+putting its preamble back 2 to 3 and TeX resumed 13 to 14. Kept, the working set went from 443 to
+510 MiB a second after the last reply to 406 to 481 at 31 s; stopped, to 146 to 153 at 6 s and 123
+to 124 at 31 s. A phone's 12 MiB still leaves its store far from full after a busy first session.
 
 **Decided.**
 

@@ -169,27 +169,36 @@ top of its notes on GitHub, and will not publish a version that has none.
   longer swallows the `\begin{document}` the plugin writes after it, which made every diagram under
   it draw "Missing \begin{document}" instead of itself. Those diagrams are compiled once more, and
   no other.
-- Saved preambles outlast the engine. Each preamble an engine saves is also kept in this device's own
-  storage, in Obsidian's IndexedDB beside the diagram cache, never in the vault, so Obsidian Sync and
-  iCloud do not copy it. When the engine starts again, after Obsidian restarts, after the engine
-  stopped for having nothing to do, or on a phone after the app was in the background, a diagram
-  whose preamble is stored starts from it instead of loading its packages again. Measured on a
-  Windows desktop in headless WebKit and Chromium against 0.2.1-beta.3, the first diagram after a
-  fresh start of the browser, the engine's start included, took 133 ms instead of 155 for a plain
-  TikZ diagram in WebKit, the browser engine of the iPhone and iPad, and 96 instead of 122 in
-  Chromium, the one of Obsidian's desktop app; siunitx 167 instead of 338 and 117 instead of 260;
-  circuitikz 331 instead of 623 and 221 instead of 437. Without the JIT, as with Lockdown Mode on,
-  in WebKit, the plain diagram took 336 ms instead of 860 and circuitikz 3.9 s instead of 11.4. A
-  note of 74 diagrams that were not cached, opened in a fresh browser after a first visit had stored
-  most of their preambles, took 17% less time in WebKit and 29% less in Chromium. In WebKit on that desktop the
-  engine's start took about 10 to 20 ms longer with the storage in use, which was not tracked down.
-  The engine writes a preamble out only once it has nothing else to do, so no diagram waits for it.
-  Up to 64 MB are kept on a computer and 16 MB on a phone or tablet, compressed from iOS 16.4 on,
-  the preamble used least recently going first; a stored preamble belongs to one build of the
-  engine, and the first start after an update that changes the engine deletes the old ones.
+- Saved preambles outlast the engine. Each preamble an engine saves is also kept in this device's
+  own storage, in Obsidian's IndexedDB beside the diagram cache, never in the vault, so it is not
+  synced with the vault, by Obsidian Sync or iCloud Drive. When the engine starts again, after
+  Obsidian restarts, after the engine stopped for having nothing to do, or on a phone after the app
+  was in the background, a diagram whose preamble is stored starts from it instead of loading its
+  packages again. Measured on a Windows desktop in headless WebKit and Chromium against
+  0.2.1-beta.3, the first diagram after a fresh start of the browser, the engine's start included,
+  took 97 ms instead of 104 for a plain TikZ diagram in WebKit, the browser engine of the iPhone and
+  iPad, and 72 instead of 92 in Chromium, the one of Obsidian's desktop app; siunitx 103 instead of
+  225 and 88 instead of 187; circuitikz 223 instead of 434 and 170 instead of 336. Without the JIT,
+  as with Lockdown Mode on, in WebKit, the plain diagram took 233 ms instead of 600 and circuitikz
+  2.8 s instead of 8.2. A note of 74 diagrams that were not cached, opened in a fresh browser after
+  a first visit had stored most of their preambles, took 24% less time in WebKit and 35% less in
+  Chromium with one engine, 48% less in Chromium with two, as Obsidian's desktop app runs by
+  default, and 10% less in WebKit at a phone's budgets. In WebKit on that desktop the engine's start
+  took 3 to 4 ms longer with the storage in use and nothing stored, and 2 to 14 ms longer while a
+  stored preamble was read, the engine's own start inside its thread taking the same; where the rest
+  goes was not tracked down. The engine writes a preamble out only once it has had nothing to do for
+  a tenth of a second, and then a little at a time, so that a diagram that comes meanwhile waits at
+  most a few milliseconds: on that desktop the longest step took 3 ms, also without the JIT. Up to
+  64 MB are kept for each vault on a computer, and 16 MB on a phone or tablet and on a computer that
+  reports less than 8 GB of memory, compressed from iOS 16.4 on, the preamble used least recently
+  going first; where storage runs out of room, the preambles already stored are still used. A stored
+  preamble belongs to one build of the engine, and the first start of a vault's engine after an
+  update that changes the engine deletes the old ones, without the first diagram waiting for it.
   Settings → Saved preambles covers these too, and turning it off deletes them; clearing the diagram
-  cache clears them. Every release now checks every test diagram started from a stored preamble
-  against the same diagram drawn from the start, byte for byte. On my iPhone 16 Pro the engine of
+  cache deletes them too, which is the way to remove them from a device before uninstalling the
+  plugin, since Obsidian does not tell a plugin it is being removed. The README says what a stored
+  preamble holds. Every release now checks every test diagram started from a stored preamble against
+  the same diagram drawn from the start, byte for byte. On my iPhone 16 Pro the engine of
   0.2.1-beta.2 started in 48 ms, read off the diagnostics view; nothing of this release has been
   measured on a phone yet.
 - On a phone or tablet the engine now stops after 15 seconds without a diagram, where it waited 30.
@@ -200,7 +209,8 @@ top of its notes on GitHub, and will not publish a version that has none.
   engine's start.
 - The diagnostics view says of a diagram that started from a stored preamble "resumed from a stored
   preamble", with how long reading it and putting it back took, and how many preambles are stored,
-  in how many MB, and how many times storage refused; Copy includes it.
+  in how many MB, and how many times storage refused, or that they are off; Copy includes it. The
+  settings say that clearing the diagram cache deletes the stored preambles too.
 
 ## 0.2.0 — 2026-10-13
 
