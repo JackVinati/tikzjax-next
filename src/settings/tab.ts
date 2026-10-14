@@ -174,8 +174,12 @@ export class TikzSettingTab extends PluginSettingTab {
 				.setName('Second engine')
 				.setDesc(
 					'Compile two new diagrams at a time when several are waiting. The second engine starts ' +
-						'only then, takes more memory while it runs, and stops with the first. A computer with ' +
-						'less than 8 GB of memory always uses one.',
+						'only then, takes more memory while it runs, and stops with the first. A computer that ' +
+						'reports less than 8 GB of memory uses one.' +
+						// Said, so that a toggle that changes nothing here does not look broken.
+						(this.plugin.secondEngineAvailable
+							? ''
+							: ' This one reports less memory, or fewer processor cores, than a second engine needs.'),
 				)
 				.addToggle((t) =>
 					t.setValue(this.plugin.settings.secondEngine).onChange(async (value) => {

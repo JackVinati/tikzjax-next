@@ -31,8 +31,8 @@ top of its notes on GitHub, and will not publish a version that has none.
   less time than one, in WebKit and in Chromium, measured on a Windows desktop with this release's
   engine; a note you scroll through one diagram at a time gains less. The second engine starts only
   while diagrams wait, takes about 100 MB more while it runs, and stops with the first. Phones and
-  tablets keep one engine, and so does a computer with less than 8 GB of memory; Settings → Second
-  engine turns it off.
+  tablets keep one engine, and so does a computer that reports less than 8 GB of memory; Settings →
+  Second engine turns it off.
 
 ## 0.2.0 — 2026-10-13
 

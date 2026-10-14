@@ -384,6 +384,15 @@ export default class TikzjaxNextPlugin extends Plugin {
 		});
 	}
 
+	/**
+	 * Whether this device runs a second engine when the setting lets it: not a phone or a tablet, nor
+	 * a computer that reports too little memory or too few cores (platform/budgets.ts `engineCount`).
+	 * The settings tab says so where it does not.
+	 */
+	get secondEngineAvailable(): boolean {
+		return engineCount(this.budgets, true, webViewFeatures()) > 1;
+	}
+
 	/** How many engines run at once on this device, under the settings now in force. */
 	private engineCount(): number {
 		return engineCount(this.budgets, this.settings.secondEngine, webViewFeatures());

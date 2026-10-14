@@ -216,6 +216,8 @@ const FILES = [
 
 let settings: TikzSettings;
 let saves: number;
+/** What the plugin says of this computer's memory and cores (main.ts `secondEngineAvailable`). */
+let secondEngineAvailable: boolean;
 
 function display(): TikzSettingTab {
 	fakes.Setting.all.length = 0;
@@ -229,6 +231,7 @@ function display(): TikzSettingTab {
 		},
 		cache: null,
 		engineInventory: null,
+		secondEngineAvailable,
 	} as unknown as TikzjaxNextPlugin;
 	const tab = new TikzSettingTab(app, plugin);
 	tab.display();
@@ -244,6 +247,7 @@ function setting(name: string): RecordedSetting {
 beforeEach(() => {
 	settings = { ...DEFAULT_SETTINGS };
 	saves = 0;
+	secondEngineAvailable = true;
 	fakes.Platform.isMobile = false;
 });
 
@@ -256,6 +260,19 @@ describe('settings tab — second engine', () => {
 		await toggle.changed?.(false);
 		expect(settings.secondEngine).toBe(false);
 		expect(saves).toBe(1);
+	});
+
+	it('says that a computer reporting less than 8 GB uses one, and so does this one where it is such', () => {
+		display();
+		const desc = setting('Second engine').desc;
+		expect(desc).toContain('A computer that reports less than 8 GB of memory uses one.');
+		expect(desc).not.toContain('This one');
+
+		secondEngineAvailable = false;
+		display();
+		expect(setting('Second engine').desc).toContain(
+			'This one reports less memory, or fewer processor cores, than a second engine needs.',
+		);
 	});
 
 	it('does not offer it on a phone or a tablet, which run one engine whatever it says', () => {

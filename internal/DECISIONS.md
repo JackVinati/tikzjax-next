@@ -1359,10 +1359,15 @@ How many (`engineCount` in `src/platform/budgets.ts`):
   compiling at once want two cores of their own beside the one Obsidian draws on. A computer that
   reports neither keeps two, since the second only starts while diagrams queue up and the setting
   turns it off. The copied diagnostics (D21) carry both figures, so whether desktop Obsidian reports
-  its memory is something a bug report will show.
-- **Changing the setting applies at once**, also when it arrives through Sync: the queue's
-  concurrency and the pool follow, an idle second worker goes at once, and a busy one when it has
-  finished its job. The diagnostics say "stopped when the second engine was turned off".
+  its memory is something a bug report will show; it most likely does, since Obsidian 1.14.4's own
+  `app.js` reads `crypto.subtle`, which a page has only in a secure context (read in the bundle).
+  The figure is the browser's approximation, a power of two, so a computer near the line falls on
+  whichever side the browser rounds it to. Where this rule misses a computer short of memory, a
+  second worker that fails to start makes the pool one (above). The setting says "a computer that
+  reports less than 8 GB", and on a computer these rules leave at one, says that this one does.
+- **Changing the setting applies at once**, also when it arrives through Sync: the pool follows, and
+  tells the queue, an idle second worker goes at once, and a busy one when it has finished its job.
+  The diagnostics say "stopped when the second engine was turned off".
 
 The worker is 0.2.0's, byte for byte: `test/engine-id.test.ts` builds the worker that ships and
 holds it to the ENGINE_ID recorded in `test/fixtures/golden/REVISION.json` (D20), so the pool
