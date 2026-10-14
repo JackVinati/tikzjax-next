@@ -480,7 +480,7 @@ interface Saving {
 }
 
 /** Runs saved and not yet handed over, oldest first, and whether they are being. */
-const toHandOver: { id: number; saving: Saving }[] = [];
+const toHandOver: { id: number; epoch: number; saving: Saving }[] = [];
 let handingOver = false;
 
 /**
@@ -489,8 +489,8 @@ let handingOver = false;
  * preambles the worker is idle only at the end, and a run waiting is memory, which a run the worker
  * no longer keeps would otherwise give back. The oldest is not handed over.
  */
-const queueHandOver = (id: number, saving: Saving, budget: number): void => {
-	toHandOver.push({ id, saving });
+const queueHandOver = (id: number, epoch: number, saving: Saving, budget: number): void => {
+	toHandOver.push({ id, epoch, saving });
 	let held = toHandOver.reduce((n, next) => n + next.saving.run.bytes, 0);
 	while (toHandOver.length > 1 && held > budget) held -= toHandOver.shift()!.saving.run.bytes;
 	if (!handingOver) void handOverAll();
@@ -501,7 +501,7 @@ const handOverAll = async (): Promise<void> => {
 	try {
 		for (let next = toHandOver.shift(); next !== undefined; next = toHandOver.shift()) {
 			await whenIdle();
-			await handOver(next.id, next.saving);
+			await handOver(next.id, next.epoch, next.saving);
 		}
 	} finally {
 		handingOver = false;
@@ -513,7 +513,7 @@ const handOverAll = async (): Promise<void> => {
  * own gzip, to keep across the engine's stops. Nothing is sent when it fails: the run is then kept
  * only while this engine runs, as before D36.
  */
-const handOver = async (id: number, saving: Saving): Promise<void> => {
+const handOver = async (id: number, epoch: number, saving: Saving): Promise<void> => {
 	const spent = { ms: 0 };
 	try {
 		const t = performance.now();
@@ -535,6 +535,7 @@ const handOver = async (id: number, saving: Saving): Promise<void> => {
 		const message: SavedRunMessage = {
 			type: 'saved-run',
 			id,
+			epoch,
 			run: {
 				route: saving.run.route,
 				data: data.buffer as ArrayBuffer,
@@ -1310,7 +1311,8 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 				rendering--;
 				quietSince = performance.now();
 				post(reply);
-				if (saving !== undefined) queueHandOver(request.id, saving, request.snapshots ?? 0);
+				if (saving !== undefined)
+					queueHandOver(request.id, request.epoch ?? 0, saving, request.snapshots ?? 0);
 			},
 			(error: unknown) => {
 				rendering--;

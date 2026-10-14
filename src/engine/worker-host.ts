@@ -164,6 +164,8 @@ export interface StoredRuns {
 	readonly readable: boolean;
 	/** Whether runs can be kept now: they can be read, and storage has not run out of room. */
 	readonly writable: boolean;
+	/** Where the store stands, moved by every clear of it: sent with each render (`keep`). */
+	readonly epoch: number;
 	/** Read what is stored, once; every later call waits for the same. */
 	load(): Promise<void>;
 	/** Whether a run is stored under `route`, as far as is known yet. */
@@ -555,6 +557,7 @@ export class WorkerHost implements TexHost {
 			snapshots,
 			...(stored === undefined ? {} : { stored }),
 			persist,
+			...(persist && runs !== undefined ? { epoch: runs.epoch } : {}),
 		};
 		if (stored === undefined) engine.worker.postMessage(request);
 		else engine.worker.postMessage(request, [stored.data]);

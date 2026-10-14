@@ -1193,6 +1193,7 @@ describe('saved preambles kept across the engines’ stops', () => {
 	class FakeRuns implements StoredRuns {
 		readable = true;
 		writable = true;
+		epoch = 3;
 		readonly stored = new Map<string, StoredRun>();
 		readonly reads: string[] = [];
 		readonly kept: SavedRunMessage[] = [];
@@ -1246,6 +1247,8 @@ describe('saved preambles kept across the engines’ stops', () => {
 		expect(runs.reads).toEqual([route]);
 		const posted = renders(worker(0))[0]!;
 		expect(posted.persist).toBe(true);
+		// Where the store stood, handed back with the run, so that a clear since is seen.
+		expect(posted.epoch).toBe(3);
 		expect(posted.stored?.route).toBe(route);
 		expect(posted.stored?.data.byteLength).toBe(100);
 		expect(posted.stored?.rawBytes).toBe(300);
@@ -1302,6 +1305,7 @@ describe('saved preambles kept across the engines’ stops', () => {
 		const message: SavedRunMessage = {
 			type: 'saved-run',
 			id,
+			epoch: 3,
 			run: storedRun(),
 			preambleMs: 120,
 			saveMs: 9,
@@ -1393,6 +1397,7 @@ describe('saved preambles kept across the engines’ stops', () => {
 		worker(0).emit({
 			type: 'saved-run',
 			id: posted.id,
+			epoch: 3,
 			run: storedRun(),
 			preambleMs: 1,
 			saveMs: 1,

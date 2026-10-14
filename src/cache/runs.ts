@@ -163,6 +163,15 @@ export class RunStore {
 		return this.readable && !this.full;
 	}
 
+	/**
+	 * Where the store stands, moved by every `clear`: sent with each render, and handed back with the
+	 * run it saved (protocol.ts RenderRequest.epoch), which `keep` refuses if the store was cleared
+	 * since.
+	 */
+	get epoch(): number {
+		return this.generation;
+	}
+
 	stats(): StoredRunStats {
 		let runs = 0;
 		let bytes = 0;
@@ -274,7 +283,10 @@ export class RunStore {
 	 * than the whole budget is not kept, and evicts nothing. One keep at a time (`writing`).
 	 */
 	keep(message: SavedRunMessage): Promise<void> {
-		const generation = this.generation;
+		// The store as it stood when the render that saved the run was posted: a worker hands its runs
+		// over once it is idle, up to its whole budget of them after a note, so a run saved before a
+		// clear can reach the store after it.
+		const generation = message.epoch;
 		const next = this.writing.then(() => this.write(message, generation));
 		this.writing = next.catch(ignore);
 		return next;

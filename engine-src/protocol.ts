@@ -77,6 +77,13 @@ export interface RenderRequest {
 	 * run it saved, if it saved one the host can name (SavedRunMessage). Absent is false.
 	 */
 	persist?: boolean | undefined;
+	/**
+	 * Where the host's store of runs stood when it posted the render, which every clear of it moves:
+	 * handed back with the run the render saved (SavedRunMessage), so that a run saved before the
+	 * diagram cache was cleared, or saved preambles turned off, and handed over after, is not kept.
+	 * Absent is 0.
+	 */
+	epoch?: number | undefined;
 }
 
 /** A saved run as the host keeps it, in IndexedDB, across the engine's stops (./stored-run, D36). */
@@ -98,6 +105,8 @@ export interface SavedRunMessage {
 	type: 'saved-run';
 	/** The render that saved it. */
 	id: number;
+	/** The render's RenderRequest.epoch. */
+	epoch: number;
 	run: StoredRun;
 	/**
 	 * TeX's time, in that render's first pass, from its start to where it was saved: what a diagram

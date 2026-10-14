@@ -31,6 +31,7 @@ function saved(route: string, bytes: number, extra: Partial<SavedRunMessage> = {
 	return {
 		type: 'saved-run',
 		id: 1,
+		epoch: 0,
 		run: { route, data: data.buffer, compressed: true, rawBytes: bytes * 3 },
 		preambleMs: 1000,
 		saveMs: 10,
@@ -193,7 +194,7 @@ describe('RunStore — storage that refuses', () => {
 		// Clearing gives it another chance.
 		await store.clear();
 		expect(store.writable).toBe(true);
-		await store.keep(saved('r3', 1000));
+		await store.keep(saved('r3', 1000, { epoch: store.epoch }));
 		expect(keys('runs')).toEqual(['engine-a/r3']);
 	});
 
@@ -347,6 +348,15 @@ describe('RunStore — clearing', () => {
 		expect(keys('index')).toEqual([]);
 		expect(store.stats().runs).toBe(0);
 		expect(await store.read('a')).toBeUndefined();
+	});
+
+	it('keeps no run saved before a clear and handed over after it', async () => {
+		await store.load();
+		await store.clear();
+		expect(store.epoch).toBe(1);
+		await store.keep(saved('before', 1000, { epoch: 0 }));
+		await store.keep(saved('after', 1000, { epoch: store.epoch }));
+		expect(keys('runs')).toEqual(['engine-a/after']);
 	});
 
 	it('lets nothing kept while it clears come back after it', async () => {
