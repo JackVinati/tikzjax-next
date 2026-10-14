@@ -91,12 +91,25 @@ interface RunRecord {
  * A run is sent with a job, and kept at all, only when that is likely less than what compiling its
  * preamble and saving it took the engine that saved it (`worth`). To begin with, the slower of WebKit
  * and Chromium on the desktop (D36): WebKit took 9 to 13 ms to read a run of 0.2 to 2.8 MiB with the
- * engine already up, Chromium 1 to 3; Chromium put 8.9 MiB back in 14 to 22 ms. Then, on each device,
- * what it took there lately (`measured`).
+ * engine already up, Chromium 1 to 3; Chromium put 8.9 MiB back in 14 to 22 ms.
+ *
+ * Then, for sending, on each device, what it took there lately (`measured`). A read is timed on the
+ * main thread, behind other transactions and whatever else the thread was doing, and a fixed delay
+ * divided by a small run's size is a large cost a MiB: one read of 300 ms of tikz-cd's 0.4 MiB, taken
+ * as it came, put the estimate for circuitikz's run past what its preamble takes, and no run that size
+ * was sent, or measured, again that session. So each sample moves the estimate a quarter of the way
+ * towards it and counts for at most four times the larger of the estimate and these figures, which
+ * one slow read moves by 1.75 times at most; and each run not sent for its cost moves it a quarter of
+ * the way back to these, so that after a few a run is sent again and measured. Keeping goes by these
+ * figures alone (`worthKeeping`): a run kept is for later sessions, which start from them.
  */
 const FIXED_MS = 12;
 const READ_MS_PER_MIB = 1;
 const RESTORE_MS_PER_MIB = 2.5;
+
+/** `estimate` moved a quarter of the way to `sample`, counted at most four times the larger of `estimate` and `base`. */
+const lean = (estimate: number, sample: number, base: number): number =>
+	0.75 * estimate + 0.25 * Math.min(sample, 4 * Math.max(estimate, base));
 
 export class RunStore {
 	private readonly name: string;
@@ -183,21 +196,37 @@ export class RunStore {
 		return this.estimateMs(info) < info.preambleMs + info.saveMs;
 	}
 
-	estimateMs(info: Pick<StoredRunInfo, 'bytes' | 'rawBytes'>): number {
-		return FIXED_MS + (info.bytes / MIB) * this.readPerMiB + (info.rawBytes / MIB) * this.restorePerMiB;
+	estimateMs(
+		info: Pick<StoredRunInfo, 'bytes' | 'rawBytes'>,
+		readPerMiB = this.readPerMiB,
+		restorePerMiB = this.restorePerMiB,
+	): number {
+		return FIXED_MS + (info.bytes / MIB) * readPerMiB + (info.rawBytes / MIB) * restorePerMiB;
+	}
+
+	/** Whether a run is worth keeping, for later sessions: by the figures they start from. */
+	private worthKeeping(info: Pick<StoredRunInfo, 'bytes' | 'rawBytes' | 'preambleMs' | 'saveMs'>): boolean {
+		return this.estimateMs(info, READ_MS_PER_MIB, RESTORE_MS_PER_MIB) < info.preambleMs + info.saveMs;
 	}
 
 	/**
 	 * What putting back a run of `info` took: reading it here, `readMs`, and in the worker,
-	 * `restoreMs`. The next estimates lean on it, a quarter at a time.
+	 * `restoreMs`. The next estimates lean on it, a quarter at a time, and on one sample by at most
+	 * 1.75 times (`lean`).
 	 */
 	measured(info: Pick<StoredRunInfo, 'bytes' | 'rawBytes'>, readMs: number, restoreMs: number): void {
 		const stored = info.bytes / MIB;
 		const raw = info.rawBytes / MIB;
 		if (stored >= 0.25 && Number.isFinite(readMs))
-			this.readPerMiB = 0.75 * this.readPerMiB + 0.25 * (Math.max(0, readMs - FIXED_MS) / stored);
+			this.readPerMiB = lean(this.readPerMiB, Math.max(0, readMs - FIXED_MS) / stored, READ_MS_PER_MIB);
 		if (raw >= 0.25 && Number.isFinite(restoreMs))
-			this.restorePerMiB = 0.75 * this.restorePerMiB + 0.25 * (restoreMs / raw);
+			this.restorePerMiB = lean(this.restorePerMiB, Math.max(0, restoreMs) / raw, RESTORE_MS_PER_MIB);
+	}
+
+	/** A run was not sent for what putting it back would cost: the estimates go a quarter of the way back. */
+	private relax(): void {
+		this.readPerMiB += (READ_MS_PER_MIB - this.readPerMiB) / 4;
+		this.restorePerMiB += (RESTORE_MS_PER_MIB - this.restorePerMiB) / 4;
 	}
 
 	/**
@@ -207,7 +236,11 @@ export class RunStore {
 	async read(route: string): Promise<StoredRun | undefined> {
 		await this.load();
 		const info = this.index?.get(route);
-		if (info === undefined || !this.worth(info)) return undefined;
+		if (info === undefined) return undefined;
+		if (!this.worth(info)) {
+			this.relax();
+			return undefined;
+		}
 		let record: RunRecord | undefined;
 		try {
 			record = await this.run(async (db) => {
@@ -231,9 +264,9 @@ export class RunStore {
 	}
 
 	/**
-	 * Keep a run a worker saved, if it is worth putting back (`worth`) and fits the budget, making
-	 * room from the least recently used. A run larger than the whole budget is not kept, and evicts
-	 * nothing. One keep at a time (`writing`).
+	 * Keep a run a worker saved, if it is worth putting back by the figures a session starts from
+	 * (`worthKeeping`) and fits the budget, making room from the least recently used. A run larger
+	 * than the whole budget is not kept, and evicts nothing. One keep at a time (`writing`).
 	 */
 	keep(message: SavedRunMessage): Promise<void> {
 		const generation = this.generation;
@@ -260,7 +293,7 @@ export class RunStore {
 			lastUsed: now,
 		};
 		const budget = this.options.budget();
-		if (info.bytes > budget || !this.worth(info)) return;
+		if (info.bytes > budget || !this.worthKeeping(info)) return;
 
 		// The least recently used first, but never the one this replaces, which goes anyway.
 		const others = [...this.index.values()]

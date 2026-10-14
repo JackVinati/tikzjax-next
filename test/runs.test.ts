@@ -280,6 +280,35 @@ describe('RunStore — whether a run is worth putting back', () => {
 		expect(store.estimateMs(run)).toBeGreaterThan(before * 10);
 		expect(store.worth(info(MIB, 200))).toBe(false);
 	});
+
+	it('moves by at most 1.75 times on one slow sample', () => {
+		// tikz-cd's run, 0.40 MiB stored and 1.26 raw, read in 300 ms behind something else.
+		const tikzcd = { bytes: 0.4 * MIB, rawBytes: 1.26 * MIB };
+		// circuitikz's, 2.83 and 8.88 MiB.
+		const circuitikz = { bytes: 2.83 * MIB, rawBytes: 8.88 * MIB };
+		const before = store.estimateMs(circuitikz) - 12;
+		store.measured(tikzcd, 300, 1000);
+		expect(store.estimateMs(circuitikz) - 12).toBeCloseTo(before * 1.75, 5);
+		expect(store.worth({ ...circuitikz, preambleMs: 300, saveMs: 40 })).toBe(true);
+	});
+
+	it('goes back towards the figures it started from for each run it does not send', async () => {
+		await store.keep(saved('big', 2 * MIB, { preambleMs: 100, saveMs: 0 }));
+		const run = { bytes: 2 * MIB, rawBytes: 6 * MIB };
+		for (let i = 0; i < 20; i++) store.measured(run, 400, 1000);
+		expect(await store.read('big')).toBeUndefined();
+		let tries = 1;
+		while ((await store.read('big')) === undefined && tries < 50) tries++;
+		expect(tries).toBeGreaterThan(1);
+		expect(tries).toBeLessThan(50);
+	});
+
+	it('keeps a run worth putting back by the figures a session starts from, however slow it was here', async () => {
+		const run = { bytes: MIB, rawBytes: 3 * MIB };
+		for (let i = 0; i < 20; i++) store.measured(run, 1000, 3000);
+		await store.keep(saved('r1', MIB, { preambleMs: 200, saveMs: 10 }));
+		expect(keys('runs')).toEqual(['engine-a/r1']);
+	});
 });
 
 describe('RunStore — clearing', () => {
