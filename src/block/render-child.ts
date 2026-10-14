@@ -766,14 +766,18 @@ export class TikzBlock extends MarkdownRenderChild {
 
 	// -------------------------------------------------------------------------------------------
 
-	/** The block is in front of the reader, or as close to it as it will get. */
+	/**
+	 * The block is in front of the reader, or as close to it as it will get. The first sighting
+	 * counts: a block scrolled away and back while it compiles is still timed from when it was first
+	 * seen, or its "seen to drawn" came out shorter than the TeX run inside it.
+	 */
 	private seen(): void {
-		this.seenAt = this.deps.now();
+		if (this.seenAt === null) this.seenAt = this.deps.now();
 	}
 
 	/** The card's Retry or the "Render diagram" button: a new attempt, seen at the press. */
 	private retry(): void {
-		this.seen();
+		this.seenAt = this.deps.now();
 		this.dispatch({ type: 'retry' });
 	}
 

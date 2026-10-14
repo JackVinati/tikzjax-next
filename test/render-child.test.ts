@@ -1279,6 +1279,42 @@ describe('what a block reports when it comes to rest', () => {
 		]);
 	});
 
+	it('a diagram scrolled away and back while it compiles: timed from when it was first seen', async () => {
+		const { reports, report } = reporting();
+		let now = 100;
+		let change: ((visible: boolean) => void) | null = null;
+		const queue = {
+			submit: (_k: string, _j: TexJobSpec, _p: number, _t: number, opts?: { onStart?: () => void }) => {
+				opts?.onStart?.();
+				// TeX runs for 200 ms, and halfway through the reader scrolls away and back.
+				now += 100;
+				change?.(false);
+				now += 50;
+				change?.(true);
+				now += 50;
+				return Promise.resolve({ svg: SVG, log: [], durationMs: 200 });
+			},
+			release: () => undefined,
+		} as unknown as BlockDeps['queue'];
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({
+				queue,
+				now: () => now,
+				report,
+				observe: (_el, onChange) => {
+					change = onChange;
+					onChange(true);
+				},
+			}),
+		);
+		child.onload();
+		await child.settled;
+		await vi.waitFor(() => expect(reports).toHaveLength(2));
+		expect(reports[1]?.timings?.totalMs).toBe(200);
+	});
+
 	it("a diagram the viewport gate gave up on: waited from its cache miss, so the gate's wait is in it", async () => {
 		const { reports, report } = reporting();
 		let now = 100;
