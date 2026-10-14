@@ -2960,8 +2960,10 @@ WebKit, 3,572 and 2,545 against 3,599 and 2,546 in Chromium, and the note of 74 
 2,924 ms against 4,398 and 2,954, its peak memory as beta.3's; within this desktop's noise, as they
 should be.
 
-**What it costs.** `main.js` is 12,220,706 bytes, 18,373 more than beta.3's: the worker's code by
-7,640 characters, and the host the rest.
+**What it costs.** `main.js` is 12,220,718 bytes, 18,385 more than beta.3's: the worker's code by
+7,640 characters, and the host the rest. The campaigns above ran a `main.js` 12 bytes shorter, before
+a guard the store's lint asked for in the host's queue, which changes nothing it does; the worker is
+the same.
 
 The store costs WebKit's engine start a few milliseconds on this desktop. The same build with and
 without its RunStore, five rounds on an empty profile, started in 60 and 61 ms against 56 and 58, by
