@@ -104,6 +104,14 @@ const letterName = (i) => String.fromCharCode(97 + (i % 26), 97 + Math.floor(i /
 const everyFont = metrics
 	.map((name, i) => `${B}font${B}verify${letterName(i)}=${name} at ${5 + (i % 7)}pt`)
 	.join('\n');
+const bundledMetrics = Object.keys(assets.files)
+	.filter((f) => f.endsWith('.tfm'))
+	.sort()
+	.map(
+		(f) =>
+			`${B}immediate${B}openout${B}w=${f} ${B}immediate${B}write${B}w{not a font}${B}immediate${B}closeout${B}w\n`,
+	)
+	.join('');
 const manyNames = Array.from(
 	{ length: 20_000 },
 	(_, i) => `${B}expandafter${B}def${B}csname verify${i}${B}endcsname{${i}}\n`,
@@ -144,6 +152,9 @@ const extra = [
 	['dump', `${B}dump\n${picture('x')}`],
 	// Every font metric at once: the reset trusts that none stops loading half-way, past fmem_ptr.
 	['every-font', `${everyFont}\n${picture('x')}`],
+	// A file written under the name of each bundled font's metrics: in every order every-font, before
+	// it or after it, must load them as they are bundled (engine-src/library.ts change 13).
+	['font-metrics-written', `${B}newwrite${B}w\n${bundledMetrics}${picture('x')}`],
 	// 20,000 names, a line each, which overflow into the hash table's slots from hash_used down.
 	['many-names', `${manyNames}${picture('x')}`, {}, ['hash_used', 10_000]],
 	// e-TeX's pseudo-files, which \scantokens keeps in mem.

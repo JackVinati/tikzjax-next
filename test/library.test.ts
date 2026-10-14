@@ -316,6 +316,63 @@ describe('the host calls TeX makes per line and per character', () => {
 });
 
 /*
+ * A font's metrics are what TeX reads when it loads the font, and the bundled ones are inflated once
+ * and kept for the worker's life. A diagram that opened one of those names to write was handed the
+ * kept bytes and wrote into them, and every later diagram in the worker read the font from what it
+ * wrote: "Bad metric (TFM) file", or a resumed run that drew what a run from the start no longer did
+ * (internal/DECISIONS.md D35).
+ */
+describe('a font metric file opened to write', () => {
+	const NAME_AT = 0;
+	const name = (memory: ArrayBuffer, filename: string) => {
+		new Uint8Array(memory).set(new TextEncoder().encode(filename.padEnd(32, ' ')), NAME_AT);
+		return 32;
+	};
+	const metrics = Uint8Array.from({ length: 64 }, (_, i) => i + 1);
+	const read = (memory: ArrayBuffer, filename: string): number[] => {
+		const descriptor = library.reset(name(memory, filename), NAME_AT);
+		const out: number[] = [];
+		for (let i = 0; i < 64; i++) {
+			library.get(descriptor, 4096, 1);
+			out.push(new Uint8Array(memory)[4096]!);
+		}
+		return out;
+	};
+
+	it('starts empty, and the bundled metrics are as they were for the next run', () => {
+		library.setBundledFiles(new Map([['eufm10.tfm', metrics]]), (bytes: Uint8Array) => bytes);
+		const memory = new ArrayBuffer(1 << 16);
+		library.setMemory(memory);
+		// A file opened first is read as at its end (library.ts get, upstream's descriptor 0).
+		library.reset(name(memory, 'first.tex'), NAME_AT);
+		const out = library.rewrite(name(memory, 'eufm10.tfm'), NAME_AT);
+		expect(library.erstat(out)).toBe(0);
+		for (const c of 'written') library.printChar(out, c.charCodeAt(0));
+		expect(new TextDecoder().decode(library.readFileSync('eufm10.tfm'))).toBe('written');
+		library.deleteEverything();
+
+		library.setMemory(memory);
+		library.reset(name(memory, 'first.tex'), NAME_AT);
+		expect(read(memory, 'eufm10.tfm')).toEqual(Array.from(metrics));
+	});
+
+	it('opens for a name the engine has no metrics for, where it used to be refused', () => {
+		library.setBundledFiles(new Map(), (bytes: Uint8Array) => bytes);
+		const memory = new ArrayBuffer(1 << 16);
+		library.setMemory(memory);
+		const missing: string[] = [];
+		library.setMissingFileSink((filename) => missing.push(filename));
+		const out = library.rewrite(name(memory, 'nosuchfont.tfm'), NAME_AT);
+		expect(library.erstat(out)).toBe(0);
+		expect(missing).toEqual([]);
+		// To read, it is not there.
+		expect(library.erstat(library.reset(name(memory, 'nosuchfont9.tfm'), NAME_AT))).toBe(1);
+		expect(missing).toEqual(['nosuchfont9.tfm']);
+		library.setMissingFileSink(null);
+	});
+});
+
+/*
  * A run is saved where \tikzjaxsnapshot stands, at the end of its \begin{document}, for later inputs
  * that start with the same text up to the line TeX has read (engine-src/snapshot.ts, D32). That holds
  * only while TeX knows of the job's own file what its main input read, a line at a time.

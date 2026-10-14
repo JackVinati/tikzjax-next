@@ -63,6 +63,17 @@ export const HAZARDS = [
 		],
 	},
 	{
+		name: 'font-metrics-written',
+		why: `a body that writes a file named as a bundled font's metrics, eufm10.tfm, which the preamble loads: every later run, resumed or from the start, must load the font as the first did`,
+		options: { addToPreamble: `${B}font${B}frak=eufm10 ` },
+		bodies: [
+			pic(`${B}node {${B}fontname${B}frak};`),
+			`${B}newwrite${B}w${B}immediate${B}openout${B}w=eufm10.tfm ${B}immediate${B}write${B}w{not a font}${B}immediate${B}closeout${B}w\n` +
+				pic(`${B}node {[${B}fontname${B}frak]};`),
+		],
+		files: ['eufm10.tfm'],
+	},
+	{
 		name: 'catcodes',
 		why: `catcodes left changed by the preamble: an active ! and ${B}makeatletter not undone`,
 		options: { addToPreamble: `${B}catcode\`${B}!=13 ${B}def!{X}${B}makeatletter` },

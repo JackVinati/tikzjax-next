@@ -43,6 +43,9 @@
  *     copies its own table of files, and puts that back for a run that starts from the saved memory
  *     (worker.ts, ./snapshot, D32). It also notes whether TeX learnt anything about the job's own
  *     file other than by reading it line by line, which a saved run could not stand for.
+ * 13. A font's metrics, from dvi2html's table or the bundle, are what TeX gets when it opens a .tfm
+ *     to READ. A .tfm opened to write starts empty, as any other file does: it was handed the
+ *     bundled bytes, which every later run reads the font from, and wrote into them (D35).
  */
 
 import { tfmData } from '@drgrice1/dvi2html';
@@ -215,7 +218,7 @@ const openSync = (filename: string, mode: 'r' | 'w'): number => {
 
 	if (filesystem[filename]) {
 		buffer = filesystem[filename];
-	} else if (filename.endsWith('.tfm')) {
+	} else if (mode === 'r' && filename.endsWith('.tfm')) {
 		// dvi2html carries a built-in metric table. It is tried FIRST so every font the engine
 		// already rendered keeps rendering byte-identically — but it covers only Computer Modern,
 		// lasy and the AMS symbol fonts (msam, msbm), and it THROWS on anything else. That throw
@@ -228,6 +231,10 @@ const openSync = (filename: string, mode: 'r' | 'w'): number => {
 		// dead engine. Drawing them is a separate gap: dvi2html's own table has neither family,
 		// and of their faces only the Euler ones ship — rsfs has metrics and no web font at all
 		// (upstream #55, #84, #113).
+		//
+		// Only to read (change 13). A .tfm opened to write starts empty below, as any other name
+		// does: handed the bundled bytes, which resolveBundled keeps for the worker's life, TeX wrote
+		// into the very array every later run reads that font from.
 		buffer = builtinMetrics(filename) ?? resolveBundled(filename);
 		if (!buffer) {
 			missingSink?.(filename);
