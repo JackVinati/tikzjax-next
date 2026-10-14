@@ -345,6 +345,28 @@ for (const twoPass of [false, true]) {
 			assert.equal(text.getAttribute('text-anchor'), 'middle');
 			assert.ok(!/[\uF000-\uF8FF]/u.test(text.textContent), 'leftover proxy glyph');
 		}
+		// Where each run is put back, to a thousandth of a point: centred in the boxes TeX set, on
+		// their baseline, in their size and colour. The golden corpus holds the boxes, not this. The
+		// last \u4E2D\u6587 follows a \ref, which reads ?? on one pass and 1 on two.
+		const at = (text, name) => Number(Number(text.getAttribute(name)).toFixed(3));
+		assert.deepEqual(
+			restored.map((text) => [
+				text.textContent,
+				at(text, 'x'),
+				at(text, 'y'),
+				text.getAttribute('font-size'),
+				text.getAttribute('fill'),
+			]),
+			[
+				['\u5F00\u59CB', -25.404, -53.898, '10', 'black'],
+				['\u041F\u0440\u0438\u0432\u0435\u0442', -5.404, -53.898, '10', 'black'],
+				['\uD83D\uDE00', -30.404, -53.898, '10', 'black'],
+				['\u03A9\u03BC\u03AD\u03B3\u03B1', -6.029, -53.898, '12', '#ff0000'],
+				['\u4E2D\u6587', -25.404, -53.898, '10', 'black'],
+				['\u4E2D\u6587', -25.404, -53.898, '10', 'black'],
+				['\u4E2D\u6587', twoPass ? -1.792 : 4.069, -53.898, '10', 'black'],
+			],
+		);
 		writeFileSync(join(RESULTS, `unicode-labels-${twoPass ? 'two' : 'one'}-pass.svg`), reply.svg);
 		console.log(`OK    Unicode labels (${twoPass ? 'two' : 'one'} pass)`);
 	} catch (error) {
