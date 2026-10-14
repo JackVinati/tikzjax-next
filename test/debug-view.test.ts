@@ -174,7 +174,7 @@ describe('the engine in the diagnostics view', () => {
 			source([], {
 				starts: 2,
 				lives: [
-					{ startMs: 230, boot: null, stop: 'background' },
+					{ startMs: 230, boot: null, snapshots: null, stop: 'background' },
 					{
 						startMs: 86,
 						boot: {
@@ -185,6 +185,7 @@ describe('the engine in the diagnostics view', () => {
 							nativeInflate: true,
 							nativeBase64: true,
 						},
+						snapshots: null,
 						stop: null,
 					},
 				],

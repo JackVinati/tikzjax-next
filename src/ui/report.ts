@@ -66,9 +66,9 @@ export interface DiagnosticsSnapshot {
 /**
  * Where a compile's time went, a step to an entry, in the order the steps happen: seen and waiting
  * to be asked for, behind other diagrams, waiting for the engine to start, setting up TeX's memory
- * (its own, reset, or a new one),
- * TeX, DVI to SVG, the SVG pipeline, drawing it in the note, and the whole of it. A step nobody
- * timed is left out.
+ * (its own, reset, or a new one), TeX, and whether it resumed from a saved preamble or saved its
+ * own, and in how long, DVI to SVG, the SVG pipeline, drawing it in the note, and the whole of it. A
+ * step nobody timed is left out.
  */
 export function timingSteps(timings: CompileTimings): string[] {
 	const steps = [
@@ -81,6 +81,9 @@ export function timingSteps(timings: CompileTimings): string[] {
 				? STRINGS.timingNewMemory(timings.resetMs)
 				: STRINGS.timingReset(timings.resetMs),
 		timings.texMs === undefined ? null : STRINGS.timingTex(timings.texMs, timings.passes ?? 1),
+		timings.resumed === true ? STRINGS.timingResumed : null,
+		timings.saveMs === undefined ? null : STRINGS.timingSaved(timings.saveMs),
+		timings.saveFailed === true ? STRINGS.timingSaveFailed : null,
 		timings.svgMs === undefined ? null : STRINGS.timingSvg(timings.svgMs),
 		STRINGS.timingPost(timings.postMs),
 		timings.mountMs === undefined ? null : STRINGS.timingMount(timings.mountMs),
@@ -100,20 +103,25 @@ export function renderName(record: RenderRecord, index: number): string {
 
 /**
  * One engine's life, as a line: how long it took to start, where that went inside the worker and
- * whether it had the platform's own gzip and base64 (which iOS has from 16.4 and 18.2), and how it
- * ended.
+ * whether it had the platform's own gzip and base64 (which iOS has from 16.4 and 18.2), what it held
+ * of saved preambles after its last diagram, how many saves failed in it, and how it ended.
  */
 export function engineLife(life: EngineReport['lives'][number]): string {
-	const start =
+	const started =
 		life.startMs === null
 			? STRINGS.engineNeverStarted
 			: life.boot === null
 				? STRINGS.engineStartedIn(life.startMs)
 				: STRINGS.engineStartedWith(life.startMs, life.boot);
+	const saved = life.snapshots;
+	const start =
+		saved === null ? started : STRINGS.engineSaved(started, saved.runs, mb(saved.bytes), saved.failures);
 	return life.stop === null ? STRINGS.engineRunning(start) : STRINGS.engineStopped(start, life.stop);
 }
 
-const mb = (bytes: number): string => `${(bytes / 1048576).toFixed(1)} MB`;
+function mb(bytes: number): string {
+	return `${(bytes / 1048576).toFixed(1)} MB`;
+}
 
 /** The whole view as plain text, for a bug report. See the top of this file for what it leaves out. */
 export function diagnosticsText(s: DiagnosticsSnapshot): string {

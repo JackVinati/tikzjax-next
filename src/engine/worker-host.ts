@@ -54,6 +54,11 @@ export interface EngineLife {
 	 * until it is ready, or from a worker that does not say.
 	 */
 	boot: BootTimings | null;
+	/**
+	 * What it held of saved preambles after its last diagram (internal/DECISIONS.md D32): how many
+	 * runs, their bytes, and how many saves failed in it. Null until a diagram has said.
+	 */
+	snapshots: { runs: number; bytes: number; failures: number } | null;
 	/** Null while it runs. */
 	stop: EngineStop | null;
 }
@@ -471,7 +476,7 @@ export class WorkerHost implements TexHost {
 		// no one awaiting `ready()` must not surface as an unhandled rejection.
 		ready.catch(() => undefined);
 
-		const life: EngineLife = { startMs: null, boot: null, stop: null };
+		const life: EngineLife = { startMs: null, boot: null, snapshots: null, stop: null };
 		this.starts++;
 		this.lives.push(life);
 		if (this.lives.length > ENGINE_LIVES) this.lives.shift();
@@ -694,9 +699,10 @@ export class WorkerHost implements TexHost {
 		}
 	}
 
-	/** What an engine said it holds of saved runs, for routing. */
+	/** What an engine said it holds of saved runs, for routing and for the diagnostics view. */
 	private heldBy(engine: Engine, state: SnapshotState): void {
 		engine.held = new Set(state.held);
+		engine.life.snapshots = { runs: state.held.length, bytes: state.bytes, failures: state.failures };
 	}
 
 	/** How many workers run at once now: the pool's size, or one once a worker failed to start. */

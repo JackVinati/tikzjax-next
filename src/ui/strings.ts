@@ -65,6 +65,11 @@ export const STRINGS = {
 	timingNewMemory: (ms: number) => `new memory ${ms} ms`,
 	timingTex: (ms: number, passes: number) =>
 		passes > 1 ? `TeX ${ms} ms, ${passes} passes` : `TeX ${ms} ms`,
+	/** The diagram's TeX started from a run an earlier diagram with the same preamble saved. */
+	timingResumed: 'resumed from a saved preamble',
+	/** The diagram's run was saved at the end of its \begin{document}, for later ones. */
+	timingSaved: (ms: number) => `preamble saved in ${ms} ms`,
+	timingSaveFailed: 'saving the preamble failed',
 	timingSvg: (ms: number) => `DVI to SVG ${ms} ms`,
 	timingPost: (ms: number) => `SVG pipeline ${ms} ms`,
 	timingMount: (ms: number) => `drawing ${ms} ms`,
@@ -82,6 +87,10 @@ export const STRINGS = {
 		`inflate ${boot.inflateMs} ms, compile ${boot.compileMs} ms; native gzip ${yesNo(boot.nativeInflate)}, ` +
 		`native base64 ${yesNo(boot.nativeBase64)})`,
 	engineNeverStarted: 'never finished starting',
+	/** What an engine held of saved preambles after its last diagram, and its saves that failed. */
+	engineSaved: (start: string, runs: number, mb: string, failures: number) =>
+		`${start}; ${runs === 1 ? '1 saved preamble' : `${runs} saved preambles`}, ${mb}` +
+		(failures === 0 ? '' : failures === 1 ? ', 1 save failed' : `, ${failures} saves failed`),
 	engineRunning: (start: string) => `${start}, running`,
 	engineStopped: (start: string, why: EngineStop) => `${start}, ${STOPPED[why]}`,
 	engineLastStop: (why: EngineStop) => `Last stopped: ${STOPPED[why]}.`,

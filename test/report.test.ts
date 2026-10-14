@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { diagnosticsText, type DiagnosticsSnapshot, type RenderRecord } from '../src/ui/report';
+import type { CompileTimings } from '../src/types';
+import {
+	diagnosticsText,
+	engineLife,
+	timingSteps,
+	type DiagnosticsSnapshot,
+	type RenderRecord,
+} from '../src/ui/report';
 
 /*
  * The diagnostics view's Copy button puts this text on the clipboard so that it can be pasted into
@@ -32,8 +39,8 @@ function snapshot(over: Partial<DiagnosticsSnapshot> = {}): DiagnosticsSnapshot 
 		engine: {
 			starts: 3,
 			lives: [
-				{ startMs: 230, boot: null, stop: 'idle' },
-				{ startMs: 214, boot: null, stop: 'background' },
+				{ startMs: 230, boot: null, snapshots: null, stop: 'idle' },
+				{ startMs: 214, boot: null, snapshots: null, stop: 'background' },
 				{
 					startMs: 221,
 					boot: {
@@ -44,6 +51,7 @@ function snapshot(over: Partial<DiagnosticsSnapshot> = {}): DiagnosticsSnapshot 
 						nativeInflate: false,
 						nativeBase64: false,
 					},
+					snapshots: null,
 					stop: null,
 				},
 			],
@@ -119,7 +127,7 @@ describe('the text the diagnostics view copies', () => {
 			snapshot({
 				engine: {
 					starts: 25,
-					lives: [{ startMs: null, boot: null, stop: 'error' }],
+					lives: [{ startMs: null, boot: null, snapshots: null, stop: 'error' }],
 					lastStop: 'error',
 					poolSize: 2,
 				},
@@ -138,6 +146,51 @@ describe('the text the diagnostics view copies', () => {
 			'#2 bbbbbbbb, 6 s ago: error (tex-error)',
 			'#1 aaaaaaaa, 9 s ago: cached from l2',
 		]);
+	});
+
+	it('says of a render whether it resumed from a saved preamble, or saved its own and in how long', () => {
+		const steps = (timings: Partial<CompileTimings>) =>
+			timingSteps({ queueMs: 1, postMs: 2, texMs: 9, passes: 1, ...timings });
+		expect(steps({ resumed: true })).toEqual([
+			'queue 1 ms',
+			'TeX 9 ms',
+			'resumed from a saved preamble',
+			'SVG pipeline 2 ms',
+		]);
+		expect(steps({ saveMs: 4 })).toContain('preamble saved in 4 ms');
+		expect(steps({ saveFailed: true })).toContain('saving the preamble failed');
+		expect(steps({})).not.toContain('resumed from a saved preamble');
+	});
+
+	it('says what each engine holds of saved preambles, and how many of its saves failed', () => {
+		const held = diagnosticsText(
+			snapshot({
+				engine: {
+					starts: 1,
+					lives: [
+						{
+							startMs: 50,
+							boot: null,
+							snapshots: { runs: 3, bytes: 9.5 * 1048576, failures: 0 },
+							stop: null,
+						},
+					],
+					lastStop: null,
+					poolSize: 1,
+				},
+			}),
+		);
+		expect(held).toContain('  1. started in 50 ms; 3 saved preambles, 9.5 MB, running');
+		expect(
+			engineLife({
+				startMs: 50,
+				boot: null,
+				snapshots: { runs: 1, bytes: 0, failures: 2 },
+				stop: 'idle',
+			}),
+		).toBe(
+			'started in 50 ms; 1 saved preamble, 0.0 MB, 2 saves failed, stopped after it had nothing to do',
+		);
 	});
 
 	it('has the cache and the queue in it', () => {

@@ -350,7 +350,7 @@ describe('the payload the engine starts from', () => {
 		expect((a.result.error as TexError).kind).toBe('engine-unavailable');
 		expect((a.result.error as TexError).message).toContain('inflated to 4096 B');
 		await expect(started).rejects.toBeInstanceOf(TexError);
-		expect(host.report().lives).toEqual([{ startMs: null, boot: null, stop: 'error' }]);
+		expect(host.report().lives).toEqual([{ startMs: null, boot: null, snapshots: null, stop: 'error' }]);
 	});
 });
 
@@ -429,7 +429,7 @@ describe('idle teardown', () => {
 		expect(worker(0).terminated).toBe(false);
 		timers.advance(1);
 		expect(worker(0).terminated).toBe(true);
-		expect(host.report().lives).toEqual([{ startMs: null, boot: null, stop: 'idle' }]);
+		expect(host.report().lives).toEqual([{ startMs: null, boot: null, snapshots: null, stop: 'idle' }]);
 	});
 
 	it('is called off by a job arriving for the engine still starting', () => {
@@ -517,10 +517,10 @@ describe('what the diagnostics view is told about the engine', () => {
 		expect(host.report()).toEqual({
 			starts: 4,
 			lives: [
-				{ startMs: 212, boot: null, stop: 'idle' },
-				{ startMs: 188, boot: null, stop: 'timeout' },
-				{ startMs: null, boot: null, stop: 'background' },
-				{ startMs: null, boot: null, stop: 'error' },
+				{ startMs: 212, boot: null, snapshots: null, stop: 'idle' },
+				{ startMs: 188, boot: null, snapshots: null, stop: 'timeout' },
+				{ startMs: null, boot: null, snapshots: null, stop: 'background' },
+				{ startMs: null, boot: null, snapshots: null, stop: 'error' },
 			],
 			lastStop: 'error',
 			poolSize: 1,
@@ -532,7 +532,7 @@ describe('what the diagnostics view is told about the engine', () => {
 		void host.ready();
 		worker(0).boot();
 		await tick();
-		expect(host.report().lives).toEqual([{ startMs: 0, boot: null, stop: null }]);
+		expect(host.report().lives).toEqual([{ startMs: 0, boot: null, snapshots: null, stop: null }]);
 
 		host.kill();
 		expect(host.report()).toMatchObject({ lives: [{ stop: 'restart' }], lastStop: 'restart' });
@@ -555,7 +555,7 @@ describe('what the diagnostics view is told about the engine', () => {
 		};
 		worker(0).boot(timings);
 		await tick();
-		expect(host.report().lives).toEqual([{ startMs: 86, boot: timings, stop: null }]);
+		expect(host.report().lives).toEqual([{ startMs: 86, boot: timings, snapshots: null, stop: null }]);
 	});
 
 	it('keeps the last twenty, and counts them all', () => {
@@ -1088,6 +1088,17 @@ describe('saved preambles', () => {
 		await tick();
 		send(host, 'd', 'pgfplots');
 		expect(worker(0).renders).toHaveLength(2);
+	});
+
+	it('are said in the report: how many each engine holds, their bytes and its saves that failed', async () => {
+		const host = new WorkerHost({ snapshotBudget: () => 32 * 1048576, now: () => 0 });
+		send(host, 'a', 'pgfplots');
+		worker(0).boot();
+		holding(worker(0), worker(0).renders[0]!, [nameOf('pgfplots'), 'other'], 1);
+		await tick();
+		expect(host.report().lives).toEqual([
+			{ startMs: 0, boot: null, snapshots: { runs: 2, bytes: 2 * 1048576, failures: 1 }, stop: null },
+		]);
 	});
 });
 
