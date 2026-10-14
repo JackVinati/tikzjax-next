@@ -17,6 +17,11 @@ top of its notes on GitHub, and will not publish a version that has none.
   its WebView supports, the engine, and every step's time, and none of your diagrams' code, error
   messages or note names. Where the device does not let the plugin copy, the text appears
   selected, to copy by hand.
+- A diagram that is not cached goes to the engine as soon as it comes into view. Until now each
+  one waited first, half a second on a phone and 300 ms on a desktop, also when you had just
+  opened the note. Only a diagram in a note you are typing in still waits for you to pause, so that
+  typing in it, in a second pane or beside a Reading view, compiles it once per pause and not at
+  every keystroke.
 
 ## 0.2.0 — 2026-10-13
 

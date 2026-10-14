@@ -964,6 +964,55 @@ describe('a block the viewport never reports on', () => {
 	});
 });
 
+describe('the debounce', () => {
+	/**
+	 * It exists for typing (#24): a block remade at every keystroke must not compile at every
+	 * keystroke. Every block used to wait for it, so a note opened on a phone waited 500 ms before
+	 * its first diagram was even queued. Now only a block of a note being typed in waits.
+	 */
+	const LONG = 60_000;
+
+	it('is not waited for by a block shown for the first time: it is queued as soon as it is seen', async () => {
+		const { queue, bands } = recordingBands();
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ queue, debounceMs: LONG, editing: () => false }),
+		);
+		child.onload();
+		await vi.waitFor(() => expect(bands).toEqual([1]));
+	});
+
+	it('is waited for by a block of a note being typed in, which the next keystroke unloads unqueued', async () => {
+		const { queue, bands } = recordingBands();
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ queue, debounceMs: LONG, editing: () => true }),
+		);
+		child.onload();
+		for (let i = 0; i < 20; i++) await Promise.resolve();
+		expect(bands).toEqual([]);
+
+		child.onunload();
+		await child.settled;
+		expect(bands).toEqual([]);
+	});
+
+	it('asks whether the note is being typed in when the cache misses, not before', async () => {
+		const asked = vi.fn(() => false);
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ cache: fakeCache(artifact(SVG)), editing: asked }),
+		);
+		child.onload();
+		await child.settled;
+		// A cached diagram never waits for anything, so nothing is asked.
+		expect(asked).not.toHaveBeenCalled();
+	});
+});
+
 describe('fast mode', () => {
 	/**
 	 * Fast mode is a preset (settings: "Preset: no SVGO, no pre-flight lint, one priority band up"),

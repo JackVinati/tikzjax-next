@@ -1190,6 +1190,74 @@ and the cores and memory it reports. The iOS version is written down by whoever 
 
 ---
 
+## D22 — Only a block of a note being typed in waits for the debounce
+
+**Amends DESIGN.md §3.3's `GATING + intersect → DEBOUNCING` row and §5.4's "Debounce while
+editing", which every uncached block paid. Date of record: 2026-10-14.**
+
+Every block that missed the cache waited `debounceMs` after the viewport gate before it was queued:
+300 ms on the desktop and 500 ms on a phone, by configuration (`src/platform/budgets.ts`), also when
+a note was opened and nobody was typing at all. On a small diagram that is most of the wait; it was
+the same in 0.1.5 and 0.2.0, and until D21 the diagnostics did not show it. It exists for one case,
+typing (upstream #24): wherever a diagram is drawn while its text is edited, each keystroke remakes
+the block, and a block that debounces is unloaded by the next keystroke before anything was queued,
+so a burst of typing compiles once, at the pause.
+
+So the debounce is kept for exactly that block and dropped for every other. A block is taken for one
+being typed in when the text of its note changed within `editWindowMs` (1 s on both platforms) of its
+cache miss, by any editor in any pane, as Obsidian's `editor-change` reports it
+(`src/block/edits.ts`); one whose editor names no note counts for every note. Such a block goes
+`GATING → DEBOUNCING` as before; any other goes `GATING → SCHEDULING` the moment the gate lets it
+through, in band 1, and a `lazy=off` block to SCHEDULING at once, in band 2. An export never gated or
+debounced, and still does not.
+
+The decision is made at the cache miss, not when the block is processed, because of the order of
+things in Obsidian, read in the 1.14.4 bundle: `editor-change` is triggered from the editor's update
+listener, after Live Preview has remade the widget for that keystroke, so at processing time the
+keystroke that caused the block may not have been reported yet; the miss comes after an IndexedDB
+read, by when it has. The window covers the rest of the way from a keystroke to the miss it causes:
+Live Preview remakes its widget in the keystroke's own update, a second pane on the same note and a
+Reading view beside the editor are told 10 ms after it (`requestOnInternalDataChange`) and a Reading
+view renders at once or, while still parsing, 200 ms later (`queueRender`), and an embed of the note
+reloads on the same notice. A longer window costs only the debounce, to a block that first appears
+in a note that was typed in within it, which is what every block paid before.
+
+How each place a diagram is drawn comes out:
+
+- **Live Preview, one pane.** While the cursor is inside the fence, Live Preview shows the source
+  and draws no widget (DESIGN.md §7.8, read in the bundle); the widget is drawn when the cursor
+  leaves, and debounces if the last keystroke was less than a second before, as every block did.
+- **A second pane on the note, a Reading view beside the editor, an embed of the note.** Remade at
+  each keystroke, each time within the window, so each debounces and is unloaded by the next
+  keystroke: one compile per pause.
+- **Opening a note, scrolling, switching view, a hover preview of a note nobody types in, "Render all
+  diagrams in this note".** No edit, so no wait.
+- **A change that is not typing**: Sync, another program saving the file. Not an editor change, so
+  the block compiles at once; such changes come seconds apart, not a keystroke apart.
+- **PDF export.** Unchanged: never gated, never debounced.
+
+"The block at this place in the note had other text a moment ago" was the first idea, and was not
+robust: with the same note in two panes, the second pane's block for a keystroke finds the first
+pane's block with the same text at that place and would compile every keystroke; `getSectionInfo`
+is null in exports, embeds and hover previews and is the whole callout for a block inside one; and a
+line inserted above moves every place below it. The note-wide rule errs the other way, towards the
+old behaviour.
+
+A block now compiles where 0.2.0's would not have only if it reaches its cache miss more than the
+window after the last change to its note and another change unloads it within the debounce: a
+keystroke after a pause of more than a second, in a view that took more than a second to remake the
+block. Nothing read in 1.14.4 takes that long. The plan's fallback, a debounce of 300 ms for every
+block on the phone as well, stays the answer if typing in Live Preview turns out to compile
+fragments on a device: every miss saying `editing: true` (`render-child.ts`), and the phone's
+`debounceMs` at 300.
+
+Tests: the transitions and both property tests in `test/machine.test.ts` (one settle, whatever the
+`editing` of a miss; no debounce for a block nobody is typing in, over 2,000 seeded sequences, and
+always one for a block that is), `test/edits.test.ts`, and the child and processor tests. Typing in
+a diagram on an Obsidian 1.7.2 install and a current one, by hand, is in `TODO.md` §9.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

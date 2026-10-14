@@ -111,7 +111,13 @@ export interface BlockDeps {
 	observe: (el: HTMLElement, onChange: (visible: boolean, escaped?: boolean) => void) => void;
 	unobserve: (el: HTMLElement) => void;
 	ensureFonts: (doc: Document) => void;
+	/** How long a block being typed in waits for the typing to pause. */
 	debounceMs: number;
+	/**
+	 * Whether the block's note is being typed in right now (block/edits.ts), asked when the cache
+	 * misses. Only then does the block debounce. Omitted: never.
+	 */
+	editing?: (() => boolean) | undefined;
 	now: () => number;
 	report?: ((outcome: BlockOutcome) => void) | undefined;
 }
@@ -399,7 +405,12 @@ export class TikzBlock extends MarkdownRenderChild {
 		const lazy = this.spec.options.presentation.lazy ?? 'on';
 		// A block that skips the viewport gate is as seen as it will ever be.
 		if (this.spec.isExport || lazy === 'off') this.seen();
-		this.dispatch({ type: 'miss', isExport: this.spec.isExport, lazy });
+		this.dispatch({
+			type: 'miss',
+			isExport: this.spec.isExport,
+			lazy,
+			editing: this.deps.editing?.() ?? false,
+		});
 	}
 
 	private async submit(priority: Priority, resumed: boolean): Promise<void> {

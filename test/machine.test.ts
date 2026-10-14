@@ -36,7 +36,9 @@ function countSettles(effects: Effect[]): number {
 const LOAD: Event[] = [{ type: 'load' }];
 const TO_LOOKUP: Event[] = [...LOAD, { type: 'l1Miss' }];
 const TO_GATING: Event[] = [...TO_LOOKUP, { type: 'miss' }];
-const TO_DEBOUNCING: Event[] = [...TO_GATING, { type: 'intersect' }];
+/** A block of a note being typed in: the only kind that debounces (DECISIONS.md D22). */
+const TO_GATING_EDITED: Event[] = [...TO_LOOKUP, { type: 'miss', editing: true }];
+const TO_DEBOUNCING: Event[] = [...TO_GATING_EDITED, { type: 'intersect' }];
 const TO_SCHEDULING: Event[] = [...TO_DEBOUNCING, { type: 'timer', priority: 1 }];
 const TO_COMPILING: Event[] = [...TO_SCHEDULING, { type: 'slot' }];
 const TO_TRANSFORMING: Event[] = [...TO_COMPILING, { type: 'ok' }];
@@ -137,16 +139,46 @@ describe('transition table', () => {
 		expect(fx).toContainEqual({ kind: 'mountManualButton', reason: 'depthCap' });
 	});
 
-	it('LOOKUP + miss -> GATING', () => {
+	it('LOOKUP + miss -> GATING, remembering whether the block is being typed in', () => {
 		const [state, fx] = reduce(stateFor('LOOKUP'), { type: 'miss' });
-		expect(state.phase).toBe('GATING');
+		expect(state).toMatchObject({ phase: 'GATING', debounce: false });
 		expect(fx).toEqual([{ kind: 'observe' }]);
+
+		const [edited] = reduce(stateFor('LOOKUP'), { type: 'miss', editing: true });
+		expect(edited).toMatchObject({ phase: 'GATING', debounce: true });
 	});
 
-	it('GATING + intersect -> DEBOUNCING, dropping the observer and the zero-record timer', () => {
+	it('GATING + intersect -> SCHEDULING at once, in band 1, for a block not being typed in', () => {
+		// A block shown for the first time, or shown again as it was: there is no typing to wait
+		// out, and the debounce was 300 ms on the desktop and 500 on a phone before anything queued.
 		const [state, fx] = reduce(stateFor('GATING'), { type: 'intersect' });
+		expect(state).toMatchObject({ phase: 'SCHEDULING', priority: 1 });
+		expect(fx).toEqual([{ kind: 'unobserve' }, { kind: 'clearTimers' }, { kind: 'submit', priority: 1 }]);
+	});
+
+	it('GATING + intersect -> DEBOUNCING for a block being typed in, dropping the observer and the zero-record timer', () => {
+		const gating = drive(initialState(), TO_GATING_EDITED).state;
+		const [state, fx] = reduce(gating, { type: 'intersect' });
 		expect(state.phase).toBe('DEBOUNCING');
 		expect(kinds(fx)).toEqual(['unobserve', 'clearTimers', 'startDebounce']);
+	});
+
+	it('LOOKUP + miss ^ lazy=off -> SCHEDULING in band 2, or DEBOUNCING when being typed in', () => {
+		// No gate to pass, so never seen: band 2, as the child would say of a block it does not know
+		// to be in view. Typing still debounces: that is what #24 needs, and it is not laziness.
+		const [fresh, fx] = reduce(stateFor('LOOKUP'), { type: 'miss', lazy: 'off' });
+		expect(fresh).toMatchObject({ phase: 'SCHEDULING', priority: 2 });
+		expect(fx).toEqual([{ kind: 'submit', priority: 2 }]);
+
+		const [edited, efx] = reduce(stateFor('LOOKUP'), { type: 'miss', lazy: 'off', editing: true });
+		expect(edited.phase).toBe('DEBOUNCING');
+		expect(efx).toEqual([{ kind: 'startDebounce' }]);
+	});
+
+	it('a block of a note being typed in submits nothing until its debounce runs out, and nothing at all if the next keystroke unloads it', () => {
+		const typed = drive(initialState(), [...TO_DEBOUNCING, { type: 'unload' }]);
+		expect(kinds(typed.effects)).not.toContain('submit');
+		expect(countSettles(typed.effects)).toBe(1);
 	});
 
 	it('GATING + noRecordsAfter2s -> SCHEDULING at the lowest band (the escape hatch)', () => {
@@ -565,6 +597,7 @@ function randomEvent(rnd: () => number): Event {
 				poisoned: rnd() < 0.2,
 				lazy: pick(LAZY),
 				depthCapped: rnd() < 0.2,
+				editing: rnd() < 0.5,
 			};
 		case 7:
 			return { type: 'intersect' };
@@ -679,6 +712,41 @@ describe('property: exactly one settle, over randomised event sequences', () => 
 		for (const phase of ALL_PHASES) {
 			expect(visited, `random walk never reached ${phase}`).toContain(phase);
 		}
+	});
+
+	it('debounces only a block being typed in, over 2000 seeded sequences', () => {
+		// The same random walks as above, with every cache miss said to be of a note nobody is typing
+		// in, or of one being typed in. In the first, no path may start the debounce, however the
+		// events land; in the second, a block passing the gate always waits for it.
+		const passed = { fresh: 0, typed: 0 };
+		for (let seed = 1; seed <= 2000; seed++) {
+			const rnd = mulberry32(seed);
+			const editing = seed % 2 === 0;
+			// A real prefix first, as above, so that the gate is actually reached.
+			const path = REACHABLE[Math.floor(rnd() * REACHABLE.length)]?.[1] ?? [];
+			const events: Event[] = path.slice(0, Math.ceil(rnd() * path.length));
+			const length = 3 + Math.floor(rnd() * 25);
+			for (let i = 0; i < length; i++)
+				events.push(rnd() < 0.25 ? { type: 'unload' } : randomEvent(rnd));
+
+			let state = initialState();
+			for (const raw of events) {
+				const event: Event = raw.type === 'miss' ? { ...raw, editing } : raw;
+				const [next, fx] = reduce(state, event);
+				if (!editing) {
+					expect(kinds(fx), `seed ${seed}: debounced a block nobody is typing in`).not.toContain(
+						'startDebounce',
+					);
+				}
+				if (state.phase === 'GATING' && event.type === 'intersect') {
+					passed[editing ? 'typed' : 'fresh']++;
+					expect(kinds(fx), `seed ${seed}`).toContain(editing ? 'startDebounce' : 'submit');
+				}
+				state = next;
+			}
+		}
+		expect(passed.fresh, 'blocks nobody is typing in that passed the gate').toBeGreaterThan(50);
+		expect(passed.typed, 'blocks being typed in that passed the gate').toBeGreaterThan(50);
 	});
 
 	it('never settles twice even when the same event is delivered repeatedly', () => {

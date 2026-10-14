@@ -49,6 +49,11 @@ export interface ProcessorDeps {
 	timers: QueueTimers;
 	preamble: PreambleService;
 	/**
+	 * Whether the note at this path is being typed in (block/edits.ts): a block of it that is not
+	 * cached waits for the typing to pause. Omitted: no note ever is.
+	 */
+	editing?: ((notePath: string) => boolean) | undefined;
+	/**
 	 * Notified of every block, so the debug view can list what happened without the child knowing
 	 * about it. What it returns, if anything, is told how the block comes to rest.
 	 */
@@ -214,6 +219,7 @@ function attach(
 			unobserve: deps.unobserve,
 			ensureFonts: deps.ensureFonts,
 			debounceMs: deps.budgets.debounceMs,
+			editing: () => deps.editing?.(ctx.sourcePath) ?? false,
 			now: deps.now,
 			report,
 		});

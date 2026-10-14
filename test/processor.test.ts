@@ -157,6 +157,26 @@ describe("a block's cache key", () => {
 	});
 });
 
+describe('whether a block waits for typing to pause', () => {
+	/**
+	 * Only a block of a note being typed in waits for the debounce (internal/DECISIONS.md D22), and
+	 * the note is the one the block is rendered from: the one Live Preview's editor, a Reading view
+	 * or an embed names as its source.
+	 */
+	it('is asked of the note the block is rendered from, once the cache has missed', async () => {
+		const asked: string[] = [];
+		const { deps, seen } = processorDeps({
+			editing: (notePath) => {
+				asked.push(notePath);
+				return false;
+			},
+		});
+		await processBlock(deps, seen, SOURCE, { path: 'Folder/Typed in.md' });
+		await flush();
+		expect(asked).toEqual(['Folder/Typed in.md']);
+	});
+});
+
 describe('a block in a list item', () => {
 	/**
 	 * Live Preview hands the processor the block's lines as they stand in the note, the list's

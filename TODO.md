@@ -93,6 +93,7 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] Render queue: priority bands, dedup by key with refcounting, depth cap → manual demotion, session poison set, **every job settles in a `finally`**
 - [x] Viewport gate (one `IntersectionObserver` per scroll root) **+ the 2 s zero-record escape hatch**
 - [x] Debounce; pre-start cancellation on unload. Mid-flight termination only on timeout / plugin unload / backpressure
+- [x] The debounce only for a block of a note being typed in (0.2.1): any other block is queued as soon as the viewport gate lets it through. A note is being typed in for a second after any editor changes its text, as `editor-change` reports it (`src/block/edits.ts`, D22)
 - [x] Export detection from `el.doc` + per-block export budget — **closes #45 #114 #101 #109**
 - [x] The TOTAL export budget, for real this time (0.1.5). It was ticked in 0.1.0 for code that did not exist — `exportTotalBudgetMs` was read nowhere. Now each `.print` container gets one deadline and its blocks an `expired` event that ends on a "not ready in time for the export" card; export blocks are exempt from the depth cap, so the PDF never prints a "Render diagram" button
 - [x] One worker, one job in it (0.1.5): the host queues the rest, a job's clock starts when the worker takes it, a timeout takes down only its own worker, and an interruption (backgrounding, Restart, unload) puts the block back in line instead of showing a card. Desktop concurrency is 1 like mobile; the `concurrency` setting is retired
@@ -180,6 +181,7 @@ The manual matrix in DESIGN.md §10.4, in full. The ones that catch the most:
 - [ ] **A vault with a pre-existing legacy cache**: upgrade, open a note, assert **zero** TeX compiles
 - [ ] **Devtools Network tab** across a full session including a failing diagram: assert zero requests
 - [ ] **Finalize a fence with no blank line above it**, then un-finalize: the embed must render as an embed, the `%%` must open a comment, and the note must come back byte for byte (the open question in `src/note/finalize.ts`)
+- [ ] **Typing in a diagram, on a 1.7.2 install and on the current Obsidian** (0.2.1, D22): change a number in a diagram for a few seconds, in Live Preview with the same note in a second pane, and with a Reading view beside the editor. The diagnostics view must show one compile after each pause, not one per keystroke. And a note opened fresh must show `waited 0 ms`, or near it, on its diagrams
 - [ ] **A diagram in a list item, on a 1.7.2 install**: open it in Live Preview, then in Reading view; the diagnostics view must show one compile and then the diagram coming from the cache, and Copy SVG with the cursor in it must work. The shared key rests on `getSectionInfo` framing Live Preview's code-block widget as it does in 1.14.4, the only version it was checked against
 
 Submitted to the community plugin browser on 2026-09-01 through Obsidian's developer portal. The automated review runs on every version and pulls a failing one from search within a day, so each release is held to it: 0.1.3 passed with zero errors and a byte-for-byte reproducible `main.js`.

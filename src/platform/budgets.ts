@@ -43,7 +43,19 @@ const DESKTOP: Budgets = {
 	 * tab does get a record, and renders when shown: block/viewport.ts.)
 	 */
 	zeroRecordEscapeMs: 2_000,
+	/**
+	 * How long a block waits for typing to pause before it is compiled — only a block whose note is
+	 * being typed in (block/edits.ts). Any other goes to the queue as soon as it is seen.
+	 */
 	debounceMs: 300,
+	/**
+	 * How long after a note's text changes a block of it that misses the cache is taken for one
+	 * remade by the typing, and debounces (block/edits.ts). It has to cover the time from the
+	 * keystroke to the block's cache miss: the same update in Live Preview, 10 ms and up to 200 ms
+	 * more in a Reading view beside the editor (read in the 1.14.4 bundle), then an IndexedDB read.
+	 * Too long costs nothing but the debounce, to a block that first appears in a note just typed in.
+	 */
+	editWindowMs: 1_000,
 	l1Entries: 256,
 	l1Bytes: 24 * 1024 * 1024,
 	l2Bytes: 64 * 1024 * 1024,
@@ -70,6 +82,7 @@ const MOBILE: Budgets = {
 	rootMarginPx: 400,
 	zeroRecordEscapeMs: 2_000,
 	debounceMs: 500,
+	editWindowMs: 1_000,
 	l1Entries: 64,
 	l1Bytes: 8 * 1024 * 1024,
 	l2Bytes: 24 * 1024 * 1024,

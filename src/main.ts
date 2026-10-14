@@ -10,6 +10,7 @@ import { device } from './platform/device';
 import { DiagramCache } from './cache';
 import { RenderQueue } from './queue/queue';
 import { ViewportGate } from './block/viewport';
+import { RecentEdits } from './block/edits';
 import {
 	BlockTally,
 	createProcessor,
@@ -115,6 +116,13 @@ export default class TikzjaxNextPlugin extends Plugin {
 			clearTimeout: (id) => window.clearTimeout(id),
 		});
 
+		// Which notes are being typed in, in any pane, so that only their blocks debounce and every
+		// other diagram goes to the queue as soon as it is seen (block/edits.ts).
+		const edits = new RecentEdits(this.budgets.editWindowMs, () => Date.now());
+		this.registerEvent(
+			this.app.workspace.on('editor-change', (_editor, info) => edits.changed(info.file?.path ?? null)),
+		);
+
 		this.registerMarkdownCodeBlockProcessor(
 			'tikz',
 			createProcessor({
@@ -145,6 +153,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 				now: () => Date.now(),
 				timers,
 				preamble: this.preamble,
+				editing: (notePath) => edits.editing(notePath),
 				onBlock: (spec, el) => {
 					const record: RenderRecord = {
 						key: spec.key,

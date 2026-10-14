@@ -272,6 +272,7 @@ export interface Budgets {
 	rootMarginPx: number;
 	zeroRecordEscapeMs: number;
 	debounceMs: number;
+	editWindowMs: number;
 	l1Entries: number;
 	l1Bytes: number;
 	l2Bytes: number;
