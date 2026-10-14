@@ -44,7 +44,11 @@ export type QueueRejectionKind =
 	| 'poisoned'
 	/** The queue was over its depth cap and this was the least urgent job waiting in it. */
 	| 'depth-cap'
-	/** Released by its last holder before it started, or dropped because the queue was closed. */
+	/**
+	 * Released by its last holder before it started, or before it reached the engine, or dropped
+	 * because the queue was closed. A job started and dropped this way has its signal aborted with
+	 * this error, so the runner can tell it from a `stalled` one.
+	 */
 	| 'cancelled';
 
 /**
@@ -184,6 +188,11 @@ interface Entry<J, T> {
 	/** Some caller submitted it `uncapped` or `resumed`: the depth cap neither evicts it nor counts it. */
 	uncapped: boolean;
 	started: boolean;
+	/**
+	 * Ends a started job that has not reached the engine yet (`running` not called), freeing its
+	 * slot. Undefined before the start, and once the engine has the job or it has settled.
+	 */
+	cancel: (() => void) | undefined;
 	promise: Promise<T>;
 	resolve: (value: T) => void;
 	reject: (error: unknown) => void;
@@ -191,7 +200,11 @@ interface Entry<J, T> {
 
 /** Folded rather than thrown, so the losing side of the race can never be an unhandled rejection. */
 type Outcome<T> =
-	{ kind: 'ok'; value: T } | { kind: 'error'; error: unknown } | { kind: 'timeout' } | { kind: 'stalled' };
+	| { kind: 'ok'; value: T }
+	| { kind: 'error'; error: unknown }
+	| { kind: 'timeout' }
+	| { kind: 'stalled' }
+	| { kind: 'cancelled' };
 
 export class RenderQueue<J, T> {
 	private concurrency: number;
@@ -349,6 +362,7 @@ export class RenderQueue<J, T> {
 			owners: new Map([[owner, opts?.onStart]]),
 			uncapped: opts?.uncapped === true || resumed,
 			started: false,
+			cancel: undefined,
 			promise,
 			resolve,
 			reject,
@@ -369,9 +383,15 @@ export class RenderQueue<J, T> {
 	 * Drop one caller's interest in `key`.
 	 *
 	 * At zero refs an unstarted job is dropped and its promise rejects with `cancelled` — it never
-	 * hangs, because a promise that never settles is the bug class this whole module is about. A
-	 * STARTED job is left to finish: we have already paid for the compile and the result still
-	 * reaches the cache, so the next mount of that key is free.
+	 * hangs, because a promise that never settles is the bug class this whole module is about. A job
+	 * the engine has (the runner said `running`) is left to finish: we have already paid for the
+	 * compile and the result still reaches the cache, so the next mount of that key is free.
+	 *
+	 * A job started but not yet in the engine is dropped like an unstarted one, its signal aborted
+	 * with `cancelled` and its slot freed (internal/DECISIONS.md D25). Nothing has been paid for it
+	 * yet: it is waiting for the engine to come up. Left to run, a note switched away from on a cold
+	 * engine, or a hover preview, would hold the slot until its diagram had compiled for nobody,
+	 * and on a phone the next note's first diagram waited for it.
 	 *
 	 * The refcount is per KEY, not per submission, so a release is only meaningful while the caller's
 	 * own job is still live. A holder that releases a key long after that job settled — and after
@@ -395,7 +415,14 @@ export class RenderQueue<J, T> {
 		}
 
 		if (entry.owners.size > 0) return;
-		if (entry.started) return;
+		if (entry.started) {
+			if (entry.cancel === undefined) return;
+			// Out of the map now rather than when its slot is freed, a few microtasks on: a caller
+			// submitting the key in between must get a job of its own, not this one's cancellation.
+			this.entries.delete(key);
+			entry.cancel();
+			return;
+		}
 
 		this.drop(entry);
 		this.entries.delete(key);
@@ -447,6 +474,8 @@ export class RenderQueue<J, T> {
 		const begin = (): void => {
 			if (running || done) return;
 			running = true;
+			// Paid for from here on: a release leaves it to finish and cache.
+			entry.cancel = undefined;
 			if (timerId !== undefined) this.timers.clearTimeout(timerId);
 			try {
 				arm();
@@ -465,6 +494,7 @@ export class RenderQueue<J, T> {
 				arm();
 			} else {
 				timerId = this.timers.setTimeout(() => expire({ kind: 'stalled' }), this.startupMs);
+				entry.cancel = () => expire({ kind: 'cancelled' });
 			}
 
 			const outcome = await Promise.race<Outcome<T>>([
@@ -486,6 +516,16 @@ export class RenderQueue<J, T> {
 				// diagram never ran, so nothing is known against it.
 				controller.abort(error);
 				entry.reject(error);
+			} else if (outcome.kind === 'cancelled') {
+				const error = new QueueError(
+					'cancelled',
+					entry.key,
+					`${entry.key} was released before it reached the engine`,
+				);
+				// With this error, so the runner knows that nobody wants it any more, which says
+				// nothing about an engine still starting for it.
+				controller.abort(error);
+				entry.reject(error);
 			} else {
 				const error = new QueueError('timeout', entry.key, `render exceeded ${entry.timeoutMs}ms`);
 				// Session-scoped: one wedging block must not starve the vault for the rest of the
@@ -505,9 +545,11 @@ export class RenderQueue<J, T> {
 			entry.reject(error);
 		} finally {
 			done = true;
+			entry.cancel = undefined;
 			if (timerId !== undefined) this.timers.clearTimeout(timerId);
 			this.inflight -= 1;
-			this.entries.delete(entry.key);
+			// A cancelled job left the map at its release, and the key may be another job's by now.
+			if (this.entries.get(entry.key) === entry) this.entries.delete(entry.key);
 			this.pump();
 		}
 	}

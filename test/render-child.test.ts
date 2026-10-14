@@ -2,7 +2,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { installObsidianDom } from './stubs/obsidian-dom';
 import { TikzBlock, type BlockDeps, type BlockOutcome, type TexJobSpec } from '../src/block/render-child';
-import { RenderQueue } from '../src/queue/queue';
+import { isQueueError, RenderQueue } from '../src/queue/queue';
 import type { Artifact, BlockOptions, EngineCapabilities, TexHost, TexResult } from '../src/types';
 import { InterruptedError, TexError } from '../src/types';
 
@@ -543,6 +543,32 @@ describe('a compile the engine was stopped under', () => {
 		await expect(first.settled).resolves.toBeUndefined();
 		expect(a.querySelector('svg')).not.toBeNull();
 		expect(b.querySelector('svg')).not.toBeNull();
+	});
+});
+
+describe('a block that goes away while its job waits for the engine to start', () => {
+	/**
+	 * A note switched away from on a cold engine: the queue started the job at once, and it waits
+	 * in the host for the engine. Nothing has been paid for, so the job is dropped and its slot
+	 * freed for the next note's diagrams (DECISIONS.md D25), and the block settles.
+	 */
+	it('is dropped, and the block settles', async () => {
+		const { queue, runs } = realQueue(60_000);
+		const reports: BlockOutcome[] = [];
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ queue, report: (outcome) => void reports.push(outcome) }),
+		);
+		child.onload();
+		await vi.waitFor(() => expect(runs).toHaveLength(1));
+		expect(queue.inflightCount()).toBe(1);
+
+		child.onunload();
+		await expect(child.settled).resolves.toBeUndefined();
+		expect(isQueueError(runs[0]?.signal.reason, 'cancelled')).toBe(true);
+		await vi.waitFor(() => expect(queue.inflightCount()).toBe(0));
+		expect(reports).toEqual([{ state: 'cancelled' }]);
 	});
 });
 

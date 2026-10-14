@@ -874,6 +874,16 @@ describe('a queue rejection before the job starts', () => {
 		const compiling = stateFor('COMPILING');
 		expect(reduce(compiling, { type: 'rejected', reason: 'timeout' })[0]).toBe(compiling);
 	});
+
+	it('COMPILING, unloaded + rejected -> DISPOSED: the queue dropped a job the engine never had', () => {
+		// Every block that wanted it let go while it waited for the engine to start (D25). The
+		// unloaded block has settled nowhere yet, and must, once.
+		const [unloaded, released] = reduce(stateFor('COMPILING'), { type: 'unload' });
+		expect(kinds(released)).toEqual(['release']);
+		const [state, fx] = reduce(unloaded, { type: 'rejected', reason: 'depthCap' });
+		expect(state.phase).toBe('DISPOSED');
+		expect(countSettles(fx)).toBe(1);
+	});
 });
 
 // -------------------------------------------------------------------------------------------

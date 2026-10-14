@@ -1369,6 +1369,46 @@ settings tab.
 
 ---
 
+## D25 — A job whose blocks went away before the engine had it is dropped
+
+**Amends DESIGN.md §5.1's "Release: … a started job is left to complete and cache", and D23's
+early start. Date of record: 2026-10-14.**
+
+Until 0.2.1 a block in view waited for the debounce before it was queued, and one unloaded within
+it — a note switched away from, a wrong tap in the file list, a hover preview that closed — had
+submitted nothing. D22 took that wait away from every block nobody is typing in, so such a block is
+queued the moment it is seen, and while a slot is free the queue starts its job at once. On a cold
+engine the job then waits in the host for the engine to come up (D23), and the block is gone a
+moment later. The queue left a started job to finish, so it held its slot and compiled for nobody,
+and on a phone, with one slot, the next note's first diagram waited for it. The host, for its part,
+stopped a worker still starting when the last job waiting for it was abandoned, so the early start
+went with it.
+
+- **The queue drops a started job the engine does not have yet** when its last block releases it:
+  the runner has not said `running`, so nothing has been paid for. Its signal is aborted with
+  `QueueError('cancelled')` and its slot is freed. A job the engine has is left to finish and cache,
+  as before; a release could only stop it by terminating the worker, which throws the work away.
+- **The host keeps a start going for a cancelled job.** A job abandoned before a worker took it
+  stops a worker still starting only when it was not cancelled: when its startup allowance ran out
+  (`stalled`), the start is presumed wedged. A cancel says nothing about the start, and the engine
+  started early is there for the next note's diagrams, or idles down if none comes (D23). A WebView
+  without `AbortSignal.reason`, an older iOS WebKit's, sees no reason and stops the start, and the
+  next note's first diagram starts the engine again.
+- **The block settles.** It was unloaded in COMPILING, which waits for its job's end; the drop
+  arrives as the queue's `cancelled` rejection, and COMPILING, unloaded, takes it to DISPOSED.
+
+What it still costs: a job the engine took before its block went away compiles to the end, and is
+cached for the next time the diagram is shown. That is at most one compile per engine per switch,
+on an engine already up, where 0.2.0's debounce compiled nothing for a view shorter than itself.
+Switching notes quickly on a cold engine, on the phone, is in `TODO.md` §9.
+
+Tests: `test/queue.test.ts` (dropped before the engine has it; kept once it has it, or while another
+caller wants it; a caller asking again at once gets a job of its own; the randomised interleavings
+with a startup), `test/worker-host.test.ts` (the start kept for a cancel, stopped for a stall),
+`test/machine.test.ts` and `test/render-child.test.ts`.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

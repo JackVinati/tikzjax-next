@@ -258,11 +258,12 @@ function unload(state: State): [State, Effect[]] {
 	if (state.phase === 'COMPILING') {
 		if (state.unloaded) return noop(state);
 		// Stays COMPILING, and deliberately does NOT settle: the running job always ends in ok,
-		// err, timeout or interrupted — the timeout is the backstop — and the settle happens at
-		// DISPOSED then.
-		// `release` is still safe here: the queue drops an *unstarted* job at refs 0 and leaves a
-		// started one to finish and cache. Timers are NOT cleared, because the timeout timer is
-		// what terminates a wedged worker whether or not this block still cares.
+		// err, timeout, interrupted or, dropped by the queue, rejected — the timeout is the
+		// backstop — and the settle happens at DISPOSED then.
+		// `release` is still safe here: at refs 0 the queue drops a job the engine does not have
+		// yet, waiting for it to start (DECISIONS.md D25), and leaves one in the engine to finish
+		// and cache. Timers are NOT cleared, because the timeout timer is what terminates a wedged
+		// worker whether or not this block still cares.
 		return [{ ...state, unloaded: true }, [{ kind: 'release' }]];
 	}
 
@@ -457,6 +458,12 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 					// any other block on the same key. This one just stops waiting for it.
 					if (state.unloaded) return go(state, { phase: 'DISPOSED' }, []);
 					return expire(state, [{ kind: 'release' }]);
+				case 'rejected':
+					// The queue dropped the job because every block that wanted it let go before the
+					// engine had it (DECISIONS.md D25), which only an unloaded block can have done.
+					// Any other rejection here is a late one, and `ok` / `err` / `timeout` own it.
+					if (state.unloaded) return go(state, { phase: 'DISPOSED' }, []);
+					return noop(state);
 				default:
 					return noop(state);
 			}

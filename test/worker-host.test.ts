@@ -5,6 +5,7 @@ import type { EngineInventory, WorkerRequest, WorkerResponse } from '../engine-s
 vi.mock('virtual:engine', () => ({ WORKER_SOURCE: '', ENGINE_ID: 'test-engine', ENGINE_INVENTORY: null }));
 
 import { WorkerHost } from '../src/engine/worker-host';
+import { QueueError } from '../src/queue/queue';
 import { InterruptedError, TexError, type TexResult } from '../src/types';
 
 // ------------------------------------------------------------------------------------------
@@ -263,6 +264,37 @@ describe('an abandoned job', () => {
 		expect(worker(0).terminated).toBe(true);
 		render(host, 'b');
 		expect(FakeWorker.spawned).toHaveLength(2);
+	});
+
+	it('keeps the start going when the queue cancelled the only job waiting for it', async () => {
+		// Its block went away, a note switched away from on a cold engine: that says nothing about
+		// the start, and the next note's diagram takes the engine once it is up.
+		const host = new WorkerHost();
+		host.ready().catch(() => undefined);
+		const controller = new AbortController();
+		const a = render(host, 'a', controller.signal);
+
+		controller.abort(new QueueError('cancelled', 'a'));
+		await tick();
+		expect((a.result.error as TexError).kind).toBe('aborted');
+		expect(worker(0).terminated).toBe(false);
+
+		const b = render(host, 'b');
+		expect(FakeWorker.spawned).toHaveLength(1);
+		worker(0).boot();
+		expect(b.running.at).toBe(true);
+	});
+
+	it('stops a start the only job waiting for it gave up on as stalled', async () => {
+		const host = new WorkerHost();
+		host.ready().catch(() => undefined);
+		const controller = new AbortController();
+		render(host, 'a', controller.signal);
+
+		controller.abort(new QueueError('stalled', 'a'));
+		await tick();
+		expect(worker(0).terminated).toBe(true);
+		expect(host.report().lastStop).toBe('error');
 	});
 
 	it('ignores the reply that arrives after it was abandoned', async () => {

@@ -6,6 +6,7 @@ import type {
 	WorkerRequest,
 	WorkerResponse,
 } from '../../engine-src/protocol';
+import { isQueueError } from '../queue/queue';
 import {
 	InterruptedError,
 	TexError,
@@ -531,7 +532,8 @@ export class WorkerHost implements TexHost {
 	}
 
 	/**
-	 * The caller stopped waiting: its timeout, or its startup allowance, ran out.
+	 * The caller stopped waiting: its timeout or its startup allowance ran out, or nobody wants the
+	 * diagram any more.
 	 *
 	 * A job abandoned mid-run takes its worker with it, and only its own. It cannot be stopped any
 	 * other way, and nothing queued behind it could run there until it ended — which, for a run that
@@ -539,6 +541,12 @@ export class WorkerHost implements TexHost {
 	 * the last one waiting while every worker was still starting: a start that outlived a caller's
 	 * whole startup allowance is presumed wedged, and with nobody left waiting there is no reason to
 	 * let it go on.
+	 *
+	 * Not when the queue cancelled the job (internal/DECISIONS.md D25): its blocks went away, a note
+	 * switched away from, which says nothing about the start, and the engine started early for it is
+	 * kept for the next note's diagrams, or idles down if none comes. A WebView without
+	 * `AbortSignal.reason`, an older iOS WebKit's, cannot tell the two apart, and stops the start as
+	 * before.
 	 */
 	private abandon(job: Job): void {
 		const running = this.engines.find((engine) => engine.current === job);
@@ -558,6 +566,7 @@ export class WorkerHost implements TexHost {
 		);
 
 		if (
+			!isQueueError(job.signal.reason, 'cancelled') &&
 			this.waiting.length === 0 &&
 			this.engines.every((engine) => !engine.up && engine.current === null)
 		) {
