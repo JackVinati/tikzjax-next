@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { hasBridgedCharacter } from '../engine-src/bridged';
 import { TS1_SYMBOLS } from '../engine-src/ts1-shim';
 import { bridgeUnicode, restoreUnicode } from '../engine-src/unicode';
 
@@ -84,6 +85,28 @@ describe('8-bit TeX Unicode bridge', () => {
 					codepoint.toString(16),
 				).toEqual([]);
 			}
+		});
+
+		// The cache key asks hasBridgedCharacter on the main thread; a block it misses would keep the
+		// key 0.2.0 cached its drawing under, characters missing (internal/DECISIONS.md D26).
+		it('agrees with the cache key on whether a text meets the bridge', () => {
+			const lone = String.fromCharCode(0xdc00);
+			for (const text of [
+				'',
+				'ASCII only',
+				'café 45° × £5 “quoted” – …',
+				'开始',
+				'Ω',
+				'¥5',
+				'😀',
+				lone,
+			]) {
+				expect(hasBridgedCharacter(text), JSON.stringify(text)).toBe(
+					bridgeUnicode(text).codepoints.length > 0,
+				);
+			}
+			expect(hasBridgedCharacter('café 45° × £5 “quoted” – …')).toBe(false);
+			expect(hasBridgedCharacter(`a${lone}`)).toBe(true);
 		});
 
 		it('declares a lone surrogate as the U+FFFD TeX reads in its place', () => {

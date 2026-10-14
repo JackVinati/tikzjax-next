@@ -12,7 +12,7 @@
  * curly quotes and dashes iOS types on its own, the ﬁ ligature. So the warning sat under diagrams
  * that rendered perfectly, and on a phone it sat under nearly all of them. Since 0.2.1 there is no
  * warning at all: the worker draws every character that is not native over a box TeX sets for it
- * (engine-src/unicode.ts), and this list is what tells it which ones to leave to TeX.
+ * (engine-src/unicode.ts), and this list is what tells it which ones to leave to TeX (bridged.ts).
  *
  * Which characters work is a property of the engine BUILD — of the LaTeX kernel frozen into
  * core.dump, of the fonts dvi2html can draw — not something to write down from memory. A list
@@ -447,9 +447,9 @@ function renderModule(engineId) {
  * character in a Computer Modern face the plugin ships. A codepoint from U+0080 up that is not
  * listed is not native on that engine. ASCII is TeX's own and is not listed at all.
  *
- * It imports nothing, and must not: the engine worker bundles it for its Unicode bridge
- * (engine-src/unicode.ts), which draws every character not listed here, and should pull nothing
- * else in with it.
+ * It imports nothing, and must not: engine-src/bridged.ts reads it to tell which characters the
+ * Unicode bridge draws, every one not listed here, in the engine worker and, for the cache key, on
+ * the main thread, and neither should pull anything else in with it.
  */
 
 /** Native codepoints as inclusive [first, last] runs, ascending and non-overlapping. */

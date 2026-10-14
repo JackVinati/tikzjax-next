@@ -1109,7 +1109,8 @@ The field now holds `OUTPUT_REVISION` (`src/cache/key.ts`), a string that moves 
 engine draws can change: the DVI TeX writes, the transcript the plugin reads its errors from, or the
 SVG the converter makes. Its first value is exactly the ENGINE_ID 0.2.0 shipped,
 `5e861510239768c57ca2965eb2329bd2bafc1370df4821cd8d3b7088ce60efde`, in the same place in the
-payload, so every key 0.2.0 derived is derived again and updating to 0.2.1 recompiles nothing.
+payload, so every key 0.2.0 derived is derived again and updating to 0.2.1 recompiles nothing, but
+for a block with a character the Unicode bridge draws, which 0.2.0 drew without it (D26).
 `test/key.test.ts` pins a key 0.2.0 derived, computed outside the implementation, and
 `test/processor.test.ts` that a block keeps its key whichever build of the engine is running.
 
@@ -1126,8 +1127,8 @@ What keeps the revision honest:
 - **The worker.** `REVISION.json` also records the ENGINE_ID the corpus was last checked against,
   and `test/engine-id.test.ts` builds the worker that ships and fails when it is another one. That
   is the moment the decision is made, by a person, because the corpus is 37 diagrams and a change
-  can alter what a diagram outside it draws. In 0.2.1 it is also the proof that the worker is
-  0.2.0's, byte for byte.
+  can alter what a diagram outside it draws. Through 0.2.1's first stage it was also the proof that
+  the worker was 0.2.0's, byte for byte; the Unicode bridge (D26) is the change that ended that.
 - **By hand.** Whenever the CHANGELOG says that diagrams draw differently, the revision moves, also
   when no fixture shows it: a package bundled that was missing, a fixed TeX file, a converter change
   for a glyph no fixture uses. CONTRIBUTING.md says so. The sha256 of the first worker that draws
@@ -1369,9 +1370,9 @@ How many (`engineCount` in `src/platform/budgets.ts`):
   tells the queue, an idle second worker goes at once, and a busy one when it has finished its job.
   The diagnostics say "stopped when the second engine was turned off".
 
-The worker is 0.2.0's, byte for byte: `test/engine-id.test.ts` builds the worker that ships and
-holds it to the ENGINE_ID recorded in `test/fixtures/golden/REVISION.json` (D20), so the pool
-changes nothing a diagram draws and nothing in anyone's cache. The preamble snapshot planned for
+The pool leaves the worker as it was: when it came, `test/engine-id.test.ts` built the worker that
+ships and held it to 0.2.0's ENGINE_ID, recorded in `test/fixtures/golden/REVISION.json` (D20), so
+the pool changes nothing a diagram draws and nothing in anyone's cache. The preamble snapshot planned for
 0.2.3 keeps its saved preambles per worker, and with two workers only 32 of 52 possible resumes
 happened in the prototype's note of 74 diagrams (the 0.2.x measurements, set F2); it needs each
 diagram sent to the worker that holds its preamble, which is for that release.
@@ -1425,8 +1426,9 @@ with a startup), `test/worker-host.test.ts` (the start kept for a cancel, stoppe
 
 ## D26 — What the engine cannot typeset is drawn over a box TeX sets for it
 
-**Amends D8 and the backlog, which leave Greek, Cyrillic and CJK to a Unicode engine, and builds on
-D16's `\ifincsname`. It came as pull request #2.**
+**Amends D8 and the backlog, which leave Greek, Cyrillic and CJK to a Unicode engine, builds on
+D16's `\ifincsname`, and amends D20's "updating to 0.2.1 recompiles nothing" for the blocks it
+draws in. It came as pull request #2.**
 
 The engine's fonts are Computer Modern, and its LaTeX has a definition for few characters beyond
 Latin. Every other one TeX leaves out with "Unicode character … not set up for use with LaTeX", and
@@ -1512,8 +1514,26 @@ in `test/fixtures/worker` check the runs that come back, on one pass and two, an
 XML parser accepts every SVG the bridge wrote in those cases, and the plugin's pipeline keeps every
 restored text with nothing to report. What the bridge cannot do is in the README: the text is not
 Computer Modern and takes an em a character, bold and italic are lost, a separate combining accent
-is drawn beside its letter, and text outside the picture is not drawn. ENGINE_ID moves, so every cached
-diagram compiles once more.
+is drawn beside its letter, and text outside the picture is not drawn.
+
+**What it does to the cache.** 0.2.0 cached what it drew of a block with such a character: TeX left
+the character out with an error and drew the rest, and a diagram TeX drew after an error is cached
+(D20). The key 0.2.1 derives for that block is the key 0.2.0 stored it under (D20), so the drawing
+without the characters, with TeX's message on it, would have gone on being shown until the block
+was edited. Moving `OUTPUT_REVISION` would have compiled every cached diagram once more, for the few
+that have such a character. Instead a block whose TeX input has a character the bridge declares
+gets one more field in its key (`usesUnicodeBridge` in `src/cache/key.ts`), and no other block
+does. Everything the worker gives TeX is among the key's inputs: the block, and the packages with
+their options, the libraries, the preamble's text and the border that `baked` holds. The main thread
+reads them with the bridge's own test, `engine-src/bridged.ts`, which leaves out the TS1 shim's
+symbols and the native table's characters as the worker does; the paths in `depHashes` are not
+read, since TeX never sees them. For every other block the bridge adds nothing to TeX's input and
+changes nothing in the SVG, and the 37 fixtures that were in the golden corpus come out byte for
+byte as they did, so its key is 0.2.0's and nothing else compiles again. `test/key.test.ts` pins a key of each kind, computed
+outside the implementation. Reading a block of 150,000 ASCII characters to the end takes about 1 ms
+in Node 22.19 on the desktop of D14, and a block of a few lines well under a microsecond. A later
+change to what the bridge draws moves `OUTPUT_REVISION` like any change of output: the bridge's
+fixtures are recorded in `REVISION.json` under it.
 
 ---
 

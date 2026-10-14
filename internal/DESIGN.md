@@ -519,7 +519,8 @@ key = sha256Hex(
   field(normalizedSource) +
   field(stableStringify(baked)) + // preamble, packages, libraries, border, two-pass
   field(artifactRevision) +
-  field(stableStringify(pipeline)),
+  field(stableStringify(pipeline)) +
+  (usesUnicodeBridge ? field('unicode-bridge') : ''), // only a block the bridge draws in (D26)
 ).slice(0, 32);
 ```
 
@@ -539,7 +540,10 @@ worker's inputs, which left out the npm packages bundled into it and the content
 
 In 0.2.1 that field became **`OUTPUT_REVISION`**, a revision of what the engine draws, held to the
 golden corpus by `test/fixtures/golden/REVISION.json`, with 0.2.0's ENGINE_ID as its first value, so
-that an engine that only gets faster recompiles nothing (DECISIONS.md D20).
+that an engine that only gets faster recompiles nothing (DECISIONS.md D20). The last field is there
+only for a block whose TeX input has a character the Unicode bridge declares: 0.2.0 drew those
+blocks without the character and cached them, and the field moves their keys and no others
+(DECISIONS.md D26).
 
 `artifactRevision()` is **deliberately narrow and enumerated**:
 

@@ -5,10 +5,12 @@ top of its notes on GitHub, and will not publish a version that has none.
 
 ## 0.2.1 — unreleased
 
-- Updating recompiles nothing: every diagram cached by 0.2.0 is shown from the cache, as before.
-  From this release on, the cache is tied to what the engine draws rather than to the exact build of
-  it, so a release that only makes the engine faster no longer compiles every cached diagram once
-  more. A release that changes what diagrams look like still does, and says so here.
+- Updating recompiles only the diagrams that contain a character the engine has no font for, such
+  as Chinese, Greek or Cyrillic, so that their labels show it (see the next point); every other
+  diagram cached by 0.2.0 is shown from the cache, as before. From this release on, the cache is tied to what
+  the engine draws rather than to the exact build of it, so a release that only makes the engine
+  faster no longer compiles every cached diagram once more. A release that changes what diagrams
+  look like still does, and says so here.
 - Labels in Chinese, Greek, Cyrillic, Arabic, Hebrew, Thai, Devanagari, IPA and emoji are drawn.
   The engine has no fonts for them, so TeX sets each character as a box one em wide, and the
   plugin writes the character over it in your system's sans-serif font; nodes and arrows are

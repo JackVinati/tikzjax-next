@@ -23,7 +23,7 @@
  * text and in math. The ts1-symbols, ts1-currency, ts1-small-caps and siunitx fixtures keep it
  * that way.
  *
- * It imports nothing. The Unicode bridge (./unicode) reads the same table, so that it leaves to the
+ * It imports nothing. The Unicode bridge (./bridged) reads the same table, so that it leaves to the
  * shim what the shim draws.
  */
 

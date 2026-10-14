@@ -18,15 +18,7 @@
  * \endcsname inserted". A character in a preamble file is declared as well.
  */
 
-import { isNativeUnicode } from '../src/source/native-unicode';
-import { isTs1Symbol } from './ts1-shim';
-
-/**
- * What the engine draws without the bridge: ASCII, what the scan measured native on the bare
- * engine, and what ./ts1-shim redefines into Computer Modern. The scan measures the bare engine,
- * which cannot draw the shim's symbols, so ° × ± µ £ € © and the rest are not in its table.
- */
-const drawnByEngine = (cp: number): boolean => cp <= 0x7f || isNativeUnicode(cp) || isTs1Symbol(cp);
+import { bridgedCodepoint } from './bridged';
 
 export interface UnicodeBridge {
 	/** For the head of the input, ahead of everything the block and its preambles load. */
@@ -103,15 +95,15 @@ const declare = (cp: number): string =>
 	String(cp) +
 	'}}';
 
-/** Declare every character in `text` that the engine cannot draw itself. Nothing, if there is none. */
+/**
+ * Declare every character in `text` that the engine cannot draw itself (./bridged). Nothing, if there
+ * is none.
+ */
 export function bridgeUnicode(text: string): UnicodeBridge {
 	const found = new Set<number>();
 	for (const ch of text) {
-		// `for..of` iterates codepoints, so an astral character is one entry. A lone surrogate is one
-		// too, and TextEncoder writes U+FFFD in its place, so that is the character TeX reads.
-		const cp = ch.codePointAt(0) ?? 0;
-		const read = cp >= 0xd800 && cp <= 0xdfff ? 0xfffd : cp;
-		if (!drawnByEngine(read)) found.add(read);
+		const cp = bridgedCodepoint(ch);
+		if (cp !== undefined) found.add(cp);
 	}
 	if (found.size === 0) return { preamble: '', codepoints: [] };
 

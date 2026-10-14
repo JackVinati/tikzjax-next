@@ -88,7 +88,10 @@ reason is not a surprise.
   output changes (`test/output-revision.test.ts` fails until you do), and by hand whenever the
   CHANGELOG says diagrams draw differently, also when no fixture shows it — a package bundled that
   was missing, a fixed TeX file, a converter fix for a glyph no fixture uses. Then
-  `node scripts/output-revision.mjs --record`. A new fixture is recorded without a bump.
+  `node scripts/output-revision.mjs --record`. A new fixture is recorded without a bump. A block
+  whose input has a character the Unicode bridge draws has one more field in its key
+  (`internal/DECISIONS.md` D26), which moved those keys in 0.2.1; a later change to what the bridge
+  draws moves `OUTPUT_REVISION` like any other.
 - **Two TypeScripts.** TypeScript 7 typechecks; TypeScript 5.9.3 runs the store lint and the
   `typecheck:legacy` cross-check, because the store's review reads the code through TypeScript 5.
   `internal/DECISIONS.md` D5 says why. Both packages ship a `tsc`, so scripts name theirs by path.

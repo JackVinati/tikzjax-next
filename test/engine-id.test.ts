@@ -204,8 +204,9 @@ describe('ENGINE_ID', { timeout: 60_000 }, () => {
 	 * OUTPUT_REVISION. This fails on any change to the worker that ships until it is recorded in
 	 * test/fixtures/golden/REVISION.json, which is the moment to decide: the golden corpus says
 	 * whether a fixture draws differently, and the CHANGELOG whether anything outside it does. Either
-	 * way OUTPUT_REVISION moves. In 0.2.1 this is the proof that the worker is 0.2.0's, byte for
-	 * byte, so nothing its users cached is drawn by another engine.
+	 * way OUTPUT_REVISION moves. Through 0.2.1's first stage this was the proof that the worker was
+	 * 0.2.0's, byte for byte; the Unicode bridge changed it, and moves the key of only the blocks it
+	 * draws in (internal/DECISIONS.md D26).
 	 */
 	it('is the worker the golden outputs were last recorded against', async () => {
 		const shipped = await buildWorker(ROOT);
