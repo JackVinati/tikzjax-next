@@ -120,6 +120,7 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] `scale=` and `width=` enlarge as well as shrink (0.1.5): the svg fills a wrapper the block sized, and the scale is in points
 - [x] No `String.prototype` methods on the hot path — Pretty BibTeX 2.0.0 monkey-patched `replaceAll` and silently killed both inversion and SVGO (#48). Enforced by a lint rule
 - [x] Fast mode as a defined preset: `svgo: off` + skip lint + priority boost; **never** skips sanitize or ids. It does not skip the measurement after all — the engine's frame is an inch short, so a fast diagram would be clipped — and the priority boost was only implemented in 0.1.5
+- [ ] **open** — a tikz-cd diagram with an empty cell, `A & B \\ & C`, fails in the SVG pipeline with "Opening and ending tag mismatch: svg line 1 and g": what dvi2html writes for it has as many `<g` as `</g>`, but two `<svg` and one `</svg>`. 0.2.0's worker writes the same bytes; two rows of one cell each, and a square with its four arrows, parse. Found while testing names in tikz-cd for 0.2.1. Read the DVI first, to tell TeX's grouping from the converter's
 
 ## 5 · Errors
 
