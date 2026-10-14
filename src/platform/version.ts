@@ -31,5 +31,39 @@ export function outOfStep(built: string | null, manifest: string | undefined): b
 	return built !== null && typeof manifest === 'string' && manifest !== '' && built !== manifest;
 }
 
+/**
+ * Which of two plugin versions is the later, as semantic versioning orders them: by major, minor and
+ * patch, a pre-release (`0.2.1-beta.3`) before its release, and pre-releases by their dotted parts,
+ * numbers as numbers. Negative when `a` is earlier, positive when later, 0 when the same or when
+ * either is not a version this can read.
+ */
+export function compareVersions(a: string, b: string): number {
+	const parse = (v: string) => {
+		const m = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(v);
+		return m === null
+			? null
+			: { core: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4]?.split('.') ?? [] };
+	};
+	const x = parse(a);
+	const y = parse(b);
+	if (x === null || y === null) return 0;
+	for (let i = 0; i < 3; i++) {
+		const d = (x.core[i] ?? 0) - (y.core[i] ?? 0);
+		if (d !== 0) return d;
+	}
+	if (x.pre.length === 0 || y.pre.length === 0) return y.pre.length - x.pre.length;
+	for (let i = 0; i < Math.min(x.pre.length, y.pre.length); i++) {
+		const p = x.pre[i] ?? '';
+		const q = y.pre[i] ?? '';
+		if (p === q) continue;
+		const pn = /^\d+$/.test(p);
+		const qn = /^\d+$/.test(q);
+		if (pn && qn) return Number(p) - Number(q);
+		if (pn !== qn) return pn ? -1 : 1;
+		return p < q ? -1 : 1;
+	}
+	return x.pre.length - y.pre.length;
+}
+
 /** The pair a warning was shown for, as data.json keeps it, so that it is shown once for each pair. */
 export const versionPair = (built: string, manifest: string): string => `${built} → ${manifest}`;

@@ -1,7 +1,7 @@
 import { buildSync } from 'esbuild';
 import { describe, expect, it } from 'vitest';
 import { manifestVersion, VERSION_DEFINE, versionDefine } from '../scripts/plugin-version.mjs';
-import { BUILT_VERSION, outOfStep, versionPair } from '../src/platform/version';
+import { BUILT_VERSION, compareVersions, outOfStep, versionPair } from '../src/platform/version';
 import { readText } from './support/read-text';
 
 /*
@@ -66,5 +66,31 @@ describe('outOfStep', () => {
 
 	it('names the pair main.js first, as data.json keeps it', () => {
 		expect(versionPair('0.2.1-beta.3', '0.2.1')).toBe('0.2.1-beta.3 → 0.2.1');
+	});
+});
+
+describe('compareVersions', () => {
+	it('orders releases and pre-releases as semantic versioning does', () => {
+		const order = [
+			'0.1.5',
+			'0.2.0',
+			'0.2.1-beta.1',
+			'0.2.1-beta.2',
+			'0.2.1-beta.10',
+			'0.2.1',
+			'0.2.10',
+			'1.0.0',
+		];
+		for (let i = 0; i < order.length; i++)
+			for (let j = 0; j < order.length; j++)
+				expect(
+					Math.sign(compareVersions(order[i]!, order[j]!)),
+					`${order[i]} against ${order[j]}`,
+				).toBe(Math.sign(i - j));
+	});
+
+	it('takes what it cannot read for the same, so that nothing is said of which is newer', () => {
+		expect(compareVersions('0.2.1', 'next')).toBe(0);
+		expect(compareVersions('', '0.2.1')).toBe(0);
 	});
 });

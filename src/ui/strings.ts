@@ -1,5 +1,6 @@
 import type { BootTimings } from '../../engine-src/protocol';
 import type { EngineStop } from '../engine/worker-host';
+import { compareVersions } from '../platform/version';
 import type { WebViewFeatures } from '../platform/device';
 
 /**
@@ -37,13 +38,22 @@ export const README_OUT_OF_STEP = `${README}#out-of-step`;
 const jitState = (on: boolean | null): string =>
 	on === null ? 'not measured yet' : on ? 'on (probably)' : 'off (probably)';
 
-/** main.js and manifest.json of different versions, and what to do about it (src/platform/version.ts). */
+/**
+ * main.js and manifest.json of different versions, and what to do about it (src/platform/version.ts):
+ * what can have left them so depends on which is the newer.
+ */
 const outOfStep = (built: string, manifest: string): string =>
-	`This device runs main.js from version ${built}, while its manifest.json says ${manifest}. ` +
-	`Obsidian Sync Standard leaves the plugin like this: it copies a new manifest.json and not ` +
-	`main.js, which is over its 5 MB limit. Reinstall the plugin on this device: with BRAT, its ` +
-	`"Choose a single plugin to reinstall"; from the community store, uninstall it and install it ` +
-	`again. With Sync Standard, turn off "Installed community plugins" in Sync's settings.`;
+	compareVersions(built, manifest) > 0
+		? `This device runs main.js from version ${built}, while its manifest.json says ${manifest}, ` +
+			`an older one: something brought back the old manifest.json, a sync service or a backup. ` +
+			`Reinstall the plugin on this device: with BRAT, its "Choose a single plugin to reinstall"; ` +
+			`from the community store, uninstall it and install it again.`
+		: `This device runs main.js from version ${built}, while its manifest.json says ${manifest}. ` +
+			`Obsidian Sync Standard can leave the plugin like this: it copies a new manifest.json and ` +
+			`not main.js, which is over its 5 MB limit. Reinstall the plugin on this device: with BRAT, ` +
+			`its "Choose a single plugin to reinstall"; from the community store, uninstall it and ` +
+			`install it again. With Sync Standard, turn off "Installed community plugins" in Sync's ` +
+			`settings.`;
 
 export const STRINGS = {
 	rendering: 'Rendering diagram',

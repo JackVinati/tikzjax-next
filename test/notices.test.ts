@@ -67,6 +67,22 @@ describe('the notice that main.js and manifest.json are out of step', () => {
 		expect(notice?.message.querySelector('a')?.getAttribute('href')).toBe(README_OUT_OF_STEP);
 	});
 
+	/*
+	 * An older manifest.json beside a newer main.js warns too (D34), and Sync Standard's copying a new
+	 * manifest.json is no explanation of it: a sync service or a backup brought the old one back.
+	 */
+	it('says something else left them so where manifest.json is the older, and that Sync Standard only can', () => {
+		const older = outOfStepNotice('0.2.1-beta.3', '0.2.0', '')?.message.textContent ?? '';
+		expect(older).toContain(
+			'This device runs main.js from version 0.2.1-beta.3, while its manifest.json says 0.2.0, an older one',
+		);
+		expect(older).toContain('something brought back the old manifest.json, a sync service or a backup');
+		expect(older).not.toContain('copies a new manifest.json');
+		expect(older).toContain('with BRAT, its "Choose a single plugin to reinstall"');
+		const newer = outOfStepNotice('0.2.1-beta.3', '0.2.1', '')?.message.textContent ?? '';
+		expect(newer).toContain('Obsidian Sync Standard can leave the plugin like this');
+	});
+
 	it('is shown once for each pair of versions', () => {
 		expect(outOfStepNotice('0.2.1-beta.3', '0.2.1', '0.2.1-beta.3 → 0.2.1')).toBeNull();
 		expect(outOfStepNotice('0.2.1', '0.2.2', '0.2.1-beta.3 → 0.2.1')?.pair).toBe('0.2.1 → 0.2.2');
