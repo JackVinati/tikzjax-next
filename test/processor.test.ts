@@ -177,6 +177,23 @@ describe('whether a block waits for typing to pause', () => {
 	});
 });
 
+describe('the engine', () => {
+	it('is started by a block that is not cached, and not by one that is', async () => {
+		const startEngine = vi.fn();
+		const { deps, seen, l1 } = processorDeps({ startEngine });
+		const cached = await processBlock(deps, seen, SOURCE, { load: false });
+		l1.set(cached.spec.key, artifact());
+
+		await processBlock(deps, seen, SOURCE);
+		await flush();
+		expect(startEngine).not.toHaveBeenCalled();
+
+		await processBlock(deps, seen, `${SOURCE}%`);
+		await flush();
+		expect(startEngine).toHaveBeenCalledTimes(1);
+	});
+});
+
 describe('a block in a list item', () => {
 	/**
 	 * Live Preview hands the processor the block's lines as they stand in the note, the list's

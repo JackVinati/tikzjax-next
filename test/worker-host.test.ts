@@ -331,6 +331,20 @@ describe('idle teardown', () => {
 		expect(b.running.at).toBe(true);
 	});
 
+	it('stops an engine started ahead of a job that never came', async () => {
+		// The plugin starts the engine when a diagram misses the cache, before it is seen; one never
+		// scrolled to leaves an engine nobody uses, which goes the way of any idle one.
+		const timers = new FakeTimers();
+		const host = new WorkerHost({ idleTeardownMs: 1000, timers });
+		const ready = host.ready();
+		worker(0).boot();
+		await ready;
+
+		timers.advance(1000);
+		expect(worker(0).terminated).toBe(true);
+		expect(host.report().lastStop).toBe('idle');
+	});
+
 	it('is called off by work arriving before it fires', async () => {
 		const timers = new FakeTimers();
 		const host = new WorkerHost({ idleTeardownMs: 1000, timers });

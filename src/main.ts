@@ -154,6 +154,13 @@ export default class TikzjaxNextPlugin extends Plugin {
 				timers,
 				preamble: this.preamble,
 				editing: (notePath) => edits.editing(notePath),
+				// At the first diagram that is not cached, never at load: a session that only shows
+				// cached diagrams never pays for an engine. Never in the background either, where the
+				// mobile teardown has just stopped one and paused the queue so that none starts.
+				startEngine: () => {
+					if (document.visibilityState === 'hidden') return;
+					this.host?.ready().catch(() => undefined);
+				},
 				onBlock: (spec, el) => {
 					const record: RenderRecord = {
 						key: spec.key,

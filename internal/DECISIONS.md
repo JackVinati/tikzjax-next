@@ -1258,6 +1258,39 @@ a diagram on an Obsidian 1.7.2 install and a current one, by hand, is in `TODO.m
 
 ---
 
+## D23 — The engine starts at the first diagram that is not cached
+
+**Amends DESIGN.md §4.3, under which the engine started when the queue handed the host its first
+job. Date of record: 2026-10-14.**
+
+Until 0.2.1 the engine was created when the first job reached it: after the diagram had been seen,
+after its debounce, after its turn in the queue. Its start, 192–234 ms in WebKit on the desktop
+with 0.2.0's worker (the 0.2.x measurements), was then paid in full by that diagram, and on a phone
+the engine stops after 30 s idle and whenever the app goes to the background, so the first diagram
+after each of those pays it again.
+
+Now a block whose cache lookup misses asks the host to start an engine (`TexHost.ready`, through the
+processor's `startEngine`), unless it is `lazy=manual` and waits for its button. The start then runs
+while the block waits for the viewport gate and the queue, and the job's "engine start" step counts
+only the part of it the job still had to wait for. At most one engine is started this way; it is
+the host's own, so the idle teardown stops it like any other, which is what becomes of an engine
+started for a diagram nobody scrolled to.
+
+- **Never at plugin load.** A session that only shows cached diagrams never starts an engine, as
+  before. Starting one at load would cost every session its memory, about 81 MB once started for
+  0.2.0's worker, measured in Node 22 by the 0.2.x boot study, and the start's CPU.
+- **Never in the background.** On a phone the app going to the background stops the engine and
+  pauses the queue so that nothing starts another (main.ts `registerTeardown`); the early start is
+  not the queue, so it checks `document.visibilityState` itself.
+- **What it costs.** Creating the worker takes the main thread 9–11 ms in WebKit and 19–21 ms in
+  Chromium on the desktop, with 0.2.0's worker (the 0.2.x boot study), which the first job used to
+  pay at the same moment of its life anyway.
+
+What it gains was not measured in Obsidian: the "engine start" step of the first diagram in the
+diagnostics view (D21) shows it, on each device.
+
+---
+
 ## Open, still needing a human
 
 1. ~~**An iOS device to test on.**~~ **Resolved 2026-08-31: the maintainer has an iPhone and an

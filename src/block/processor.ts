@@ -53,6 +53,8 @@ export interface ProcessorDeps {
 	 * cached waits for the typing to pause. Omitted: no note ever is.
 	 */
 	editing?: ((notePath: string) => boolean) | undefined;
+	/** Start the engine ahead of the first job (BlockDeps.startEngine). Omitted: it starts with the job. */
+	startEngine?: (() => void) | undefined;
 	/**
 	 * Notified of every block, so the debug view can list what happened without the child knowing
 	 * about it. What it returns, if anything, is told how the block comes to rest.
@@ -220,6 +222,7 @@ function attach(
 			ensureFonts: deps.ensureFonts,
 			debounceMs: deps.budgets.debounceMs,
 			editing: () => deps.editing?.(ctx.sourcePath) ?? false,
+			startEngine: deps.startEngine,
 			now: deps.now,
 			report,
 		});

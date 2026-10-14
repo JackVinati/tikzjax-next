@@ -118,6 +118,13 @@ export interface BlockDeps {
 	 * misses. Only then does the block debounce. Omitted: never.
 	 */
 	editing?: (() => boolean) | undefined;
+	/**
+	 * Start the engine, if none is running or starting, without waiting for it. Called when the
+	 * cache misses, so that the engine's start runs while the block waits for the viewport gate and
+	 * its turn in the queue rather than after them (internal/DECISIONS.md D22). Omitted: the engine
+	 * starts when the queue hands it the first job.
+	 */
+	startEngine?: (() => void) | undefined;
 	now: () => number;
 	report?: ((outcome: BlockOutcome) => void) | undefined;
 }
@@ -405,6 +412,11 @@ export class TikzBlock extends MarkdownRenderChild {
 		const lazy = this.spec.options.presentation.lazy ?? 'on';
 		// A block that skips the viewport gate is as seen as it will ever be.
 		if (this.spec.isExport || lazy === 'off') this.seen();
+		// Not cached, so it will be compiled once it has been seen: start the engine now, so that its
+		// start runs while the block waits for that. A diagram that waits for a button press does not
+		// start it. One engine at most is started this way, and the host stops it when it has been
+		// idle for its budget, which is what happens to one started for a diagram never scrolled to.
+		if (lazy !== 'manual') this.deps.startEngine?.();
 		this.dispatch({
 			type: 'miss',
 			isExport: this.spec.isExport,

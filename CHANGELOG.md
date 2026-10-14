@@ -22,6 +22,10 @@ top of its notes on GitHub, and will not publish a version that has none.
   opened the note. Only a diagram in a note you are typing in still waits for you to pause, so that
   typing in it, in a second pane or beside a Reading view, compiles it once per pause and not at
   every keystroke.
+- The TeX engine starts as soon as a diagram turns out not to be in the cache, while the diagram is
+  still on its way into view, instead of when it is about to be compiled. It still never starts
+  when every diagram shown is cached, and an engine started for a diagram you never scroll to stops
+  again once it has had nothing to do for a while, as before.
 
 ## 0.2.0 — 2026-10-13
 

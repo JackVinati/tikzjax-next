@@ -93,6 +93,7 @@ Straight to `WorkerHost`; no `LegacyScriptHost` (D2).
 - [x] Render queue: priority bands, dedup by key with refcounting, depth cap → manual demotion, session poison set, **every job settles in a `finally`**
 - [x] Viewport gate (one `IntersectionObserver` per scroll root) **+ the 2 s zero-record escape hatch**
 - [x] Debounce; pre-start cancellation on unload. Mid-flight termination only on timeout / plugin unload / backpressure
+- [x] The engine starts at the first cache miss (0.2.1), not when the first job reaches it, and never at load or in the background; one nobody uses idles down (D23)
 - [x] The debounce only for a block of a note being typed in (0.2.1): any other block is queued as soon as the viewport gate lets it through. A note is being typed in for a second after any editor changes its text, as `editor-change` reports it (`src/block/edits.ts`, D22)
 - [x] Export detection from `el.doc` + per-block export budget — **closes #45 #114 #101 #109**
 - [x] The TOTAL export budget, for real this time (0.1.5). It was ticked in 0.1.0 for code that did not exist — `exportTotalBudgetMs` was read nowhere. Now each `.print` container gets one deadline and its blocks an `expired` event that ends on a "not ready in time for the export" card; export blocks are exempt from the depth cap, so the PDF never prints a "Render diagram" button

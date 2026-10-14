@@ -1013,6 +1013,50 @@ describe('the debounce', () => {
 	});
 });
 
+describe('the engine started ahead of the first job', () => {
+	/**
+	 * A diagram that is not cached will be compiled once it has been seen, so the engine is started
+	 * when the cache misses, and its start runs while the block waits for the viewport gate and the
+	 * queue. Never for a cached diagram, nor for one waiting for a button press.
+	 */
+	it('is started when the cache misses, before the block is even seen', async () => {
+		const startEngine = vi.fn();
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			// Never in view, so never queued: only the miss can have started the engine.
+			deps({ startEngine, observe: () => undefined }),
+		);
+		child.onload();
+		await vi.waitFor(() => expect(startEngine).toHaveBeenCalledTimes(1));
+		child.onunload();
+	});
+
+	it('is not started for a diagram from the cache', async () => {
+		const startEngine = vi.fn();
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ cache: fakeCache(artifact(SVG)), startEngine }),
+		);
+		child.onload();
+		await child.settled;
+		expect(startEngine).not.toHaveBeenCalled();
+	});
+
+	it('is not started for a lazy=manual diagram, which waits for its button', async () => {
+		const startEngine = vi.fn();
+		const child = new TikzBlock(
+			container(),
+			spec({ options: options({ presentation: { lazy: 'manual' } }) }),
+			deps({ startEngine }),
+		);
+		child.onload();
+		await child.settled;
+		expect(startEngine).not.toHaveBeenCalled();
+	});
+});
+
 describe('fast mode', () => {
 	/**
 	 * Fast mode is a preset (settings: "Preset: no SVGO, no pre-flight lint, one priority band up"),
