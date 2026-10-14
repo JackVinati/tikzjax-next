@@ -261,6 +261,46 @@ describe('the text the diagnostics view copies', () => {
 		expect(noWasm).toContain('WebView: WebAssembly no, ');
 	});
 
+	it('says of a render that resumed from a stored preamble what reading and putting it back took', () => {
+		const steps = (timings: Partial<CompileTimings>) =>
+			timingSteps({ queueMs: 1, postMs: 2, texMs: 9, passes: 1, ...timings });
+		expect(steps({ resumed: true, restored: true, fetchMs: 12, restoreMs: 5 })).toEqual([
+			'queue 1 ms',
+			'TeX 9 ms',
+			'resumed from a stored preamble (read 12 ms, put back 5 ms)',
+			'SVG pipeline 2 ms',
+		]);
+		expect(steps({ resumed: true, restored: true })).toContain('resumed from a stored preamble');
+		// One sent that could not be started from: its time is said, and the diagram saved its own.
+		expect(steps({ restoreMs: 3, saveMs: 8 })).toEqual([
+			'queue 1 ms',
+			'TeX 9 ms',
+			'stored preamble not used, 3 ms',
+			'preamble saved in 8 ms',
+			'SVG pipeline 2 ms',
+		]);
+	});
+
+	it('says what is stored of saved preambles, and what storage refused', () => {
+		const line = (preambles: DiagnosticsSnapshot['preambles']) =>
+			diagnosticsText(snapshot({ preambles }))
+				.split('\n')
+				.filter((l) => l.startsWith('Stored preambles'));
+		expect(line({ available: true, read: false, runs: 0, bytes: 0, errors: 0 })).toEqual([
+			'Stored preambles: not read yet, until the engine starts',
+		]);
+		expect(line({ available: true, read: true, runs: 3, bytes: 2.5 * 1048576, errors: 0 })).toEqual([
+			'Stored preambles: 3, 2.5 MB',
+		]);
+		expect(line({ available: true, read: true, runs: 1, bytes: 1048576, errors: 1 })).toEqual([
+			'Stored preambles: 1, 1.0 MB, 1 storage error',
+		]);
+		expect(line({ available: false, read: true, runs: 0, bytes: 0, errors: 2 })).toEqual([
+			'Stored preambles: unavailable, 2 storage errors',
+		]);
+		expect(line(null)).toEqual([]);
+	});
+
 	it('has the cache and the queue in it', () => {
 		expect(text).toContain('In memory: 4 diagrams, 2.0 MB');
 		expect(text).toContain('On disk: 40 diagrams, 3.0 MB');

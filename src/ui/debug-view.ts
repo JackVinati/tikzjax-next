@@ -1,5 +1,6 @@
 import { ItemView, Notice, type WorkspaceLeaf } from 'obsidian';
 import type { EngineInventory } from '../../engine-src/protocol';
+import type { StoredRunStats } from '../cache/runs';
 import type { EngineReport } from '../engine/worker-host';
 import { outOfStep } from '../platform/version';
 import type { CompileTimings } from '../types';
@@ -8,6 +9,7 @@ import {
 	diagnosticsText,
 	engineLife,
 	jitOf,
+	preamblesLine,
 	renderName,
 	timingSteps,
 	type About,
@@ -30,6 +32,8 @@ export interface DebugSource {
 	inventory(): EngineInventory | null;
 	cacheStats(): Promise<{ entries: number; bytes: number }>;
 	memoryStats(): { entries: number; bytes: number };
+	/** Saved preambles kept across the engine's stops (cache/runs.ts); null where none are kept. */
+	storedRuns?: (() => StoredRunStats | null) | undefined;
 	queueDepth(): number;
 	/** How often the engine started this session, and why it last stopped. */
 	engine(): EngineReport;
@@ -106,6 +110,7 @@ export class DebugView extends ItemView {
 			engine: this.source.engine(),
 			memory: this.source.memoryStats(),
 			stored: this.stored,
+			preambles: this.source.storedRuns?.() ?? null,
 			queueDepth: this.source.queueDepth(),
 			records: this.source.records(),
 			now: (this.source.now ?? Date.now)(),
@@ -234,6 +239,10 @@ export class DebugView extends ItemView {
 			'On disk',
 			this.stored ? `${this.stored.entries} diagrams, ${mb(this.stored.bytes)}` : 'unavailable',
 		);
+		const preambles = this.source.storedRuns?.() ?? null;
+		// The copied line, less its label, which the fact has.
+		if (preambles !== null)
+			this.fact(facts, 'Stored preambles', preamblesLine(preambles).replace(/^Stored preambles: /, ''));
 
 		const recent = root.createDiv({ cls: 'tikzjax-debug-section' });
 		recent.createEl('h3', { text: 'Recent renders' });

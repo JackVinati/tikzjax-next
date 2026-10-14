@@ -342,6 +342,27 @@ describe('the plugin in the diagnostics view', () => {
 	});
 });
 
+describe('stored preambles in the diagnostics view', () => {
+	it('are counted beside the cache, with what storage refused', async () => {
+		const from: DebugSource = {
+			...source([]),
+			storedRuns: () => ({ available: true, read: true, runs: 2, bytes: 3 * 1048576, errors: 1 }),
+		};
+		const view = await opened(from);
+		expect(factsOf(view)['Stored preambles']).toBe('2, 3.0 MB, 1 storage error');
+	});
+
+	it('say so where storage could not be opened, and are not there where none are kept', async () => {
+		const unavailable = await opened({
+			...source([]),
+			storedRuns: () => ({ available: false, read: false, runs: 0, bytes: 0, errors: 1 }),
+		});
+		expect(factsOf(unavailable)['Stored preambles']).toBe('unavailable, 1 storage error');
+		const none = await opened({ ...source([]), storedRuns: () => null });
+		expect(factsOf(none)['Stored preambles']).toBeUndefined();
+	});
+});
+
 describe('the Copy button', () => {
 	const RECORDS = [record({ timings: { queueMs: 2, postMs: 1 } })];
 
@@ -393,6 +414,19 @@ describe('the Copy button', () => {
 		await vi.waitFor(() => expect(shownNotices.length).toBe(before + 1));
 		expect(shownNotices[shownNotices.length - 1]?.message).toBe('Diagnostics copied to the clipboard.');
 		expect(view.contentEl.querySelector<HTMLElement>('.tikzjax-debug-by-hand')?.hidden).toBe(true);
+	});
+
+	it('copies what is stored of saved preambles', async () => {
+		const writeText = vi.fn(() => Promise.resolve());
+		Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+		const view = await opened({
+			...source(RECORDS),
+			storedRuns: () => ({ available: true, read: true, runs: 2, bytes: 3 * 1048576, errors: 0 }),
+		});
+		press(view);
+		expect((writeText.mock.calls[0] as unknown as [string])[0]).toContain(
+			'Stored preambles: 2, 3.0 MB\n',
+		);
 	});
 
 	it('shows the text, selected, to copy by hand where there is no clipboard', async () => {

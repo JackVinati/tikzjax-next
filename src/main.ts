@@ -240,6 +240,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 					inventory: () => this.host?.engineInventory ?? null,
 					cacheStats: () => this.cache?.stats() ?? Promise.resolve({ entries: 0, bytes: 0 }),
 					memoryStats: () => this.cache?.memoryStats() ?? { entries: 0, bytes: 0 },
+					storedRuns: () => this.runs?.stats() ?? null,
 					queueDepth: () => this.queue?.size() ?? 0,
 					engine: () =>
 						this.host?.report() ?? { starts: 0, lives: [], lastStop: null, poolSize: 1 },

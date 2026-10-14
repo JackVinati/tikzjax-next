@@ -27,6 +27,10 @@ const STOPPED: Record<EngineStop, string> = {
 
 const yesNo = (value: boolean): string => (value ? 'yes' : 'no');
 
+/** What storage refused this session, for the line on stored preambles; nothing when it refused nothing. */
+const storageErrors = (errors: number): string =>
+	errors === 0 ? '' : errors === 1 ? ', 1 storage error' : `, ${errors} storage errors`;
+
 /** The README's answers, which the hints below link to (README.md, Questions). */
 const README = 'https://github.com/JackVinati/tikzjax-next';
 /** "Diagrams are very slow on my iPhone or iPad": Lockdown Mode. */
@@ -96,6 +100,22 @@ export const STRINGS = {
 		passes > 1 ? `TeX ${ms} ms, ${passes} passes` : `TeX ${ms} ms`,
 	/** The diagram's TeX started from a run an earlier diagram with the same preamble saved. */
 	timingResumed: 'resumed from a saved preamble',
+	/**
+	 * The same, from a run kept in storage across the engine's stops (cache/runs.ts, D36), read there
+	 * and put back in the engine in this long.
+	 */
+	timingRestored: (readMs: number | undefined, restoreMs: number | undefined) =>
+		'resumed from a stored preamble' +
+		(readMs === undefined && restoreMs === undefined
+			? ''
+			: ` (${[
+					readMs === undefined ? null : `read ${readMs} ms`,
+					restoreMs === undefined ? null : `put back ${restoreMs} ms`,
+				]
+					.filter(Boolean)
+					.join(', ')})`),
+	/** A stored run was sent with the diagram, and could not be started from: it did not read back. */
+	timingRestoreFailed: (ms: number) => `stored preamble not used, ${ms} ms`,
 	/** The diagram's run was saved at the end of its \begin{document}, for later ones. */
 	timingSaved: (ms: number) => `preamble saved in ${ms} ms`,
 	/** The same, when the engine had no room left for it within its budget, and let it go. */
@@ -196,6 +216,12 @@ export const STRINGS = {
 	reportMemory: (count: number, mb: string) => `In memory: ${count} diagrams, ${mb}`,
 	reportStored: (count: number, mb: string) => `On disk: ${count} diagrams, ${mb}`,
 	reportStoredUnknown: 'On disk: unavailable',
+	/** Saved preambles kept across the engine's stops (cache/runs.ts, D36), and what storage refused. */
+	reportPreambles: (runs: number, mb: string, errors: number) =>
+		`Stored preambles: ${runs}, ${mb}${storageErrors(errors)}`,
+	reportPreamblesUnavailable: (errors: number) => `Stored preambles: unavailable${storageErrors(errors)}`,
+	/** Before the engine has first started this session, when what is stored has not been read. */
+	reportPreamblesUnread: 'Stored preambles: not read yet, until the engine starts',
 	reportQueue: (depth: number) => `Queue depth: ${depth}`,
 	reportRenders: (count: number) => `Recent renders, newest first: ${count}`,
 	reportTier: (tier: string) => `from ${tier}`,

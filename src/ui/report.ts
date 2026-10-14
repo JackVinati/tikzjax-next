@@ -1,4 +1,5 @@
 import type { BlockOutcome } from '../block/render-child';
+import type { StoredRunStats } from '../cache/runs';
 import type { EngineReport } from '../engine/worker-host';
 import type { WebViewFeatures } from '../platform/device';
 import type { CompileTimings } from '../types';
@@ -63,6 +64,8 @@ export interface DiagnosticsSnapshot {
 	memory: { entries: number; bytes: number };
 	/** Null when IndexedDB could not say. */
 	stored: { entries: number; bytes: number } | null;
+	/** Saved preambles kept across the engine's stops (cache/runs.ts); absent or null where none are kept. */
+	preambles?: StoredRunStats | null | undefined;
 	queueDepth: number;
 	records: readonly RenderRecord[];
 	/** The wall clock now, for how long ago each render was. */
@@ -87,7 +90,13 @@ export function timingSteps(timings: CompileTimings): string[] {
 				? STRINGS.timingNewMemory(timings.resetMs)
 				: STRINGS.timingReset(timings.resetMs),
 		timings.texMs === undefined ? null : STRINGS.timingTex(timings.texMs, timings.passes ?? 1),
-		timings.resumed === true ? STRINGS.timingResumed : null,
+		timings.resumed !== true
+			? timings.restoreMs === undefined
+				? null
+				: STRINGS.timingRestoreFailed(timings.restoreMs)
+			: timings.restored === true
+				? STRINGS.timingRestored(timings.fetchMs, timings.restoreMs)
+				: STRINGS.timingResumed,
 		timings.saveMs === undefined
 			? null
 			: timings.saveNotKept === true
@@ -145,6 +154,14 @@ export function jitOf(engine: EngineReport): boolean | null {
 	return null;
 }
 
+/** What is stored of saved preambles, as a line of the view and of the copied text. */
+export function preamblesLine(stats: StoredRunStats): string {
+	if (!stats.available) return STRINGS.reportPreamblesUnavailable(stats.errors);
+	return stats.read
+		? STRINGS.reportPreambles(stats.runs, mb(stats.bytes), stats.errors)
+		: STRINGS.reportPreamblesUnread;
+}
+
 /** The whole view as plain text, for a bug report. See the top of this file for what it leaves out. */
 export function diagnosticsText(s: DiagnosticsSnapshot): string {
 	const { about, engine } = s;
@@ -173,6 +190,7 @@ export function diagnosticsText(s: DiagnosticsSnapshot): string {
 		s.stored === null
 			? STRINGS.reportStoredUnknown
 			: STRINGS.reportStored(s.stored.entries, mb(s.stored.bytes)),
+		...(s.preambles === null || s.preambles === undefined ? [] : [preamblesLine(s.preambles)]),
 		STRINGS.reportQueue(s.queueDepth),
 		'',
 		STRINGS.reportRenders(s.records.length),
