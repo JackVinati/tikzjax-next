@@ -356,6 +356,62 @@ process.exit(1);
 ok "a jump out of TeX calls library.jumpOut; nothing is left for asyncify"
 
 # ---------------------------------------------------------------------------------------------
+# THE SNAPSHOT POINT.
+#
+# engine-build/changes/snapshot.ch adds \tikzjaxsnapshot, at which TeX calls the host's
+# snapshotPoint so that the host can copy its memory, and a run started from such a copy resumes
+# there (internal/DECISIONS.md D32). web2js compiles a call to a procedure it has no declaration for
+# only for the few it knows, so the call becomes an import here, as tex_final_end is. The format is
+# built with web2js's own library.js, which gets a snapshotPoint that copies nothing.
+#
+# The format puts the command at the end of LaTeX's begindocument/end hook, the last thing
+# \begin{document} does before its \ignorespaces, as code of the `top-level` label, which LaTeX
+# runs after every package's code for the hook. The worker adds nothing to the input TeX reads, so
+# \filesize, \inputlineno and a second \openin of the job's own file see it as they did before.
+node - <<'SNAP' || die "the snapshot_point patch did not apply — re-read web2js's call-procedure.js, program.js and initex.js"
+const fs = require('fs');
+const edit = (file, before, after) => {
+    const path = `web2js/${file}`;
+    const text = fs.readFileSync(path, 'utf8');
+    const found = text.split(before).length - 1;
+    if (found !== 1) {
+        console.error(`${file}: expected what is replaced exactly once, found it ${found} times`);
+        process.exit(1);
+    }
+    const patched = text.replace(before, () => after);
+    if (!patched.includes(after)) process.exit(1);
+    fs.writeFileSync(path, patched);
+};
+const finalEnd = `        if (this.procedure.name == 'tex_final_end') {
+            return module.block(null, [module.call('tex_final_end', [], Binaryen.none)]);
+        }
+`;
+edit('pascal/statements/call-procedure.js', finalEnd, `${finalEnd}
+        if (this.procedure.name == 'snapshot_point') {
+            return module.block(null, [module.call('snapshotPoint', [], Binaryen.none)]);
+        }
+`);
+const importFinalEnd = `        module.addFunctionImport('tex_final_end', 'library', 'tex_final_end', Binaryen.createType([]), Binaryen.none);
+`;
+edit('pascal/program.js', importFinalEnd, `${importFinalEnd}        module.addFunctionImport('snapshotPoint', 'library', 'snapshotPoint', Binaryen.createType([]), Binaryen.none);
+`);
+const lastLine = `        '\\\\DeclareGraphicsExtensions{}\\n',
+`;
+edit('initex.js', lastLine, `        '\\\\DeclareGraphicsExtensions{}\\n' +
+        '\\\\AddToHook{begindocument/end}{\\\\tikzjaxsnapshot}\\n',
+`);
+SNAP
+grep -qF 'AddToHook{begindocument/end}{\\tikzjaxsnapshot}' web2js/initex.js \
+    || die "initex.js does not add \\tikzjaxsnapshot to begindocument/end"
+grep -q "^module.exports = {" web2js/library.js || die "web2js library.js is no longer a CommonJS object literal"
+cat >> web2js/library.js <<'SNAPLIB'
+
+// Appended by engine-build/build-engine.sh. \tikzjaxsnapshot calls this; the format build copies nothing.
+module.exports.snapshotPoint = () => {};
+SNAPLIB
+ok "\\tikzjaxsnapshot calls library.snapshotPoint, from the end of the format's begindocument/end hook"
+
+# ---------------------------------------------------------------------------------------------
 # WHERE TEX'S GLOBALS LIE IN MEMORY.
 #
 # web2js lays TeX's global variables out one after another, in the order they are declared, from
@@ -471,11 +527,11 @@ ok "hash_prime $HASH_PRIME of hash_size 600000"
 # applies one after the other, each to TeX as the ones before it left it (internal/DECISIONS.md D8).
 # engine-build/changes holds ours, for what LaTeX expects of the engine and web2js's do not give it:
 # the \ifincsname primitive, and a \filesize that prints nothing for a file that does not exist
-# (D16), and a fatal error that closes TeX's files before the jump below ends the run (D17). Each
-# goes at the end of the list, so it changes TeX as web2js changed it, and tie stops the build if a
-# change no longer finds the text it replaces. A change file of web2js's own by the same name is not
-# overwritten.
-OUR_CHANGES=(ifincsname.ch filesize-missing.ch jump-out.ch)
+# (D16), a fatal error that closes TeX's files before the jump below ends the run (D17), and the
+# snapshot point above (D32). Each goes at the end of the list, so it changes TeX as web2js changed
+# it, and tie stops the build if a change no longer finds the text it replaces. A change file of
+# web2js's own by the same name is not overwritten.
+OUR_CHANGES=(ifincsname.ch filesize-missing.ch jump-out.ch snapshot.ch)
 for ch in "${OUR_CHANGES[@]}"; do
     [ -s "$SRC/changes/$ch" ] || die "the image has no engine-build/changes/$ch — rebuild it (npm run engine:image)"
     [ ! -e "web2js/changes/$ch" ] || die "web2js has a change file of its own named $ch — read it before adding ours"
@@ -544,10 +600,11 @@ done
 # TeX that was compiled. web2js/tex.web is the merged source build:tie wrote and build:tangle read.
 for marker in 'primitive("ifincsname",if_test,if_in_csname_code);' \
               'filesize_code: if cur_val>=0 then print_int(cur_val);' \
-              'begin close_files_and_terminate; goto end_of_TEX;'; do
+              'begin close_files_and_terminate; goto end_of_TEX;' \
+              'primitive("tikzjaxsnapshot",ignore_spaces,1);'; do
     grep -qF "$marker" web2js/tex.web || die "the TeX compiled lacks a change of ours: $marker"
 done
-ok "the TeX compiled carries \\ifincsname, \\filesize's nothing for a missing file, and jump_out's close"
+ok "the TeX compiled carries \\ifincsname, \\filesize's nothing for a missing file, jump_out's close and \\tikzjaxsnapshot"
 
 # In place of build:asyncify-wasm: the same -O4, and nothing beyond WebAssembly 1.0. The engine has
 # to compile in the WebViews minAppVersion admits, iOS 14.5's among them, and the later features
@@ -581,6 +638,10 @@ if (!names.includes("library.jumpOut")) {
     console.error("tex.wasm does not import library.jumpOut, so a jump out of TeX has nowhere to go");
     process.exit(1);
 }
+if (!names.includes("library.snapshotPoint")) {
+    console.error("tex.wasm does not import library.snapshotPoint, so no run can be saved");
+    process.exit(1);
+}
 // The marks a reset of only what a run wrote reads (engine-build/web2js-codegen, D31).
 const marks = ["getStackLow", "getPoolPtrHigh", "getStrPtrHigh"].filter((n) => !names.includes(n));
 if (marks.length) {
@@ -588,7 +649,7 @@ if (marks.length) {
     process.exit(1);
 }
 ' || die "tex.wasm is not the engine without asyncify that this build makes"
-ok "tex.wasm imports library.jumpOut, exports the marks a reset reads, and has no asyncify left"
+ok "tex.wasm imports library.jumpOut and library.snapshotPoint, exports the marks a reset reads, and has no asyncify left"
 
 # memory-layout.json, as program.js wrote it while TeX was compiled (above), checked and completed
 # with the two numbers it does not know: the memory's pages, and hash_prime, the slots a name can

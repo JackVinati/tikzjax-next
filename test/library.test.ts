@@ -314,3 +314,23 @@ describe('the host calls TeX makes per line and per character', () => {
 		expect(lines).toEqual([]);
 	});
 });
+
+/*
+ * \tikzjaxsnapshot, which the format runs at the end of every \begin{document}, calls the host
+ * (engine-build/changes/snapshot.ch, internal/DECISIONS.md D32).
+ */
+describe('the snapshot point', () => {
+	it('calls the hook at the snapshot point, and nothing the hook throws reaches TeX', () => {
+		expect(() => library.snapshotPoint()).not.toThrow();
+		let called = 0;
+		library.setSnapshotHook(() => {
+			called++;
+			throw new RangeError('out of memory');
+		});
+		expect(() => library.snapshotPoint()).not.toThrow();
+		expect(called).toBe(1);
+		library.deleteEverything();
+		library.snapshotPoint();
+		expect(called).toBe(1);
+	});
+});

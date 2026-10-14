@@ -38,6 +38,9 @@
  * 11. A line longer than what is left of TeX's buffer throws LineTooLong, where it threw the
  *     RangeError of a view that refused it, so that the worker tells it from a run cut off by the
  *     engine's stack (D29).
+ * 12. The engine's \tikzjaxsnapshot, which the format runs at the end of every \begin{document},
+ *     calls a hook here with TeX's memory as it stands there, for a run to be saved where it is
+ *     (D32). With no hook it is \ignorespaces.
  */
 
 import { tfmData } from '@drgrice1/dvi2html';
@@ -175,6 +178,7 @@ export const deleteEverything = () => {
 	callback = null;
 	showConsole = false;
 	consoleBuffer = '';
+	snapshotHook = null;
 	// inflatedCache is NOT cleared (change 3): the pgf tree costs ~100 ms to re-inflate and is
 	// identical on every run.
 };
@@ -321,6 +325,32 @@ export const hostWrites = (): readonly (readonly [number, number])[] =>
 export const setInput = (input: string, cb?: () => void) => {
 	inputBuffer = input;
 	if (cb) callback = cb;
+};
+
+// --- saving a run (change 12) -------------------------------------------------------------------
+
+/**
+ * Called by \tikzjaxsnapshot (engine-build/changes/snapshot.ch), which the format runs at the end of
+ * every \begin{document}, with TeX's memory as it stands there and the engine's flag for a resumed
+ * run set in it. Whoever set the hook may copy the memory during the call, and TeX goes on when it
+ * returns. With no hook the command is \ignorespaces.
+ */
+let snapshotHook: (() => void) | null = null;
+
+export const setSnapshotHook = (fn: (() => void) | null) => {
+	snapshotHook = fn;
+};
+
+export const snapshotPoint = () => {
+	const hook = snapshotHook;
+	if (hook === null) return;
+	try {
+		hook();
+	} catch {
+		// A save that fails is a save not made, never a run cut off: the worker's hook catches and
+		// counts its own failures, and this keeps anything it did not catch from unwinding TeX,
+		// where a RangeError would read as the engine's stack running out (worker.ts runPass).
+	}
 };
 
 /** What jumpOut throws. Its own class, so that a trap in the engine is never taken for one. */
