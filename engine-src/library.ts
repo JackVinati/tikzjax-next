@@ -30,6 +30,9 @@
  *     a run never ended.
  *  8. getfilesize answers -1 for a file it does not have, where upstream answered 0, and the engine's
  *     \filesize then prints nothing, as pdfTeX's does (internal/DECISIONS.md D16).
+ *  9. The calls TeX makes once a line or once a character allocate nothing: views of the memory are
+ *     made once a run rather than two or three a call, and a character is appended where it was
+ *     wrapped in an array of its own. They answer and fail exactly as before (D29).
  */
 
 import { tfmData } from '@drgrice1/dvi2html';
@@ -57,6 +60,14 @@ let filesystem: Record<string, Uint8Array> = {};
 let files: TexFile[] = [];
 
 let memory: ArrayBuffer | null = null;
+/**
+ * Views of the whole of `memory`, made once a run in setMemory rather than once a call (change 9):
+ * TeX calls inputln once a line and get once a byte it reads, a pgfplots run reads some 60,000
+ * lines, and each call made two or three views of its own. The Memory never grows, its maximum being
+ * its initial size, so a view of it never goes stale within a run.
+ */
+let bytes: Uint8Array | null = null;
+let words: Uint32Array | null = null;
 let inputBuffer: string | null = null;
 let callback: (() => void) | null = null;
 
@@ -135,6 +146,8 @@ export const deleteEverything = () => {
 	files = [];
 	filesystem = {};
 	memory = null;
+	bytes = null;
+	words = null;
 	inputBuffer = null;
 	callback = null;
 	showConsole = false;
@@ -268,6 +281,8 @@ export const setShowConsole = () => {
 
 export const setMemory = (m: ArrayBuffer) => {
 	memory = m;
+	bytes = new Uint8Array(m);
+	words = new Uint32Array(m, 0, m.byteLength >>> 2);
 };
 
 export const setInput = (input: string, cb?: () => void) => {
@@ -341,12 +356,42 @@ export const printInteger = (descriptor: number, x: number) => printRaw(descript
 export const printFloat = (descriptor: number, x: number) => printRaw(descriptor, x.toString());
 export const printNewline = (descriptor: number, _x: number) => printRaw(descriptor, '\n');
 
+/**
+ * One character to the terminal: what writeToConsole does with a string of one, without searching
+ * the line so far for a newline, which writeToConsole never leaves in it.
+ */
+const consoleChar = (c: string) => {
+	if (!showConsole) return;
+	if (c !== '\n') {
+		consoleBuffer += c;
+		return;
+	}
+	if (consoleBuffer.length) logSink?.(consoleBuffer);
+	consoleBuffer = '';
+};
+
+/** One byte to a file: writeSync of a one-byte array, the file grown the same way. */
+const appendByte = (file: TexFile, x: number) => {
+	let content = file.content ?? new Uint8Array();
+	const position = file.position ?? 0;
+	while (1 > content.length - position) {
+		const grown = new Uint8Array(1 + content.length * 2);
+		grown.set(content);
+		content = grown;
+	}
+	content[position] = x;
+	file.content = content;
+	file.position = position + 1;
+};
+
+/**
+ * TeX prints every character of its transcript through here, twice when it prints to the terminal
+ * and the log: 18,000 calls in a pgfplots run, each of which made an array of one byte (change 9).
+ */
 export const printChar = (descriptor: number, x: number) => {
 	const file = fileFor(descriptor);
-	if (file.stdout) return writeToConsole(String.fromCharCode(x));
-	const b = new Uint8Array(1);
-	b[0] = x;
-	writeSync(file, b);
+	if (file.stdout) return consoleChar(String.fromCharCode(x));
+	appendByte(file, x);
 };
 
 // --- file name plumbing -------------------------------------------------------------------------
@@ -445,19 +490,34 @@ export const inputln = (
 	const file = files[descriptor]!;
 	const content = file.content ?? new Uint8Array();
 
-	const buffer = new Uint8Array(memory!, bufferp, bufSize);
-	const first = new Uint32Array(memory!, firstp, 4);
-	const last = new Uint32Array(memory!, lastp, 4);
+	// The checks `new Uint8Array(memory, bufferp, bufSize)` and the two `new Uint32Array(memory, p, 4)`
+	// this used to make for every line would have failed, failing the same way (change 9).
+	const mem = bytes!;
+	const word = words!;
+	if (
+		bufferp < 0 ||
+		bufSize < 0 ||
+		firstp < 0 ||
+		lastp < 0 ||
+		bufferp + bufSize > mem.length ||
+		(firstp & 3) !== 0 ||
+		(lastp & 3) !== 0 ||
+		firstp + 16 > mem.length ||
+		lastp + 16 > mem.length
+	)
+		throw new RangeError('inputln: a view outside the memory');
 
-	last[0] = first[0]!;
+	const first = word[firstp >>> 2]!;
+	word[lastp >>> 2] = first;
 
 	if (bypassEoln && !file.eof && file.eoln) file.position2 = (file.position2 ?? 0) + 1;
 	if (file.eof) return false;
 
-	let endOfLine = content.indexOf(10, file.position2 ?? 0);
+	const from = file.position2 ?? 0;
+	let endOfLine = content.indexOf(10, from);
 	if (endOfLine < 0) endOfLine = content.length;
 
-	if ((file.position2 ?? 0) >= content.length) {
+	if (from >= content.length) {
 		if (file.stdin) {
 			callback?.();
 			tex_final_end();
@@ -466,9 +526,20 @@ export const inputln = (
 		return false;
 	}
 
-	buffer.subarray(first[0]).set(content.subarray(file.position2 ?? 0, endOfLine));
-	last[0] = first[0]! + endOfLine - (file.position2 ?? 0);
-	while (buffer[last[0] - 1] === 32) last[0] = last[0] - 1;
+	// The line into TeX's buffer at `first`, as `buffer.subarray(first).set(line)` did, which threw
+	// when the line did not fit in what was left of the buffer. A short line a byte at a time, which
+	// costs less than the view `set` needs.
+	const length = endOfLine - from;
+	if (length > (first < bufSize ? bufSize - first : 0)) throw new RangeError('offset is out of bounds');
+	const at = bufferp + first;
+	if (length < 64) for (let i = 0; i < length; i++) mem[at + i] = content[from + i]!;
+	else mem.set(content.subarray(from, endOfLine), at);
+
+	// Trailing spaces off, looking only inside the buffer, as the view of it did: an index outside it
+	// read as undefined there, and ended the loop.
+	let last = first + length;
+	while (last - 1 >= 0 && last - 1 < bufSize && mem[bufferp + last - 1] === 32) last--;
+	word[lastp >>> 2] = last;
 
 	file.position2 = endOfLine;
 	file.eoln = true;
@@ -477,7 +548,7 @@ export const inputln = (
 
 export const get = (descriptor: number, pointer: number, length: number) => {
 	const file = files[descriptor]!;
-	const buffer = new Uint8Array(memory!);
+	const buffer = bytes!;
 
 	if (file.stdin) {
 		const input = inputBuffer ?? '';
@@ -513,7 +584,7 @@ export const get = (descriptor: number, pointer: number, length: number) => {
 
 export const put = (descriptor: number, pointer: number, length: number) => {
 	const file = files[descriptor]!;
-	writeSync(file, new Uint8Array(memory!), pointer, length);
+	writeSync(file, bytes!, pointer, length);
 };
 
 export const tex_final_end = () => {
