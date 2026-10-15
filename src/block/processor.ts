@@ -49,10 +49,11 @@ export interface ProcessorDeps {
 	timers: QueueTimers;
 	preamble: PreambleService;
 	/**
-	 * Whether the note at this path is being typed in (block/edits.ts): a block of it that is not
-	 * cached waits for the typing to pause. Omitted: no note ever is.
+	 * Asked as a block of the note at this path is made, and says what its cache miss asks: whether
+	 * the block was made by typing in the note (block/edits.ts RecentEdits.making), and so waits for
+	 * the typing to pause if it is not cached. Omitted: no note ever is.
 	 */
-	editing?: ((notePath: string) => boolean) | undefined;
+	editing?: ((notePath: string) => () => boolean) | undefined;
 	/** Start the engine ahead of the first job (BlockDeps.startEngine). Omitted: it starts with the job. */
 	startEngine?: ((doc: Document) => void) | undefined;
 	/**
@@ -144,6 +145,9 @@ export function createProcessor(deps: ProcessorDeps) {
 			budgeted: print !== null,
 			offscreen: el.closest(`.${OFFSCREEN_CLASS}`) !== null,
 		};
+		// Whether an edit made this block is told by what came before it and in this same run, not by
+		// what comes while its cache is read (block/edits.ts): so asked here, before anything yields.
+		const editing = deps.editing?.(ctx.sourcePath);
 		const prepared = prepare(readingViewSource(source, el, ctx), deps, ctx.sourcePath, place);
 
 		// The common case — no preamble configured anywhere — stays SYNCHRONOUS, and that is not an
@@ -152,9 +156,9 @@ export function createProcessor(deps: ProcessorDeps) {
 		// nothing to resolve would put every cache hit a microtask late and bring the placeholder
 		// back. A vault that does configure a preamble opts into the async path.
 		if (prepared instanceof Promise) {
-			return prepared.then((spec) => attach(spec, el, ctx, deps, deadline));
+			return prepared.then((spec) => attach(spec, el, ctx, deps, deadline, editing));
 		}
-		return attach(prepared, el, ctx, deps, deadline);
+		return attach(prepared, el, ctx, deps, deadline, editing);
 	};
 }
 
@@ -209,6 +213,7 @@ function attach(
 	ctx: MarkdownPostProcessorContext,
 	deps: ProcessorDeps,
 	deadline: number | undefined,
+	editing: (() => boolean) | undefined,
 ): Promise<void> {
 	const report = deps.onBlock?.(spec, el);
 	{
@@ -221,7 +226,7 @@ function attach(
 			unobserve: deps.unobserve,
 			ensureFonts: deps.ensureFonts,
 			debounceMs: deps.budgets.debounceMs,
-			editing: () => deps.editing?.(ctx.sourcePath) ?? false,
+			editing: () => editing?.() ?? false,
 			startEngine: deps.startEngine,
 			now: deps.now,
 			report,

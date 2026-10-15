@@ -53,11 +53,13 @@ const DESKTOP: Budgets = {
 	 */
 	debounceMs: 300,
 	/**
-	 * How long after a note's text changes a block of it that misses the cache is taken for one
-	 * remade by the typing, and debounces (block/edits.ts). It has to cover the time from the
-	 * keystroke to the block's cache miss: the same update in Live Preview, 10 ms and up to 200 ms
-	 * more in a Reading view beside the editor (read in the 1.14.4 bundle), then an IndexedDB read.
-	 * Too long costs nothing but the debounce, to a block that first appears in a note just typed in.
+	 * How long after a note's text changes a block of it made then is taken for one remade by the
+	 * typing, and debounces if it misses the cache (block/edits.ts). It has to cover the time from
+	 * the keystroke to the block's making: 10 ms and up to 200 ms in a Reading view beside the editor
+	 * (read in the 1.14.4 bundle); Live Preview remakes its widget in the keystroke's own update, which
+	 * reports the edit after it, and that is told apart by its run, not by this. Too long costs nothing
+	 * but the debounce, to a block that first appears in a note just typed in. An edit after a block
+	 * was made does not count for it (internal/DECISIONS.md D39).
 	 */
 	editWindowMs: 1_000,
 	l1Entries: 256,

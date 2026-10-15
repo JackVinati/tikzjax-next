@@ -1,9 +1,12 @@
 // @vitest-environment happy-dom
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { installObsidianDom } from './stubs/obsidian-dom';
-import { artifact, processBlock, processorDeps } from './stubs/processor';
+import { artifact, processBlock, processorDeps, tieredCache } from './stubs/processor';
 import { fakeApp } from './stubs/vault';
-import { BlockTally, OFFSCREEN_CLASS, rendersDifferently } from '../src/block/processor';
+import { BlockTally, createProcessor, OFFSCREEN_CLASS, rendersDifferently } from '../src/block/processor';
+import { RecentEdits } from '../src/block/edits';
+import { Component } from './stubs/obsidian';
+import type { MarkdownPostProcessorContext } from 'obsidian';
 import type { BlockOutcome, TexJobSpec } from '../src/block/render-child';
 import { buildInput } from '../engine-src/document';
 import { budgetsFor } from '../src/platform/budgets';
@@ -161,19 +164,139 @@ describe('whether a block waits for typing to pause', () => {
 	/**
 	 * Only a block of a note being typed in waits for the debounce (internal/DECISIONS.md D22), and
 	 * the note is the one the block is rendered from: the one Live Preview's editor, a Reading view
-	 * or an embed names as its source.
+	 * or an embed names as its source. It is asked as the block is made, and answered at its cache
+	 * miss (D39).
 	 */
-	it('is asked of the note the block is rendered from, once the cache has missed', async () => {
+	it('is asked of the note the block is rendered from as it is made, and answered once the cache has missed', async () => {
 		const asked: string[] = [];
+		let answered = 0;
 		const { deps, seen } = processorDeps({
 			editing: (notePath) => {
 				asked.push(notePath);
-				return false;
+				return () => {
+					answered++;
+					return false;
+				};
 			},
 		});
 		await processBlock(deps, seen, SOURCE, { path: 'Folder/Typed in.md' });
-		await flush();
 		expect(asked).toEqual(['Folder/Typed in.md']);
+		await flush();
+		expect(answered).toBe(1);
+	});
+
+	/*
+	 * The orders of things below are Obsidian's, read in its 1.14.4 bundle. A view that loads a note
+	 * replaces its editor's state (`set(text, true)` → setState), which no update listener hears, so
+	 * loading a note is no edit; Live Preview builds a code block's widget, and calls the processor,
+	 * in the update of the keystroke that remade it, and triggers `editor-change` from that update's
+	 * listener, after it; a view whose file is written by something else re-reads it and redraws
+	 * after the `modify`. Here with the plugin's own RecentEdits, and a cache read held until the
+	 * test lets it miss, as IndexedDB answers later.
+	 */
+	function startingNote() {
+		const clock = { now: 10_000 };
+		const edits = new RecentEdits(1000, () => clock.now);
+		const reads: ((found: undefined) => void)[] = [];
+		const { cache } = tieredCache();
+		const held = {
+			...(cache as unknown as Record<string, unknown>),
+			lookup: () => new Promise<undefined>((resolve) => reads.push(resolve)),
+		} as unknown as typeof cache;
+		const submitted: string[] = [];
+		const { deps } = processorDeps({
+			cache: held,
+			budgets: { ...budgetsFor(false), debounceMs: 5 },
+			editing: (notePath) => edits.making(notePath),
+			// In view at once: what decides the wait is the debounce alone.
+			observe: (_el, onChange) => onChange(true),
+			queue: {
+				submit: (key: string) => {
+					submitted.push(key);
+					return new Promise(() => undefined);
+				},
+				release: () => undefined,
+			} as never,
+		});
+		const processor = createProcessor(deps);
+		/** Obsidian hands the processor a block of `note.md`, in the run of code under way. */
+		const make = (source: string) => {
+			const parent = new Component();
+			parent.load();
+			const ctx = {
+				sourcePath: 'note.md',
+				addChild: (child: Component) => parent.addChild(child),
+				getSectionInfo: () => null,
+			} as unknown as MarkdownPostProcessorContext;
+			void processor(source, document.body.createDiv(), ctx);
+		};
+		/** The cache reads under way miss. */
+		const miss = async () => {
+			for (const resolve of reads.splice(0)) resolve(undefined);
+			await flush();
+		};
+		return { edits, clock, make, miss, submitted };
+	}
+
+	it('does not wait when the note was written after the block was made, as at startup', async () => {
+		const { edits, clock, make, miss, submitted } = startingNote();
+		// Obsidian starts and its view of the note makes the block: no edit.
+		make(SOURCE);
+		await flush();
+		// Then something writes the note, Sync bringing another device's change or a plugin acting at
+		// startup, while the block's cache read is under way.
+		clock.now += 40;
+		edits.changed('note.md');
+		clock.now += 40;
+		await miss();
+		// Queued at once: 0.2.1-beta.5 counted the write and waited the debounce.
+		expect(submitted).toHaveLength(1);
+	});
+
+	it('does not wait either for an editor that names no note, after the block was made', async () => {
+		const { edits, clock, make, miss, submitted } = startingNote();
+		make(SOURCE);
+		await flush();
+		clock.now += 40;
+		edits.changed(null);
+		await miss();
+		expect(submitted).toHaveLength(1);
+	});
+
+	it('waits while typing in Live Preview, where the keystroke is reported after its widget was made', async () => {
+		const { edits, clock, make, miss, submitted } = startingNote();
+		// One keystroke's update: the widget, and so the block, first; then editor-change.
+		make(SOURCE);
+		edits.changed('note.md');
+		await flush();
+		clock.now += 40;
+		await miss();
+		expect(submitted).toHaveLength(0);
+		await vi.waitFor(() => expect(submitted).toHaveLength(1));
+	});
+
+	it('waits for a block made after its note changed: a second pane, a Reading view, a sync while it is shown', async () => {
+		const { edits, clock, make, miss, submitted } = startingNote();
+		edits.changed('note.md');
+		// Remade 10 ms later, or up to 200 while a Reading view is still parsing.
+		clock.now += 200;
+		make(SOURCE);
+		await flush();
+		await miss();
+		expect(submitted).toHaveLength(0);
+		await vi.waitFor(() => expect(submitted).toHaveLength(1));
+	});
+
+	it('waits for a block made after a change and before another, whichever came last', async () => {
+		const { edits, clock, make, miss, submitted } = startingNote();
+		edits.changed('note.md');
+		clock.now += 100;
+		make(SOURCE);
+		await flush();
+		clock.now += 100;
+		edits.changed('note.md');
+		await miss();
+		expect(submitted).toHaveLength(0);
 	});
 });
 

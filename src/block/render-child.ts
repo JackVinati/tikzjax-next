@@ -114,8 +114,8 @@ export interface BlockDeps {
 	/** How long a block being typed in waits for the typing to pause. */
 	debounceMs: number;
 	/**
-	 * Whether the block's note is being typed in right now (block/edits.ts), asked when the cache
-	 * misses. Only then does the block debounce. Omitted: never.
+	 * Whether the block was made by typing in its note (block/edits.ts), asked when the cache misses.
+	 * Only then does the block debounce. Omitted: never.
 	 */
 	editing?: (() => boolean) | undefined;
 	/**

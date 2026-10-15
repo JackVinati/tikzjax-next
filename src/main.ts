@@ -196,7 +196,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 				now: () => Date.now(),
 				timers,
 				preamble: this.preamble,
-				editing: (notePath) => edits.editing(notePath),
+				editing: (notePath) => edits.making(notePath),
 				// At the first diagram that is not cached, never at load: a session that only shows
 				// cached diagrams never pays for an engine. Never in the background either, where the
 				// mobile teardown has just stopped one and paused the queue so that none starts. The
