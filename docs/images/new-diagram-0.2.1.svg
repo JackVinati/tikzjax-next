@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="544" viewBox="0 0 640 544" role="img" aria-labelledby="title desc">
-<title id="title">What a new diagram waits for, 0.2.0 and 0.2.1, Windows desktop, Chromium 153 (V8)</title>
-<desc id="desc">Four pairs of horizontal bars, a grey bar for 0.2.0 and a blue bar for 0.2.1, each pair on its own scale: wait before a new diagram goes to the engine, 300 ms and 0 ms; engine start, 162 ms and 54 ms; first small diagram after the start, 38 ms and 46 ms; the same diagram, the engine running, 24 ms and 7 ms.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="618" viewBox="0 0 640 618" role="img" aria-labelledby="title desc">
+<title id="title">What a new diagram waits for, 0.2.0 and 0.2.1, Windows desktop, headless Chromium 153, not in Obsidian</title>
+<desc id="desc">Three pairs of horizontal bars on one scale, a grey bar for 0.2.0 and a blue bar for 0.2.1: wait before a new diagram goes to the engine, 300 ms and 0 ms; engine start, 162 ms and 54 ms; first small diagram after the start, 38 ms and 46 ms; added up, 500 ms and 100 ms.</desc>
 <style>
 	.card { fill: #f6f8fa; stroke: #d1d9e0; }
 	text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; }
@@ -33,9 +33,9 @@
 		.snap { fill: #199e70; }
 	}
 </style>
-<rect x="0.5" y="0.5" width="639" height="543" rx="10" class="card"/>
+<rect x="0.5" y="0.5" width="639" height="617" rx="10" class="card"/>
 <text x="24" y="42" class="t1" font-size="22" font-weight="600">What a new diagram waits for</text>
-<text x="24" y="70" class="t2" font-size="17">Each pair drawn to its own scale. Shorter is better.</text>
+<text x="24" y="70" class="t2" font-size="17">Milliseconds, all on one scale. Shorter is better.</text>
 <rect x="24" y="91" width="16" height="14" rx="2" class="old"/>
 <text x="46" y="104" class="t2" font-size="17">0.2.0</text>
 <rect x="110.1" y="91" width="16" height="14" rx="2" class="new"/>
@@ -45,24 +45,25 @@
 <text x="483.6" y="166" class="t2 num" font-size="18">300 ms</text>
 <text x="31" y="184" class="t1 num" font-size="18" font-weight="600">0 ms</text>
 <text x="24" y="223" class="t1" font-size="18" font-weight="600">Engine start</text>
-<path class="old" d="M24 234H473.6A3 3 0 0 1 476.6 237V246A3 3 0 0 1 473.6 249H24Z"/>
-<text x="483.6" y="248" class="t2 num" font-size="18">162 ms</text>
-<path class="new" d="M24 252H171.9A3 3 0 0 1 174.9 255V264A3 3 0 0 1 171.9 267H24Z"/>
-<text x="181.9" y="266" class="t1 num" font-size="18" font-weight="600">54 ms</text>
-<text x="616" y="257" class="t2 num" font-size="18" text-anchor="end">−67%</text>
+<path class="old" d="M24 234H264.9A3 3 0 0 1 267.9 237V246A3 3 0 0 1 264.9 249H24Z"/>
+<text x="274.9" y="248" class="t2 num" font-size="18">162 ms</text>
+<path class="new" d="M24 252H102.8A3 3 0 0 1 105.8 255V264A3 3 0 0 1 102.8 267H24Z"/>
+<text x="112.8" y="266" class="t1 num" font-size="18" font-weight="600">54 ms</text>
+<text x="616" y="257" class="t2 num" font-size="18" text-anchor="end">−66%</text>
 <text x="24" y="305" class="t1" font-size="18" font-weight="600">First small diagram after the start</text>
-<path class="old" d="M24 316H394.9A3 3 0 0 1 397.9 319V328A3 3 0 0 1 394.9 331H24Z"/>
-<text x="404.9" y="330" class="t2 num" font-size="18">38 ms</text>
-<path class="new" d="M24 334H473.6A3 3 0 0 1 476.6 337V346A3 3 0 0 1 473.6 349H24Z"/>
-<text x="483.6" y="348" class="t1 num" font-size="18" font-weight="600">46 ms</text>
-<text x="616" y="339" class="t2 num" font-size="18" text-anchor="end">+21%</text>
-<text x="24" y="387" class="t1" font-size="18" font-weight="600">The same diagram, the engine running</text>
-<path class="old" d="M24 398H473.6A3 3 0 0 1 476.6 401V410A3 3 0 0 1 473.6 413H24Z"/>
-<text x="483.6" y="412" class="t2 num" font-size="18">24 ms</text>
-<path class="new" d="M24 416H153A3 3 0 0 1 156 419V428A3 3 0 0 1 153 431H24Z"/>
-<text x="163" y="430" class="t1 num" font-size="18" font-weight="600">7 ms</text>
-<text x="616" y="421" class="t2 num" font-size="18" text-anchor="end">−71%</text>
-<text x="24" y="470" class="t2" font-size="18">Windows desktop, Chromium 153 (V8). Medians of 7 fresh browsers.</text>
-<text x="24" y="496" class="t2" font-size="18">A diagram’s time runs from handing it to the engine to its SVG back.</text>
-<text x="24" y="522" class="t2" font-size="18">The wait is the plugin’s setting, not a measurement.</text>
+<path class="old" d="M24 316H78.3A3 3 0 0 1 81.3 319V328A3 3 0 0 1 78.3 331H24Z"/>
+<text x="88.3" y="330" class="t2 num" font-size="18">38 ms</text>
+<path class="new" d="M24 334H89.6A3 3 0 0 1 92.6 337V346A3 3 0 0 1 89.6 349H24Z"/>
+<text x="99.6" y="348" class="t1 num" font-size="18" font-weight="600">46 ms</text>
+<text x="616" y="339" class="t2 num" font-size="18" text-anchor="end">+20%</text>
+<line x1="24" y1="372" x2="616" y2="372" class="rule"/>
+<text x="24" y="404" class="t1 num" font-size="18" font-weight="600">Added up: 500 ms → 100 ms</text>
+<text x="616" y="404" class="t1 num" font-size="18" font-weight="600" text-anchor="end">−80%</text>
+<text x="24" y="440" class="t2" font-size="18">Windows desktop, headless Chromium 153, not in Obsidian.</text>
+<text x="24" y="466" class="t2" font-size="18">Medians of 7 fresh browsers.</text>
+<text x="24" y="492" class="t2" font-size="18">A diagram’s time runs from handing it to the engine to its SVG back.</text>
+<text x="24" y="518" class="t2" font-size="18">0.2.1’s first diagram also saves its preamble.</text>
+<text x="24" y="544" class="t2" font-size="18">The wait is the plugin’s setting, not a measurement.</text>
+<text x="24" y="570" class="t2" font-size="18">In a note you are typing in, 0.2.1 still waits 300 ms.</text>
+<text x="24" y="596" class="t2" font-size="18">Changes from unrounded medians.</text>
 </svg>

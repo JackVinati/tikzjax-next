@@ -163,11 +163,13 @@ const DATA_021 = {
 		// render with saved preambles off, so compiled from the start; 0.2.1's second render with saved
 		// preambles on at a computer's 32 MiB, as the plugin sends them, which starts from the preamble
 		// its first render saved (all but missing-pgfplots-library, which stops in its preamble and
-		// saves nothing). 0.2.0's second renders add up to 2,787 ms. Every SVG is the golden corpus's
-		// but expl3's, whose source this harness reads with Windows line ends, in both builds alike.
-		// The same runs in WebKit 26.6 add up to 4,210, 2,772 and 1,192 ms; the README gives those in
-		// its text.
-		platform: 'Windows desktop, Chromium 153 (V8)',
+		// saves nothing). 0.2.0's second renders add up to 2,787 ms; the README, the changelog and the
+		// chart all compare with its first, 2,827. Every SVG is the golden corpus's but expl3's, whose
+		// source this harness reads with Windows line ends, in both builds alike. Per diagram, 0.2.1
+		// from the start took 29.4% (white-fill) to 63.0% (batchmode-errors) less in Chromium. The same
+		// runs in WebKit 26.6 add up to 4,210, 2,772 and 1,192 ms, 25.0% (runaway-macro) to 53.8%
+		// (batchmode-errors) less per diagram; the README gives those in its text.
+		platform: 'Windows desktop, headless Chromium 153, not in Obsidian',
 		runs: 7,
 		rows: [
 			['arrows-meta', 44, 28, 6],
@@ -222,6 +224,7 @@ const DATA_021 = {
 	// out. Nothing here may be guessed or carried over from the desktop.
 	texTimeIphone: {
 		platform: 'iPhone 16 Pro, iOS 27.0.1, Obsidian 1.14.5',
+		method: 'A range is where I read it more than once',
 		date020: '14 October 2026',
 		date021: null,
 		// [diagram of the test note, 0.2.0, 0.2.1 cold, 0.2.1 saved]
@@ -234,25 +237,30 @@ const DATA_021 = {
 	},
 
 	wait: {
-		// What a new diagram waits for, in ms, on the desktop. The wait before a diagram that is not
-		// cached goes to the engine is the plugin's own setting, not a measurement: `debounceMs`, 300 ms
-		// on a computer in 0.2.0, and none in 0.2.1 but for a note being typed in (D22). The rest are
-		// medians of the 7 runs of each build above (Chromium): the engine's start, from creating the
-		// worker to its `ready` on the main thread (range 160 to 172 ms for 0.2.0, 51 to 59 for
-		// 0.2.1); the first diagram after the start, `basic`, from handing it to the worker to its SVG
-		// back on the main thread (36 to 41 and 45 to 48 ms; 0.2.1's includes saving its preamble, 11 to
-		// 13 ms); and the same diagram once the engine runs, its second render (23 to 26 ms, and 7 ms in
-		// every run).
+		// What a new diagram waits for, in ms, on the desktop, all on one scale. The wait before a
+		// diagram that is not cached goes to the engine is the plugin's own setting, not a
+		// measurement: `debounceMs`, 300 ms on a computer in 0.2.0, and none in 0.2.1 but for a note
+		// being typed in (D22). The rest are medians of the 7 runs of each build above (Chromium),
+		// unrounded, so that the changes are worked out from them: the engine's start, from creating
+		// the worker to its `ready` on the main thread (161.7 ms for 0.2.0, range 159.5 to 171.9;
+		// 54.2 for 0.2.1, 51.0 to 58.5); and the first diagram after the start, `basic`, from handing
+		// it to the worker to its SVG back on the main thread (38.0, 35.9 to 41.0; and 45.5, 44.7 to
+		// 47.7, which includes saving its preamble, 11 to 13 ms; with saved preambles off, 34.0). The
+		// chart adds the three up, 499.7 against 99.7 ms. The same diagram drawn again, once the engine
+		// runs, is not a wait for a new diagram and is left to the README's text: 24.0 ms on 0.2.0,
+		// 7.0 on 0.2.1 from its saved preamble, and 14.4 with saved preambles off.
 		// The plugin's SVG pipeline and drawing the diagram in the note come on top of each, and were
 		// not part of this harness.
 		desktop: {
-			platform: 'Windows desktop, Chromium 153 (V8)',
+			platform: 'Windows desktop, headless Chromium 153, not in Obsidian',
 			method: 'Medians of 7 fresh browsers',
+			unrounded: true,
+			total: 'Added up',
+			typing: 'In a note you are typing in, 0.2.1 still waits 300 ms',
 			rows: [
 				['Wait before a new diagram goes to the engine', 'ms', 300, 0, 'set'],
-				['Engine start', 'ms', 162, 54],
-				['First small diagram after the start', 'ms', 38, 46],
-				['The same diagram, the engine running', 'ms', 24, 7],
+				['Engine start', 'ms', 161.7, 54.2],
+				['First small diagram after the start', 'ms', 38.0, 45.5],
 			],
 		},
 		// IPHONE-FIGURES: the same on the maintainer's iPhone, read off the diagnostics view's Copy
@@ -261,13 +269,15 @@ const DATA_021 = {
 		// TeX step of a small diagram read 15 to 40 ms; 0.2.0's view did not time a diagram from seen to
 		// drawn. 0.2.1's are still to be read: `waited`, `engine start`, the TeX step and `seen to
 		// drawn` of the small diagrams of the same note, from 0.2.1 or its last beta, a number or
-		// [lo, hi] each, and `date021`. Until every 0.2.1 value is filled in, start-iphone-0.2.1.svg is
-		// left out. Nothing here may be guessed or carried over from the desktop.
+		// [lo, hi] each, and `date021`. Until every 0.2.1 value is filled in,
+		// new-diagram-iphone-0.2.1.svg is left out. Nothing here may be guessed or carried over from
+		// the desktop.
 		iphone: {
 			platform: 'iPhone 16 Pro, iOS 27.0.1, Obsidian 1.14.5',
 			date020: '14 October 2026',
 			date021: null,
 			method: 'Read off the diagnostics view; a range spans several diagrams',
+			typing: 'In a note you are typing in, 0.2.1 still waits 500 ms',
 			rows: [
 				['Wait before a new diagram goes to the engine', 'ms', 500, null, 'set'],
 				['Engine start', 'ms', 134, null],
@@ -299,6 +309,8 @@ const TEX_CHART_ROWS_021 = [
 	'basic',
 ];
 const LABEL_021 = { feynhand: 'tikz-feynhand', basic: 'plain TikZ' };
+// The README's table says what the chart calls `basic`, so the two can be read side by side.
+const NOTE_021 = { ...NOTE, basic: 'plain TikZ' };
 
 // ---------------------------------------------------------------------------------------------
 // Drawing helpers.
@@ -736,10 +748,11 @@ const LEGEND_021 = [
 ];
 
 // A figure is a number or a range [lo, hi], as read off a phone more than once; null is not known.
+// A number is shown to the whole ms, and any change is worked out from it as given.
 const isRange = (v) => Array.isArray(v);
 const top_ = (v) => (isRange(v) ? v[1] : v);
 const show = (v, unit = '') => {
-	const s = isRange(v) ? `${fmt(v[0])}–${fmt(v[1])}` : fmt(v);
+	const s = isRange(v) ? `${fmt(v[0])}–${fmt(v[1])}` : fmt(Math.round(v));
 	return unit ? `${s} ${unit}` : s;
 };
 const pctBetween = (before, after) =>
@@ -848,11 +861,13 @@ function texTime021(which) {
 	}
 	const notes = [`${d.platform}.`];
 	if (which !== 'desktop') notes.push(`0.2.0 read on ${d.date020}, 0.2.1 on ${d.date021}.`);
+	if (d.method) notes.push(`${d.method}.`);
 	notes.push(
 		which === 'desktop'
 			? 'Saved preamble: the same diagram drawn a second time in a row.'
 			: 'Saved preamble: a diagram that started from one, saved or stored.',
 	);
+	if (pcts.length) notes.push('Changes are against 0.2.0.');
 	const src = source(yNext, notes);
 	body += src.markup;
 	const height = src.last + 22;
@@ -875,7 +890,8 @@ function texTime021(which) {
 }
 
 // 2. What a new diagram waits for: the wait before it goes to the engine, the engine's start, and a
-// small diagram's compile. Each pair on its own scale.
+// small diagram's compile, all on one scale, so that the bars show what the wait is made of; and,
+// where the data asks for it, what they add up to.
 
 function wait021(which) {
 	const d = DATA_021.wait[which];
@@ -889,9 +905,16 @@ function wait021(which) {
 		pct: kind === 'set' ? null : pctBetween(before, after),
 	}));
 	if (rows.length * 2 > 8) throw new Error('wait021: more than 8 bars');
+	let sums = null;
+	if (d.total) {
+		if (rows.some((r) => typeof r.before !== 'number' || typeof r.after !== 'number' || r.unit !== 'ms'))
+			throw new Error('wait021: a total needs a number in ms in every row');
+		sums = [rows.reduce((a, r) => a + r.before, 0), rows.reduce((a, r) => a + r.after, 0)];
+	}
 
 	const colPct = W - PAD;
 	const pcts = rows.map((r) => r.pct).filter((p) => p !== null);
+	if (sums) pcts.push(change(sums[0], sums[1]));
 	const pctW = pcts.length ? Math.max(...pcts.map((p) => textWidth(`${signed(p)}%`, S.value))) : 0;
 	const valW = Math.max(
 		...rows.flatMap((r) => [
@@ -901,21 +924,21 @@ function wait021(which) {
 	);
 	const x0 = PAD;
 	const x1 = colPct - (pctW ? pctW + 22 : 0) - valW - 8;
+	const most = Math.max(...rows.flatMap((r) => [r.before === null ? 0 : top_(r.before), top_(r.after)]));
+	const scale = most > 0 ? (x1 - x0) / most : 0;
 
 	const top = 124;
 	const pitch = 82;
 	const barH = 15;
 	const title =
 		which === 'desktop' ? 'What a new diagram waits for' : 'What a new diagram waits for, on a phone';
-	let body = header(title, 'Each pair drawn to its own scale. Shorter is better.');
+	let body = header(title, 'Milliseconds, all on one scale. Shorter is better.');
 	body += legend(PAD, 104, LEGEND_021);
 
 	rows.forEach((r, i) => {
 		const y = top + i * pitch;
 		fits(PAD, r.label, S.label, 600, pctW ? colPct - pctW - 12 : colPct);
 		body += text(PAD, y + 17, r.label, { weight: 600 });
-		const most = Math.max(r.before === null ? 0 : top_(r.before), top_(r.after));
-		const scale = most > 0 ? (x1 - x0) / most : 0;
 		const yA = y + 28;
 		const yB = yA + barH + 3;
 		if (r.before === null) {
@@ -938,17 +961,34 @@ function wait021(which) {
 	});
 
 	const bottom = top + rows.length * pitch;
+	let yNext = bottom + 18;
+	if (sums) {
+		body += line(PAD, bottom + 2, W - PAD, bottom + 2, 'rule');
+		const str = `${d.total}: ${show(sums[0], 'ms')} → ${show(sums[1], 'ms')}`;
+		fits(PAD, str, S.value, 600, colPct - pctW - 12);
+		body += text(PAD, bottom + 34, str, { weight: 600, num: true });
+		body += text(colPct, bottom + 34, `${signed(change(sums[0], sums[1]))}%`, {
+			weight: 600,
+			anchor: 'end',
+			num: true,
+		});
+		yNext = bottom + 34 + 36;
+	}
 	const notes = [`${d.platform}.`];
 	if (which !== 'desktop') notes.push(`0.2.0 read on ${d.date020}, 0.2.1 on ${d.date021}.`);
 	if (d.method) notes.push(`${d.method}.`);
-	if (which === 'desktop')
+	if (which === 'desktop') {
 		notes.push('A diagram’s time runs from handing it to the engine to its SVG back.');
+		notes.push('0.2.1’s first diagram also saves its preamble.');
+	}
 	notes.push(
 		which === 'desktop'
 			? 'The wait is the plugin’s setting, not a measurement.'
 			: 'The wait in 0.2.0 is its setting, not a reading.',
 	);
-	const src = source(bottom + 18, notes);
+	if (d.typing) notes.push(`${d.typing}.`);
+	if (d.unrounded && pcts.length) notes.push('Changes from unrounded medians.');
+	const src = source(yNext, notes);
 	body += src.markup;
 	const height = src.last + 22;
 
@@ -957,11 +997,12 @@ function wait021(which) {
 		which === 'desktop' ? 'new-diagram-0.2.1.svg' : 'new-diagram-iphone-0.2.1.svg',
 		height,
 		`${title}, 0.2.0 and 0.2.1, ${d.platform}`,
-		`${WORDS[rows.length] ?? rows.length} pairs of horizontal bars, a grey bar for 0.2.0 and a blue bar for ` +
-			'0.2.1, each pair on its own scale: ' +
+		`${WORDS[rows.length] ?? rows.length} pairs of horizontal bars on one scale, a grey bar for 0.2.0 and a ` +
+			'blue bar for 0.2.1: ' +
 			rows
 				.map((r) => `${lowerFirst(r.label)}, ${said(r.before, r.unit)} and ${said(r.after, r.unit)}`)
 				.join('; ') +
+			(sums ? `; ${lowerFirst(d.total)}, ${show(sums[0], 'ms')} and ${show(sums[1], 'ms')}` : '') +
 			'.',
 		body,
 		STYLE_021,
@@ -975,7 +1016,7 @@ function table021() {
 	const cell = (v) => `<td align="right">${fmt(v)}</td>`;
 	const rows = d.rows
 		.map(([n, a, b, c]) => {
-			const note = NOTE[n] ? ` (${NOTE[n]})` : '';
+			const note = NOTE_021[n] ? ` (${NOTE_021[n]})` : '';
 			return `<tr><td><code>${n}</code>${note}</td>${cell(a)}${cell(b)}${cell(c)}<td align="right">${signed(change(a, b))}%</td></tr>`;
 		})
 		.join('\n');
