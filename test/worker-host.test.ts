@@ -1797,6 +1797,128 @@ describe('saved preambles kept across the engines’ stops', () => {
 		expect(host.report().lives[0]?.handOvers).toEqual({ sent: 3, dropped: 1, failed: 1 });
 	});
 
+	/*
+	 * A job the engine does not have yet gives its slot to a diagram higher in the note, and goes back
+	 * in line; a note switched away from drops its jobs. The host drops the job, and the run read for
+	 * it was read again when the job came back, with the engine idle (internal/DECISIONS.md D40).
+	 */
+	describe('a run read for a job the queue took back', () => {
+		/** The job's diagram, under a signal the test aborts as the queue would. */
+		const ask = (host: WorkerHost, key: string) => {
+			const controller = new AbortController();
+			const result = track(host.render({ key, source, options, timeoutMs: 1000 }, controller.signal));
+			return {
+				result,
+				takeBack: () => controller.abort(new QueueError('cancelled', key, 'gave its slot up')),
+				abort: () => controller.abort(),
+			};
+		};
+
+		it('is kept for the job as it starts again, and sent with it', async () => {
+			let now = 0;
+			const runs = new FakeRuns();
+			runs.stored.set(route, storedRun(100));
+			const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs, now: () => now });
+			const first = ask(host, 'a');
+			now = 16;
+			await tick();
+			first.takeBack();
+			await tick();
+			expect(first.result.status).toBe('rejected');
+			// The engine was kept starting, as for any job the queue took back (D25), and is up now.
+			now = 50;
+			worker(0).boot();
+			ask(host, 'a');
+			await tick();
+			expect(runs.reads).toEqual([route]);
+			const posted = renders(worker(0))[0]!;
+			expect(posted.stored?.data.byteLength).toBe(100);
+			// Read while the engine started: not what a read takes.
+			reply(worker(0), posted.id, {
+				stored: 'used',
+				timings: {
+					resetMs: 1,
+					texMs: 5,
+					svgMs: 1,
+					passes: 1,
+					resumed: true,
+					restored: true,
+					restoreMs: 4,
+				},
+			});
+			await tick();
+			expect(runs.measuredWith).toEqual([[{ bytes: 100, rawBytes: 300 }, NaN, 4]]);
+		});
+
+		it('is kept still being read, and taken when it is done', async () => {
+			const runs = new FakeRuns();
+			runs.stored.set(route, storedRun(100));
+			let release!: () => void;
+			runs.hold = new Promise((resolve) => (release = resolve));
+			const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+			const first = ask(host, 'a');
+			await tick();
+			first.takeBack();
+			ask(host, 'a');
+			worker(0).boot();
+			await tick();
+			expect(renders(worker(0))).toHaveLength(0);
+			release();
+			await tick();
+			expect(runs.reads).toEqual([route]);
+			expect(renders(worker(0))[0]?.stored?.data.byteLength).toBe(100);
+		});
+
+		it('goes to the next job of the same preamble, once', async () => {
+			const runs = new FakeRuns();
+			runs.stored.set(route, storedRun(100));
+			const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, poolSize: 2, runs });
+			const first = ask(host, 'a');
+			await tick();
+			first.takeBack();
+			ask(host, 'b');
+			ask(host, 'c');
+			await tick();
+			// One read for the job taken back, kept for b; c reads its own.
+			expect(runs.reads).toEqual([route, route]);
+		});
+
+		it('is not kept for a job aborted for any other reason', async () => {
+			const runs = new FakeRuns();
+			runs.stored.set(route, storedRun(100));
+			const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, poolSize: 2, runs });
+			ask(host, 'other');
+			const first = ask(host, 'a');
+			await tick();
+			first.abort();
+			ask(host, 'a');
+			await tick();
+			expect(runs.reads).toEqual([route, route, route]);
+		});
+
+		it('is let go once the store was cleared, once the engines stop, or past what an engine may hold', async () => {
+			const cases: [string, (host: WorkerHost, runs: FakeRuns) => void, number][] = [
+				['cleared', (_host, runs) => runs.epoch++, 12 * 1048576],
+				['stopped', (host) => host.kill('restart'), 12 * 1048576],
+				['too large', () => undefined, 99],
+			];
+			for (const [name, after, budget] of cases) {
+				FakeWorker.spawned = [];
+				const runs = new FakeRuns();
+				runs.stored.set(route, storedRun(100));
+				const host = new WorkerHost({ snapshotBudget: () => budget, runs });
+				const first = ask(host, 'a');
+				await tick();
+				first.takeBack();
+				await tick();
+				after(host, runs);
+				ask(host, 'a');
+				await tick();
+				expect(runs.reads, name).toEqual([route, route]);
+			}
+		});
+	});
+
 	it('ask for no run to be written out again when one is stored and none was sent', async () => {
 		const runs = new FakeRuns();
 		runs.stored.set(route, storedRun());

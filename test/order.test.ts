@@ -79,6 +79,17 @@ async function open(opts: { late: number; bootMs?: number; place?: boolean; engi
 	return p;
 }
 
+/** When the diagram was drawn: its compile, then the pipeline and the drawing. */
+function drawn(
+	p: { outcomes: { name: string; settled: number | undefined }[]; diagrams: readonly Diagram[] },
+	name: string,
+): number {
+	const outcome = p.outcomes.find((o) => o.name === name);
+	const d = p.diagrams.find((x) => x.name === name);
+	if (outcome?.settled === undefined || d === undefined) throw new Error(`${name} never drawn`);
+	return outcome.settled + d.afterMs;
+}
+
 /** How long the diagram waited for the queue to start it, as its diagnostics say. */
 function queued(p: Awaited<ReturnType<typeof open>>, name: string): number {
 	const outcome = p.outcomes.find((o) => o.name === name);
@@ -126,6 +137,40 @@ describe('the order a phone draws a note in after a start', () => {
 		} finally {
 			Object.defineProperty(AbortSignal.prototype, 'reason', reason);
 		}
+	});
+
+	it('reads each stored run once, also that of the job that gave its slot to the top one', async () => {
+		// #2's run was read while the engine started, before #1 took its slot: the first build of
+		// this read it again when #2 started again, with the engine idle.
+		const p = await open({ late: 20, place: true });
+		expect([...p.reads].sort()).toEqual(['#1', '#2', '#3', '#4']);
+		expect(queued(p, '#2')).toBe(58);
+		expect(drawn(p, '#4')).toBe(332);
+	});
+
+	it('on a warm engine whose cache reads answer from the bottom up, reads each run once', async () => {
+		// Ten diagrams, each with a run to read, whose blocks ask 5 ms apart from the bottom up: each
+		// takes the slot of the one below it, whose read goes on and is kept for it.
+		const many: Diagram[] = Array.from({ length: 10 }, (_, i) => ({
+			name: `d${i + 1}`,
+			place: i + 1,
+			packages: { [`pkg${i + 1}`]: '' },
+			workMs: 40,
+			readMs: 23,
+			afterMs: 2,
+		}));
+		const p = phone(many, { bootMs: 38, place: true });
+		p.miss();
+		await p.sim.run(100);
+		for (const d of [...many].reverse()) {
+			p.submit(d);
+			await p.sim.run(p.sim.now + 5);
+		}
+		await p.sim.run(20_000);
+		expect(p.posted).toEqual(many.map((d) => d.name));
+		expect(p.reads).toHaveLength(10);
+		// beta.6 drew the bottom one first and the note in 632 ms, the first build of this in 677.
+		expect(Math.max(...many.map((d) => drawn(p, d.name))) - 100).toBe(470);
 	});
 
 	it('on a computer with two engines, puts the top one in the first engine free', async () => {

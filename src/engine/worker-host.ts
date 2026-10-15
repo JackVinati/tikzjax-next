@@ -211,6 +211,23 @@ export interface StoredRuns {
 	used(route: string): void;
 }
 
+/** What reading a stored run gave (StoredRuns.read), and how long the read took. */
+interface ReadOf {
+	run: StoredRun | 'not-worth' | 'read-failed' | undefined;
+	ms: number;
+}
+
+/**
+ * The read of a stored run for a job the queue took back before an engine had it, kept for the next
+ * job of its name (WorkerHost.kept): the read, under way or done; where the store stood as it began;
+ * and the bytes it gave, once it has given a run.
+ */
+interface KeptRead {
+	read: Promise<ReadOf>;
+	epoch: number;
+	bytes: number;
+}
+
 /** One render, from `render()` until it settles. */
 interface Job {
 	readonly id: number;
@@ -233,6 +250,13 @@ interface Job {
 	fetching: boolean;
 	stored: StoredRun | undefined;
 	fetchMs: number | undefined;
+	/** The read of its stored run, under way or done, while it waits: kept if the queue takes it back. */
+	read: Promise<ReadOf> | undefined;
+	/**
+	 * Its run was read for another job, one the queue took back, and kept (WorkerHost.kept): not what a
+	 * read takes now, as it may have been made while an engine started.
+	 */
+	keptRead: boolean;
 	/**
 	 * The timer of the longest it waits for the read with an engine idle for it (STORED_READ_WAIT_MS),
 	 * and whether that ran out first: it then went without the run.
@@ -328,6 +352,16 @@ export class WorkerHost implements TexHost {
 	 * would cost the inflate it failed in and then the preamble.
 	 */
 	private readonly unsendable = new Set<string>();
+	/**
+	 * Stored runs read for a job the queue took back before an engine had it, by name, for the next job
+	 * that would read the same: the job itself as it starts again, after it gave its slot to a diagram
+	 * higher in the note, or another diagram with the same preamble, after a note was switched away
+	 * from (internal/DECISIONS.md D25, D40). The host dropped such a job with its read, and the job
+	 * read it again when it came back, with the engine idle. A read under way is kept too, and a run
+	 * is kept until a job takes it, as long as the engines run, and only while all those kept come to
+	 * no more than one engine may hold of saved runs (`snapshotBudget`).
+	 */
+	private readonly kept = new Map<string, KeptRead>();
 
 	/** For the diagnostics view: see EngineReport. */
 	private starts = 0;
@@ -455,6 +489,8 @@ export class WorkerHost implements TexHost {
 				fetching: false,
 				stored: undefined,
 				fetchMs: undefined,
+				read: undefined,
+				keptRead: false,
 				readWait: null,
 				overdue: false,
 				sent: undefined,
@@ -841,7 +877,9 @@ export class WorkerHost implements TexHost {
 	 * switched away from, which says nothing about the start, and the engine started early for it is
 	 * kept for the next note's diagrams, or idles down if none comes. A WebView without
 	 * `AbortSignal.reason`, an older iOS WebKit's, cannot tell the two apart, and stops the start as
-	 * before.
+	 * before. What was read of its stored run is kept for the next job that would read it (kept), as
+	 * the queue also cancels a job that gives its slot to a more urgent one, and starts it again later
+	 * (D40).
 	 */
 	private abandon(job: Job): void {
 		const running = this.engines.find((engine) => engine.current === job);
@@ -856,6 +894,7 @@ export class WorkerHost implements TexHost {
 		const index = this.waiting.indexOf(job);
 		if (index < 0) return;
 		this.waiting.splice(index, 1);
+		if (isQueueError(job.signal.reason, 'cancelled')) this.keepRead(job);
 		this.settle(job, () =>
 			job.reject(new TexError('aborted', [], undefined, undefined, 'abandoned before it started')),
 		);
@@ -893,7 +932,11 @@ export class WorkerHost implements TexHost {
 		const at = this.engines.indexOf(engine);
 		if (at < 0) return;
 		this.engines.splice(at, 1);
-		if (this.engines.length === 0) this.cancelIdleTeardown();
+		if (this.engines.length === 0) {
+			this.cancelIdleTeardown();
+			// The runs read for the jobs the queue took back go with the engines they were read for.
+			this.kept.clear();
+		}
 		this.keepEngine(engine);
 		engine.life.stop = why;
 		this.lastStop = why;
@@ -1012,15 +1055,23 @@ export class WorkerHost implements TexHost {
 	 * run if there was one worth sending (StoredRuns.read), or before, to an engine that turns out to
 	 * hold the run, and the bytes read are then let go. The engine's start, when there is one, runs
 	 * meanwhile. A job waits for the read at most STORED_READ_WAIT_MS with an engine idle for it, and
-	 * while a read it stopped waiting for has not settled, storage is not asked for another.
+	 * while a read it stopped waiting for has not settled, storage is not asked for another. A run read
+	 * for a job the queue took back is taken instead of reading it again (kept).
 	 */
 	private fetchStored(job: Job): void {
 		const runs = this.runs;
 		const route = job.route;
 		if (runs === undefined || !runs.readable || route === undefined) return;
+		// Read for a job the queue took back a moment ago, and not since the store was cleared: taken
+		// rather than read again (kept), also while storage is slow, as it asks storage for nothing.
+		let kept = this.kept.get(route);
+		if (kept !== undefined && kept.epoch !== runs.epoch) {
+			this.kept.delete(route);
+			kept = undefined;
+		}
 		// Why none is read, for the diagnostics, where one is stored and the job does not go to an
 		// engine that holds it after all (post).
-		if (this.overdueReads > 0) {
+		if (this.overdueReads > 0 && kept === undefined) {
 			job.unsent = 'slow';
 			return;
 		}
@@ -1037,24 +1088,63 @@ export class WorkerHost implements TexHost {
 			return;
 		}
 		job.fetching = true;
+		if (kept !== undefined) this.kept.delete(route);
+		job.keptRead = kept !== undefined;
 		const started = this.now();
-		runs.read(route)
-			.then(
-				(run) => {
-					// Not waited for, or no longer needed: the bytes go.
-					if (job.overdue || !this.waiting.includes(job)) return;
-					if (typeof run === 'string') job.unsent = run;
-					else job.stored = run;
-					job.fetchMs = this.now() - started;
-				},
-				() => undefined,
-			)
-			.finally(() => {
-				if (job.overdue) this.overdueReads--;
-				job.fetching = false;
-				this.stopReadWait(job);
-				this.pump();
-			});
+		const read =
+			kept?.read ?? runs.read(route).then((run): ReadOf => ({ run, ms: this.now() - started }));
+		job.read = read;
+		read.then(
+			({ run, ms }) => {
+				// Not waited for, or no longer needed: the bytes go, unless they were kept (abandon).
+				if (job.overdue || !this.waiting.includes(job)) return;
+				if (typeof run === 'string') job.unsent = run;
+				else job.stored = run;
+				job.fetchMs = ms;
+			},
+			() => undefined,
+		).finally(() => {
+			if (job.overdue) this.overdueReads--;
+			job.fetching = false;
+			this.stopReadWait(job);
+			this.pump();
+		});
+	}
+
+	/**
+	 * Keep what was read of its stored run for a job the queue took back before an engine had it, for
+	 * the next job that would read the same (kept): the run, or the read still under way. Not while no
+	 * engine runs, nor a second for one name, nor what is not a run, nor past what one engine may hold.
+	 */
+	private keepRead(job: Job): void {
+		const route = job.route;
+		const runs = this.runs;
+		if (route === undefined || runs === undefined || this.engines.length === 0 || this.kept.has(route))
+			return;
+		const stored = job.stored;
+		const read =
+			stored !== undefined
+				? Promise.resolve<ReadOf>({ run: stored, ms: job.fetchMs ?? 0 })
+				: job.fetching
+					? job.read
+					: undefined;
+		if (read === undefined) return;
+		const kept: KeptRead = { read, epoch: runs.epoch, bytes: 0 };
+		this.kept.set(route, kept);
+		const drop = (): void => {
+			if (this.kept.get(route) === kept) this.kept.delete(route);
+		};
+		read.then(({ run }) => {
+			if (this.kept.get(route) !== kept) return;
+			if (run === undefined || typeof run === 'string') {
+				drop();
+				return;
+			}
+			kept.bytes = run.data.byteLength;
+			let bytes = 0;
+			for (const other of this.kept.values()) bytes += other.bytes;
+			if (bytes > this.snapshotBudget()) drop();
+		}, drop);
 	}
 
 	/**
@@ -1096,10 +1186,11 @@ export class WorkerHost implements TexHost {
 		if (outcome === 'corrupt') runs.forget(job.route).catch(() => undefined);
 		if (outcome === 'failed') this.unsendable.add(job.route);
 		// A read made while the engine started is not what a read takes: the two shared the processor.
+		// Nor one kept from a job the queue took back, which may have been.
 		if (outcome === 'used' && job.sent !== undefined && timings?.restoreMs !== undefined)
 			runs.measured(
 				job.sent,
-				job.startMs === undefined ? (job.fetchMs ?? NaN) : NaN,
+				job.startMs === undefined && !job.keptRead ? (job.fetchMs ?? NaN) : NaN,
 				timings.restoreMs,
 			);
 	}

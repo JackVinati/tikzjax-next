@@ -100,6 +100,8 @@ export function phone(
 	const sim = new Sim();
 	const byRoute = new Map(diagrams.map((d) => [routeOfDiagram(d), d]));
 	const posted: string[] = [];
+	/** Each read of a stored run, by the diagram it is for. */
+	const reads: string[] = [];
 
 	class SimWorker {
 		onmessage: ((event: MessageEvent<WorkerResponse>) => void) | null = null;
@@ -157,6 +159,7 @@ export function phone(
 		has: (route) => byRoute.get(route)?.readMs !== undefined,
 		read: (route) => {
 			const d = byRoute.get(route);
+			if (d !== undefined) reads.push(d.name);
 			if (d?.readMs === undefined) return Promise.resolve(undefined);
 			return new Promise<StoredRun>((resolve) =>
 				sim.setTimeout(
@@ -210,5 +213,5 @@ export function phone(
 			.then(() => void (outcome.settled = sim.now));
 	};
 
-	return { sim, host, queue, posted, outcomes, miss, submit, diagrams };
+	return { sim, host, queue, posted, reads, outcomes, miss, submit, diagrams };
 }

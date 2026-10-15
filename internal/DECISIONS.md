@@ -4032,17 +4032,34 @@ to drawn, in ms:
 | As observed: #1 39 ms after the others, the engine's start 38 ms | beta.6 | 267 / 290 | 0 / 166 | 147 / 256 | 254 / 308 |
 | | now | 108 / 131 | 0 / 166 | 169 / 278 | 276 / 330 |
 | #1 20 ms after the others, while the engine starts | beta.6 | 286 / 309 | 0 / 166 | 147 / 256 | 254 / 308 |
-| | now | 0 / 39 | 58 / 204 | 185 / 294 | 292 / 346 |
+| | now | 0 / 39 | 58 / 188 | 169 / 278 | 276 / 330 |
 | An engine that starts in 900 ms, as without the JIT | beta.6 | 1,129 / 1,152 | 0 / 1,028 | 1,009 / 1,118 | 1,116 / 1,170 |
-| | now | 0 / 882 | 920 / 1,066 | 1,047 / 1,156 | 1,154 / 1,208 |
+| | now | 0 / 882 | 920 / 1,050 | 1,031 / 1,140 | 1,138 / 1,192 |
 | A computer with two engines, as observed | beta.6 | 108 / 131 | 0 / 166 | 0 / 124 | 122 / 176 |
 | | now | 83 / 106 | 0 / 166 | 0 / 124 | 144 / 198 |
 
 The simulation gives the phone's queue times within 3 ms, and its seen to drawn within 6. As observed, #2 was in the engine
 before #1 asked, and the order in the note is what helps; giving up the slot helps whenever the top
-diagram asks while the engine is still starting. A job that gave its slot up has its stored run read
-again when it starts again, with the engine idle: #2's 16 ms in the second case. The note's last
-diagram is drawn 22 to 38 ms later; the work is the same.
+diagram asks while the engine is still starting. On one engine the note's last diagram is drawn 1 ms
+later than in beta.6, as #4 is drawn last instead of #1; with two engines, 22 ms later.
+
+**A run read for a job that gave its slot up is kept.** The host drops a job the queue takes back,
+and with it the run read for it from storage; the first build of this read the run again when the job
+started again, with the engine idle: #2's 16 ms in the second case, and 16 ms for every diagram after
+it. With the engine up and ten diagrams whose blocks ask 5 ms apart from the bottom up, each with
+a run to read (23 ms), each took the slot of the one below it and cancelled its read: 19 reads, the
+first diagram in the engine 68 ms after the first asked, and the note drawn in 677 ms, where beta.6
+drew the bottom one first and the note in 632 (found in review). Now the host keeps, by the name of
+the run, the read of a job the queue cancelled before an engine had it, done or still under way, and
+the next job that would read the same takes it instead (`WorkerHost.kept`): the job as it starts
+again, or a diagram with the same preamble after a note was switched away from (D25). Ten reads, and
+the note in 470 ms, as the reads of the jobs taken back go on meanwhile. A kept run goes when a job
+takes it, when the last engine stops, when the store was cleared since its read began, and is not kept
+at all where the runs kept would come to more than one engine may hold of saved runs
+(`snapshotBudget`, 12 MiB on a phone): a note of many diagrams each with its own preamble holds, for
+a moment, runs it would otherwise have read one at a time. What a kept read took is not learnt as
+what a read takes, as it may have shared the processor with an engine's start. A WebView without
+`AbortSignal.reason` cannot tell the queue's cancel, and reads again, as in the first build.
 
 **What else it touches.**
 
@@ -4055,7 +4072,8 @@ diagram is drawn 22 to 38 ms later; the work is the same.
   A block in the margin above the view is made first, and goes first. Telling them apart, band 1 only
   for a block truly in view, is left for later.
 - **Stored runs** are still read only once the queue has started a job, so with one engine every read
-  is made with the engine idle; reading ahead for the next job is left for later.
+  is made with the engine idle, but for a run kept from a job taken back; reading ahead for the next
+  job is left for later.
 - **A block made by scrolling up, or by typing,** is made later and goes later, as it did.
 
 **Not measured on a phone.** Whether #1's cache read was slow for the old plugin's store: a step in
@@ -4069,7 +4087,11 @@ back, also once the queue resumes; a waiting job promoted by a second caller; a 
 ignored; a job put back released, started again at once, or dropped as the queue closes; not while
 paused; the randomised interleavings unchanged), `test/order.test.ts` (the phone's note, as beta.6
 had it and now, early and late, on a slow engine, where `AbortSignal` has no reason, with two
-engines), `test/processor.test.ts` (the note through the processor, the block and its machine and the
+engines; each run read once, also on a warm engine as the blocks ask from the bottom up),
+`test/worker-host.test.ts` (a run read for a job taken back: kept for it as it starts again, also
+while still being read; for the next job of that preamble, once; not for another abort; let go once
+the store was cleared, the engines stopped, or past what an engine may hold; not learnt as a read),
+`test/processor.test.ts` (the note through the processor, the block and its machine and the
 real queue), `test/machine.test.ts` (COMPILING turned away), `test/render-child.test.ts` (the queue
 time to the last start, also for a block that joined the job before it gave its slot up, and the
 place handed to the queue).
