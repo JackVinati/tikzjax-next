@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="814" viewBox="0 0 640 814" role="img" aria-labelledby="title desc">
+<title id="title">TeX time per diagram, 0.2.0 and 0.2.1, Windows desktop, Chromium 153 (V8)</title>
+<desc id="desc">Three horizontal bars for each of 8 of the 37 test diagrams, slowest first: grey for 0.2.0, blue for 0.2.1 compiling the diagram from the start, and green for 0.2.1 starting from a saved preamble, each labelled in milliseconds. The blue bar is shorter than the grey one in every row, and the green bar in every row, much shorter where the diagram loads packages. Over all 37 diagrams TeX's time falls by 35 percent from the start, 29 to 63 percent per diagram, and by 73 percent from a saved preamble.</desc>
+<style>
+	.card { fill: #f6f8fa; stroke: #d1d9e0; }
+	text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; }
+	.t1 { fill: #1f2328; }
+	.t2 { fill: #59636e; }
+	.num { font-variant-numeric: tabular-nums; }
+	.rule { stroke: #d1d9e0; stroke-width: 1; }
+	.base { stroke: #808893; stroke-width: 1; }
+	.link { stroke: #808893; stroke-width: 2; fill: none; }
+	.open { stroke: #808893; stroke-width: 2; stroke-dasharray: 4 4; fill: none; }
+	.old { fill: #656d76; }
+	.new { fill: #2a78d6; }
+	.dot { fill: #2a78d6; stroke: #f6f8fa; stroke-width: 2; }
+	.ring { fill: none; stroke: #2a78d6; stroke-width: 2; }
+	.todo { fill: #f6f8fa; stroke: #656d76; stroke-width: 2; }
+	.snap { fill: #13895f; }
+	@media (prefers-color-scheme: dark) {
+		.card { fill: #161b22; stroke: #3d444d; }
+		.t1 { fill: #f0f6fc; }
+		.t2 { fill: #9198a1; }
+		.rule { stroke: #3d444d; }
+		.base { stroke: #626c78; }
+		.link { stroke: #626c78; }
+		.open { stroke: #626c78; }
+		.old { fill: #6e7681; }
+		.new { fill: #3987e5; }
+		.dot { fill: #3987e5; stroke: #161b22; }
+		.ring { stroke: #3987e5; }
+		.todo { fill: #161b22; stroke: #6e7681; }
+		.snap { fill: #199e70; }
+	}
+</style>
+<rect x="0.5" y="0.5" width="639" height="813" rx="10" class="card"/>
+<text x="24" y="42" class="t1" font-size="22" font-weight="600">TeX time, 8 of the 37 test diagrams</text>
+<text x="24" y="70" class="t2" font-size="17">Milliseconds, fastest of 7 runs. Shorter is better.</text>
+<rect x="24" y="91" width="16" height="14" rx="2" class="old"/>
+<text x="46" y="104" class="t2" font-size="17">0.2.0</text>
+<rect x="110.1" y="91" width="16" height="14" rx="2" class="new"/>
+<text x="132.1" y="104" class="t2" font-size="17">0.2.1, from the start</text>
+<rect x="309.6" y="91" width="16" height="14" rx="2" class="snap"/>
+<text x="331.6" y="104" class="t2" font-size="17">0.2.1, saved preamble</text>
+<line x1="151.9" y1="122" x2="151.9" y2="653" class="base"/>
+<text x="137.9" y="158" class="t1" font-size="18" text-anchor="end">tikz-feynhand</text>
+<path class="old" d="M151.9 126H502.3A3 3 0 0 1 505.3 129V138A3 3 0 0 1 502.3 141H151.9Z"/>
+<text x="512.3" y="140" class="t2 num" font-size="18">359</text>
+<path class="new" d="M151.9 144H380.2A3 3 0 0 1 383.2 147V156A3 3 0 0 1 380.2 159H151.9Z"/>
+<text x="390.2" y="158" class="t1 num" font-size="18" font-weight="600">235</text>
+<text x="616" y="158" class="t2 num" font-size="18" text-anchor="end">−35%</text>
+<path class="snap" d="M151.9 162H304.4A3 3 0 0 1 307.4 165V174A3 3 0 0 1 304.4 177H151.9Z"/>
+<text x="314.4" y="176" class="t1 num" font-size="18" font-weight="600">158</text>
+<text x="616" y="176" class="t2 num" font-size="18" text-anchor="end">−56%</text>
+<text x="137.9" y="226" class="t1" font-size="18" text-anchor="end">circuitikz</text>
+<path class="old" d="M151.9 194H458A3 3 0 0 1 461 197V206A3 3 0 0 1 458 209H151.9Z"/>
+<text x="468" y="208" class="t2 num" font-size="18">314</text>
+<path class="new" d="M151.9 212H359.6A3 3 0 0 1 362.6 215V224A3 3 0 0 1 359.6 227H151.9Z"/>
+<text x="369.6" y="226" class="t1 num" font-size="18" font-weight="600">214</text>
+<text x="616" y="226" class="t2 num" font-size="18" text-anchor="end">−32%</text>
+<path class="snap" d="M151.9 230H211.9A3 3 0 0 1 214.9 233V242A3 3 0 0 1 211.9 245H151.9Z"/>
+<text x="221.9" y="244" class="t1 num" font-size="18" font-weight="600">64</text>
+<text x="616" y="244" class="t2 num" font-size="18" text-anchor="end">−80%</text>
+<text x="137.9" y="294" class="t1" font-size="18" text-anchor="end">pgfplots-axis</text>
+<path class="old" d="M151.9 262H440.3A3 3 0 0 1 443.3 265V274A3 3 0 0 1 440.3 277H151.9Z"/>
+<text x="450.3" y="276" class="t2 num" font-size="18">296</text>
+<path class="new" d="M151.9 280H335A3 3 0 0 1 338 283V292A3 3 0 0 1 335 295H151.9Z"/>
+<text x="345" y="294" class="t1 num" font-size="18" font-weight="600">189</text>
+<text x="616" y="294" class="t2 num" font-size="18" text-anchor="end">−36%</text>
+<path class="snap" d="M151.9 298H224.7A3 3 0 0 1 227.7 301V310A3 3 0 0 1 224.7 313H151.9Z"/>
+<text x="234.7" y="312" class="t1 num" font-size="18" font-weight="600">77</text>
+<text x="616" y="312" class="t2 num" font-size="18" text-anchor="end">−74%</text>
+<text x="137.9" y="362" class="t1" font-size="18" text-anchor="end">forest</text>
+<path class="old" d="M151.9 330H420.6A3 3 0 0 1 423.6 333V342A3 3 0 0 1 420.6 345H151.9Z"/>
+<text x="430.6" y="344" class="t2 num" font-size="18">276</text>
+<path class="new" d="M151.9 348H329.1A3 3 0 0 1 332.1 351V360A3 3 0 0 1 329.1 363H151.9Z"/>
+<text x="339.1" y="362" class="t1 num" font-size="18" font-weight="600">183</text>
+<text x="616" y="362" class="t2 num" font-size="18" text-anchor="end">−34%</text>
+<path class="snap" d="M151.9 366H226.7A3 3 0 0 1 229.7 369V378A3 3 0 0 1 226.7 381H151.9Z"/>
+<text x="236.7" y="380" class="t1 num" font-size="18" font-weight="600">79</text>
+<text x="616" y="380" class="t2 num" font-size="18" text-anchor="end">−71%</text>
+<text x="137.9" y="430" class="t1" font-size="18" text-anchor="end">pgfplotstable</text>
+<path class="old" d="M151.9 398H379.3A3 3 0 0 1 382.3 401V410A3 3 0 0 1 379.3 413H151.9Z"/>
+<text x="389.3" y="412" class="t2 num" font-size="18">234</text>
+<path class="new" d="M151.9 416H301.5A3 3 0 0 1 304.5 419V428A3 3 0 0 1 301.5 431H151.9Z"/>
+<text x="311.5" y="430" class="t1 num" font-size="18" font-weight="600">155</text>
+<text x="616" y="430" class="t2 num" font-size="18" text-anchor="end">−34%</text>
+<path class="snap" d="M151.9 434H181.4A3 3 0 0 1 184.4 437V446A3 3 0 0 1 181.4 449H151.9Z"/>
+<text x="191.4" y="448" class="t1 num" font-size="18" font-weight="600">33</text>
+<text x="616" y="448" class="t2 num" font-size="18" text-anchor="end">−86%</text>
+<text x="137.9" y="498" class="t1" font-size="18" text-anchor="end">siunitx</text>
+<path class="old" d="M151.9 466H279.8A3 3 0 0 1 282.8 469V478A3 3 0 0 1 279.8 481H151.9Z"/>
+<text x="289.8" y="480" class="t2 num" font-size="18">133</text>
+<path class="new" d="M151.9 484H236.5A3 3 0 0 1 239.5 487V496A3 3 0 0 1 236.5 499H151.9Z"/>
+<text x="246.5" y="498" class="t1 num" font-size="18" font-weight="600">89</text>
+<text x="616" y="498" class="t2 num" font-size="18" text-anchor="end">−33%</text>
+<path class="snap" d="M151.9 502H158.8A3 3 0 0 1 161.8 505V514A3 3 0 0 1 158.8 517H151.9Z"/>
+<text x="168.8" y="516" class="t1 num" font-size="18" font-weight="600">10</text>
+<text x="616" y="516" class="t2 num" font-size="18" text-anchor="end">−92%</text>
+<text x="137.9" y="566" class="t1" font-size="18" text-anchor="end">tikz-cd</text>
+<path class="old" d="M151.9 534H251.3A3 3 0 0 1 254.3 537V546A3 3 0 0 1 251.3 549H151.9Z"/>
+<text x="261.3" y="548" class="t2 num" font-size="18">104</text>
+<path class="new" d="M151.9 552H211.9A3 3 0 0 1 214.9 555V564A3 3 0 0 1 211.9 567H151.9Z"/>
+<text x="221.9" y="566" class="t1 num" font-size="18" font-weight="600">64</text>
+<text x="616" y="566" class="t2 num" font-size="18" text-anchor="end">−38%</text>
+<path class="snap" d="M151.9 570H178.5A3 3 0 0 1 181.5 573V582A3 3 0 0 1 178.5 585H151.9Z"/>
+<text x="188.5" y="584" class="t1 num" font-size="18" font-weight="600">30</text>
+<text x="616" y="584" class="t2 num" font-size="18" text-anchor="end">−71%</text>
+<text x="137.9" y="634" class="t1" font-size="18" text-anchor="end">plain TikZ</text>
+<path class="old" d="M151.9 602H166.7A3 3 0 0 1 169.7 605V614A3 3 0 0 1 166.7 617H151.9Z"/>
+<text x="176.7" y="616" class="t2 num" font-size="18">18</text>
+<path class="new" d="M151.9 620H160.8A3 3 0 0 1 163.8 623V632A3 3 0 0 1 160.8 635H151.9Z"/>
+<text x="170.8" y="634" class="t1 num" font-size="18" font-weight="600">12</text>
+<text x="616" y="634" class="t2 num" font-size="18" text-anchor="end">−33%</text>
+<path class="snap" d="M151.9 638H152.9A3 3 0 0 1 155.9 641V650A3 3 0 0 1 152.9 653H151.9Z"/>
+<text x="162.9" y="652" class="t1 num" font-size="18" font-weight="600">4</text>
+<text x="616" y="652" class="t2 num" font-size="18" text-anchor="end">−78%</text>
+<line x1="24" y1="668" x2="616" y2="668" class="rule"/>
+<text x="24" y="700" class="t1 num" font-size="18" font-weight="600">All 37 test diagrams: 2,827 ms → 1,850 ms</text>
+<text x="616" y="700" class="t1 num" font-size="18" font-weight="600" text-anchor="end">−35%</text>
+<text x="24" y="730" class="t1 num" font-size="18" font-weight="600">From a saved preamble: 752 ms</text>
+<text x="616" y="730" class="t1 num" font-size="18" font-weight="600" text-anchor="end">−73%</text>
+<text x="24" y="766" class="t2" font-size="18">Windows desktop, Chromium 153 (V8).</text>
+<text x="24" y="792" class="t2" font-size="18">Saved preamble: the same diagram drawn a second time in a row.</text>
+</svg>

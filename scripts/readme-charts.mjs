@@ -1,8 +1,13 @@
 /**
  * Draws the README's charts as static SVG files in docs/images.
  *
- *   node scripts/readme-charts.mjs [out-dir]           out-dir defaults to docs/images
- *   node scripts/readme-charts.mjs [out-dir] --table   also prints the README's table of all 26 diagrams
+ *   node scripts/readme-charts.mjs [out-dir]              out-dir defaults to docs/images
+ *   node scripts/readme-charts.mjs [out-dir] --table      also prints 0.2.0's table of all 26 diagrams
+ *   node scripts/readme-charts.mjs [out-dir] --table021   also prints 0.2.1's table of all 37 diagrams
+ *
+ * It draws 0.2.0's charts as they were published, byte for byte, and 0.2.1's beside them. 0.2.1's
+ * phone charts are drawn once their figures are filled in below (IPHONE-FIGURES); until then the
+ * script says which it left out.
  *
  * Deterministic: every number is written out below with where it comes from, and nothing depends on
  * the time, the machine or a random seed. Run it twice and the files are identical. No dependencies,
@@ -33,14 +38,10 @@ const OUT = resolve(
 // Data. The only place the charts' numbers live.
 // ---------------------------------------------------------------------------------------------
 
-// IPHONE-FIGURES: nothing has been measured on an iPhone or iPad yet, so each `iphone` entry below is
-// null. To fill one in, read the figures off the diagnostics view on the device (engine start, memory
-// reset, TeX, DVI to SVG for each diagram), on 0.1.5 and on 0.2.0, best of several runs, and give the
-// device, its iOS version and the Obsidian version as `platform`. Then run this script. For each
-// entry that is filled in it draws a phone chart (`tex-time-iphone-0.2.0.svg`,
-// `engine-iphone-0.2.0.svg`), and the desktop charts stop saying that nothing was measured on a
-// phone. The README's IPHONE-FIGURES comments say where the phone charts and the sentence that
-// names the device go.
+// 0.2.0's charts, 0.1.5 against 0.2.0. They are drawn again exactly as published, since the plugin
+// site loads them live under an older README; nothing here may change. Their `iphone` entries stay
+// null: 0.1.5 was never timed on a phone, and 0.2.1's charts (DATA_021, below) carry the phone's
+// figures.
 
 const DATA = {
 	texTime: {
@@ -146,6 +147,158 @@ const LABEL = { feynhand: 'tikz-feynhand' };
 
 // What the README's table says next to a test diagram's name.
 const NOTE = { broken: 'an error on purpose' };
+
+// ---------------------------------------------------------------------------------------------
+// 0.2.1's data, 0.2.0 against 0.2.1.
+// ---------------------------------------------------------------------------------------------
+
+const DATA_021 = {
+	texTime: {
+		// TeX time per test diagram in ms, the fastest of 7 runs: 0.2.0's main.js as published against
+		// 0.2.1-beta.5's, whose engine and worker 0.2.1 ships, measured on 2026-10-15 on a Windows 11
+		// desktop (i9-13900K) with the 0.2.x study's harness: each build's worker as its main.js
+		// carries it, in a Web Worker of Playwright 1.63's headless Chromium 153, a fresh browser for
+		// every run, the builds interleaved. A run starts the engine, compiles `basic`, then each of
+		// 0.2.0's 37 test diagrams twice in a row. The columns: 0.2.0's first render; 0.2.1's first
+		// render with saved preambles off, so compiled from the start; 0.2.1's second render with saved
+		// preambles on at a computer's 32 MiB, as the plugin sends them, which starts from the preamble
+		// its first render saved (all but missing-pgfplots-library, which stops in its preamble and
+		// saves nothing). 0.2.0's second renders add up to 2,787 ms. Every SVG is the golden corpus's
+		// but expl3's, whose source this harness reads with Windows line ends, in both builds alike.
+		// The same runs in WebKit 26.6 add up to 4,210, 2,772 and 1,192 ms; the README gives those in
+		// its text.
+		platform: 'Windows desktop, Chromium 153 (V8)',
+		runs: 7,
+		rows: [
+			['arrows-meta', 44, 28, 6],
+			['basic', 18, 12, 4],
+			['batchmode-errors', 27, 10, 2],
+			['batchmode-missing-file', 12, 8, 0],
+			['broken', 14, 9, 2],
+			['chemfig', 64, 45, 17],
+			['circuitikz', 314, 214, 64],
+			['dieresis', 23, 14, 6],
+			['documentclass', 14, 9, 2],
+			['expl3', 18, 12, 3],
+			['fatal-after-page', 14, 9, 2],
+			['feynhand', 359, 235, 158],
+			['filesize', 20, 11, 3],
+			['forest', 276, 183, 79],
+			['l-stroke', 21, 13, 5],
+			['mathfrak', 20, 13, 4],
+			['mathscr', 19, 12, 4],
+			['mathtools', 48, 32, 4],
+			['missing-package', 15, 10, 2],
+			['missing-pgfplots-library', 167, 114, 104],
+			['omega-otimes', 16, 11, 3],
+			['patterns', 42, 26, 3],
+			['pgfplots-axis', 296, 189, 77],
+			['pgfplots-fillbetween', 292, 192, 72],
+			['pgfplotstable', 234, 155, 33],
+			['rule-frac', 20, 12, 5],
+			['runaway-macro', 12, 8, 1],
+			['shading', 22, 14, 7],
+			['siunitx', 133, 89, 10],
+			['tikz-cd', 104, 64, 30],
+			['tilde', 19, 12, 5],
+			['ts1-currency', 25, 16, 8],
+			['ts1-small-caps', 22, 14, 6],
+			['ts1-symbols', 23, 15, 7],
+			['utf8-names', 22, 14, 6],
+			['white-fill', 17, 12, 4],
+			['xparse', 21, 14, 4],
+		],
+		total: true,
+	},
+
+	// IPHONE-FIGURES: TeX time on the phone. 0.2.0's figures are the maintainer's readings on his
+	// iPhone, off the diagnostics view, one run, on 14 October 2026, with Obsidian excluded from
+	// Lockdown Mode: the TeX step of the heavy diagrams of his test note, a range where he read it
+	// more than once. 0.2.1's are still to be read, on the same phone and the same note: `cold` is the
+	// TeX step of a diagram that says "preamble saved in N ms", `saved` of one that says "resumed
+	// from a saved preamble" or "resumed from a stored preamble". Give each as a number or [lo, hi],
+	// fill in `date021`, and run this script: it then draws tex-time-iphone-0.2.1.svg, which the
+	// README's IPHONE-FIGURES comment says where to put. Until every value is filled in it is left
+	// out. Nothing here may be guessed or carried over from the desktop.
+	texTimeIphone: {
+		platform: 'iPhone 16 Pro, iOS 27.0.1, Obsidian 1.14.5',
+		date020: '14 October 2026',
+		date021: null,
+		// [diagram of the test note, 0.2.0, 0.2.1 cold, 0.2.1 saved]
+		rows: [
+			['circuitikz', [268, 276], null, null],
+			['pgfplots', [244, 275], null, null],
+			['pgfplotstable', 233, null, null],
+		],
+		total: false,
+	},
+
+	wait: {
+		// What a new diagram waits for, in ms, on the desktop. The wait before a diagram that is not
+		// cached goes to the engine is the plugin's own setting, not a measurement: `debounceMs`, 300 ms
+		// on a computer in 0.2.0, and none in 0.2.1 but for a note being typed in (D22). The rest are
+		// medians of the 7 runs of each build above (Chromium): the engine's start, from creating the
+		// worker to its `ready` on the main thread (range 160 to 172 ms for 0.2.0, 51 to 59 for
+		// 0.2.1); the first diagram after the start, `basic`, from handing it to the worker to its SVG
+		// back on the main thread (36 to 41 and 45 to 48 ms; 0.2.1's includes saving its preamble, 11 to
+		// 13 ms); and the same diagram once the engine runs, its second render (23 to 26 ms, and 7 ms in
+		// every run).
+		// The plugin's SVG pipeline and drawing the diagram in the note come on top of each, and were
+		// not part of this harness.
+		desktop: {
+			platform: 'Windows desktop, Chromium 153 (V8)',
+			method: 'Medians of 7 fresh browsers',
+			rows: [
+				['Wait before a new diagram goes to the engine', 'ms', 300, 0, 'set'],
+				['Engine start', 'ms', 162, 54],
+				['First small diagram after the start', 'ms', 38, 46],
+				['The same diagram, the engine running', 'ms', 24, 7],
+			],
+		},
+		// IPHONE-FIGURES: the same on the maintainer's iPhone, read off the diagnostics view's Copy
+		// text. 0.2.0's: the wait was 500 ms on a phone by the same setting, not a reading; the engine
+		// started in 134 ms (one reading, Obsidian excluded from Lockdown Mode, 14 October 2026); the
+		// TeX step of a small diagram read 15 to 40 ms; 0.2.0's view did not time a diagram from seen to
+		// drawn. 0.2.1's are still to be read: `waited`, `engine start`, the TeX step and `seen to
+		// drawn` of the small diagrams of the same note, from 0.2.1 or its last beta, a number or
+		// [lo, hi] each, and `date021`. Until every 0.2.1 value is filled in, start-iphone-0.2.1.svg is
+		// left out. Nothing here may be guessed or carried over from the desktop.
+		iphone: {
+			platform: 'iPhone 16 Pro, iOS 27.0.1, Obsidian 1.14.5',
+			date020: '14 October 2026',
+			date021: null,
+			method: 'Read off the diagnostics view; a range spans several diagrams',
+			rows: [
+				['Wait before a new diagram goes to the engine', 'ms', 500, null, 'set'],
+				['Engine start', 'ms', 134, null],
+				['TeX, a small diagram', 'ms', [15, 40], null],
+				['From seen to drawn, a small diagram', 'ms', null, null],
+			],
+		},
+	},
+
+	// The plan, from the wiki's Roadmap page. No dates. `done`, `now` or `next`.
+	plan: [
+		['0.1.0 to 0.2.0', 'Seven releases, 1 September to 13 October 2026', 'released', 'done'],
+		['0.2.1', 'Faster new diagrams, Unicode labels', 'this release', 'now'],
+		['0.3.0', 'TeX Live 2026: newer packages, smaller main.js', 'planned', 'next'],
+		['Then', 'Features, one at a time', 'chosen in Discussions', 'next'],
+	],
+};
+
+// The diagrams 0.2.1's TeX chart shows: the packages people load most, slowest first, and plain TikZ.
+// The README's table has all 37.
+const TEX_CHART_ROWS_021 = [
+	'feynhand',
+	'circuitikz',
+	'pgfplots-axis',
+	'forest',
+	'pgfplotstable',
+	'siunitx',
+	'tikz-cd',
+	'basic',
+];
+const LABEL_021 = { feynhand: 'tikz-feynhand', basic: 'plain TikZ' };
 
 // ---------------------------------------------------------------------------------------------
 // Drawing helpers.
@@ -291,12 +444,12 @@ function source(y, sentences) {
 	return { markup: out, last: y + (lines.length - 1) * 26 };
 }
 
-function doc(name, height, title, desc, body) {
+function doc(name, height, title, desc, body, style = STYLE) {
 	const svg =
 		`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${height}" viewBox="0 0 ${W} ${height}" role="img" aria-labelledby="title desc">\n` +
 		`<title id="title">${esc(title)}</title>\n` +
 		`<desc id="desc">${esc(desc)}</desc>\n` +
-		`<style>${STYLE}</style>\n` +
+		`<style>${style}</style>\n` +
 		`<rect x="0.5" y="0.5" width="${W - 1}" height="${height - 1}" rx="10" class="card"/>\n` +
 		body.replace(/></g, '>\n<') +
 		`\n</svg>\n`;
@@ -499,8 +652,7 @@ function engine(platform) {
 // 3. Releases so far and the plan, top to bottom.
 // ---------------------------------------------------------------------------------------------
 
-function plan() {
-	const rows = DATA.plan;
+function plan(rows = DATA.plan, name = 'roadmap-0.2.0.svg') {
 	const top = 104;
 	const pitch = 62;
 	const cx = PAD + 9;
@@ -528,7 +680,7 @@ function plan() {
 	const filled = rows.filter((r) => r[3] !== 'next').length;
 	const height = top + rows.length * pitch - 4;
 	return doc(
-		'roadmap-0.2.0.svg',
+		name,
 		height,
 		'Releases and what comes next',
 		`A vertical line of ${WORDS[rows.length]?.toLowerCase() ?? rows.length} steps. ` +
@@ -560,6 +712,282 @@ function table() {
 	);
 }
 
+// ---------------------------------------------------------------------------------------------
+// 0.2.1's charts. A third bar colour, green, for 0.2.1 starting from a saved preamble: checked with
+// the grey and the blue in both themes (OKLab x100: normal vision and the colour-vision deficiencies
+// at least 15 apart between neighbouring bars, and at least 3:1 against the card). The grey stays
+// grey on purpose, as in 0.2.0's charts: it is the reference.
+// ---------------------------------------------------------------------------------------------
+
+function withSnap(style) {
+	const light = '\t@media (prefers-color-scheme: dark) {';
+	const dark = '\t\t.todo { fill: #161b22; stroke: #6e7681; }\n';
+	if (!style.includes(light) || !style.includes(dark))
+		throw new Error('STYLE changed: put .snap in by hand');
+	return style
+		.replace(light, `\t.snap { fill: #13895f; }\n${light}`)
+		.replace(dark, `${dark}\t\t.snap { fill: #199e70; }\n`);
+}
+const STYLE_021 = withSnap(STYLE);
+
+const LEGEND_021 = [
+	['old', '0.2.0'],
+	['new', '0.2.1'],
+];
+
+// A figure is a number or a range [lo, hi], as read off a phone more than once; null is not known.
+const isRange = (v) => Array.isArray(v);
+const top_ = (v) => (isRange(v) ? v[1] : v);
+const show = (v, unit = '') => {
+	const s = isRange(v) ? `${fmt(v[0])}–${fmt(v[1])}` : fmt(v);
+	return unit ? `${s} ${unit}` : s;
+};
+const pctBetween = (before, after) =>
+	typeof before === 'number' && typeof after === 'number' && before > 0 ? change(before, after) : null;
+
+// 1. TeX time per diagram: 0.2.0, 0.2.1 from the start, and 0.2.1 from a saved preamble.
+
+function texTime021(which) {
+	const d = which === 'desktop' ? DATA_021.texTime : DATA_021.texTimeIphone;
+	if (d.rows.some((r) => r.slice(1).some((v) => v === null)) || (which !== 'desktop' && !d.date021))
+		return null;
+	const rows =
+		which === 'desktop'
+			? TEX_CHART_ROWS_021.map((n) => d.rows.find((r) => r[0] === n)).filter(Boolean)
+			: d.rows;
+	if (rows.length === 0) throw new Error(`texTime021 ${which}: no rows`);
+	if (rows.length > 8) throw new Error('texTime021: more than 8 rows');
+	const label = (name) => LABEL_021[name] ?? name;
+
+	const labelW = Math.max(...rows.map((r) => textWidth(label(r[0]), S.label)));
+	const labelRight = PAD + labelW;
+	const x0 = labelRight + 14;
+	const colPct = W - PAD;
+	const pcts = rows
+		.flatMap((r) => [pctBetween(r[1], r[2]), pctBetween(r[1], r[3])])
+		.filter((p) => p !== null);
+	const pctW = pcts.length ? Math.max(...pcts.map((p) => textWidth(`${signed(p)}%`, S.value))) : 0;
+	const valW = Math.max(
+		...rows.flatMap((r) => [
+			textWidth(show(r[1]), S.value),
+			textWidth(show(r[2]), S.value, 600),
+			textWidth(show(r[3]), S.value, 600),
+		]),
+	);
+	const x1 = colPct - (pctW ? pctW + 22 : 0) - valW - 8;
+	const scale = (x1 - x0) / Math.max(...rows.flatMap((r) => [top_(r[1]), top_(r[2]), top_(r[3])]));
+
+	const top = 122;
+	const barH = 15;
+	const step = barH + 3;
+	const pitch = 3 * barH + 2 * 3 + 17;
+	const all = d.rows.length;
+	const shown =
+		which === 'desktop'
+			? rows.length === all
+				? `${all} test diagrams`
+				: `${rows.length} of the ${all} test diagrams`
+			: `${WORDS[rows.length]?.toLowerCase() ?? rows.length} diagrams of a test note`;
+	const how = which === 'desktop' ? `, fastest of ${d.runs} runs` : ', read off the diagnostics view';
+	let body = header(`TeX time, ${shown}`, `Milliseconds${how}. Shorter is better.`);
+	body += legend(PAD, 104, [
+		['old', '0.2.0'],
+		['new', '0.2.1, from the start'],
+		['snap', '0.2.1, saved preamble'],
+	]);
+	const bottom = top + rows.length * pitch;
+	body += line(x0, top, x0, bottom - 17 + 4, 'base');
+
+	rows.forEach(([name, before, cold, saved], i) => {
+		const y = top + i * pitch + 4;
+		body += text(labelRight, y + step + barH / 2 + MID, label(name), { anchor: 'end' });
+		const bars = [
+			[before, 'old', 't2', 400, null],
+			[cold, 'new', 't1', 600, pctBetween(before, cold)],
+			[saved, 'snap', 't1', 600, pctBetween(before, saved)],
+		];
+		bars.forEach(([v, cls, tcls, weight, pct], k) => {
+			const yb = y + k * step;
+			const len = top_(v) * scale;
+			body += hbar(x0, yb, len, barH, cls);
+			const right = pctW ? colPct - pctW - 12 : colPct;
+			fits(x0 + len + 7, show(v), S.value, weight, right);
+			body += text(x0 + len + 7, yb + barH / 2 + MID, show(v), { cls: tcls, weight, num: true });
+			if (pct !== null) {
+				body += text(colPct, yb + barH / 2 + MID, `${signed(pct)}%`, {
+					cls: 't2',
+					anchor: 'end',
+					num: true,
+				});
+			}
+		});
+	});
+
+	let yNext = bottom + 18;
+	let sumSentence = '';
+	if (d.total) {
+		const sum = (k) => d.rows.reduce((a, r) => a + r[k], 0);
+		const [s0, s1, s2] = [sum(1), sum(2), sum(3)];
+		body += line(PAD, bottom + 2, W - PAD, bottom + 2, 'rule');
+		const lines = [
+			[`All ${all} test diagrams: ${fmt(s0)} ms → ${fmt(s1)} ms`, change(s0, s1)],
+			[`From a saved preamble: ${fmt(s2)} ms`, change(s0, s2)],
+		];
+		lines.forEach(([str, pct], k) => {
+			const y = bottom + 34 + k * 30;
+			fits(PAD, str, S.value, 600, colPct - pctW - 12);
+			body += text(PAD, y, str, { weight: 600, num: true });
+			body += text(colPct, y, `${signed(pct)}%`, { weight: 600, anchor: 'end', num: true });
+		});
+		yNext = bottom + 34 + 30 + 36;
+		const coldPcts = d.rows.map((r) => change(r[1], r[2]));
+		sumSentence =
+			` Over all ${all} diagrams TeX's time falls by ${-change(s0, s1)} percent from the start, ` +
+			`${-Math.max(...coldPcts)} to ${-Math.min(...coldPcts)} percent per diagram, and by ${-change(s0, s2)} percent ` +
+			'from a saved preamble.';
+	}
+	const notes = [`${d.platform}.`];
+	if (which !== 'desktop') notes.push(`0.2.0 read on ${d.date020}, 0.2.1 on ${d.date021}.`);
+	notes.push(
+		which === 'desktop'
+			? 'Saved preamble: the same diagram drawn a second time in a row.'
+			: 'Saved preamble: a diagram that started from one, saved or stored.',
+	);
+	const src = source(yNext, notes);
+	body += src.markup;
+	const height = src.last + 22;
+
+	const shorter = (k) => {
+		const n = rows.filter((r) => top_(r[k]) < top_(r[1])).length;
+		return n === rows.length ? 'every' : `${n} of the ${rows.length}`;
+	};
+	return doc(
+		which === 'desktop' ? 'tex-time-0.2.1.svg' : 'tex-time-iphone-0.2.1.svg',
+		height,
+		`TeX time per diagram, 0.2.0 and 0.2.1, ${d.platform}`,
+		`Three horizontal bars for each of ${shown}, slowest first: grey for 0.2.0, blue for 0.2.1 ` +
+			'compiling the diagram from the start, and green for 0.2.1 starting from a saved preamble, each ' +
+			`labelled in milliseconds. The blue bar is shorter than the grey one in ${shorter(2)} row, and the ` +
+			`green bar in ${shorter(3)} row, much shorter where the diagram loads packages.${sumSentence}`,
+		body,
+		STYLE_021,
+	);
+}
+
+// 2. What a new diagram waits for: the wait before it goes to the engine, the engine's start, and a
+// small diagram's compile. Each pair on its own scale.
+
+function wait021(which) {
+	const d = DATA_021.wait[which];
+	if (d.rows.some((r) => r[3] === null) || (which !== 'desktop' && !d.date021)) return null;
+	const rows = d.rows.map(([label, unit, before, after, kind]) => ({
+		label,
+		unit,
+		before,
+		after,
+		set: kind === 'set',
+		pct: kind === 'set' ? null : pctBetween(before, after),
+	}));
+	if (rows.length * 2 > 8) throw new Error('wait021: more than 8 bars');
+
+	const colPct = W - PAD;
+	const pcts = rows.map((r) => r.pct).filter((p) => p !== null);
+	const pctW = pcts.length ? Math.max(...pcts.map((p) => textWidth(`${signed(p)}%`, S.value))) : 0;
+	const valW = Math.max(
+		...rows.flatMap((r) => [
+			r.before === null ? 0 : textWidth(show(r.before, r.unit), S.value),
+			textWidth(show(r.after, r.unit), S.value, 600),
+		]),
+	);
+	const x0 = PAD;
+	const x1 = colPct - (pctW ? pctW + 22 : 0) - valW - 8;
+
+	const top = 124;
+	const pitch = 82;
+	const barH = 15;
+	const title =
+		which === 'desktop' ? 'What a new diagram waits for' : 'What a new diagram waits for, on a phone';
+	let body = header(title, 'Each pair drawn to its own scale. Shorter is better.');
+	body += legend(PAD, 104, LEGEND_021);
+
+	rows.forEach((r, i) => {
+		const y = top + i * pitch;
+		fits(PAD, r.label, S.label, 600, pctW ? colPct - pctW - 12 : colPct);
+		body += text(PAD, y + 17, r.label, { weight: 600 });
+		const most = Math.max(r.before === null ? 0 : top_(r.before), top_(r.after));
+		const scale = most > 0 ? (x1 - x0) / most : 0;
+		const yA = y + 28;
+		const yB = yA + barH + 3;
+		if (r.before === null) {
+			body += text(x0, yA + barH / 2 + MID, '0.2.0 did not time this', { cls: 't2' });
+		} else {
+			const a = top_(r.before) * scale;
+			body += hbar(x0, yA, a, barH, 'old');
+			body += text(x0 + a + 7, yA + barH / 2 + MID, show(r.before, r.unit), { cls: 't2', num: true });
+		}
+		const b = top_(r.after) * scale;
+		body += hbar(x0, yB, b, barH, 'new');
+		body += text(x0 + b + 7, yB + barH / 2 + MID, show(r.after, r.unit), { weight: 600, num: true });
+		if (r.pct !== null) {
+			body += text(colPct, yB - 1.5 + MID, `${signed(r.pct)}%`, {
+				cls: 't2',
+				anchor: 'end',
+				num: true,
+			});
+		}
+	});
+
+	const bottom = top + rows.length * pitch;
+	const notes = [`${d.platform}.`];
+	if (which !== 'desktop') notes.push(`0.2.0 read on ${d.date020}, 0.2.1 on ${d.date021}.`);
+	if (d.method) notes.push(`${d.method}.`);
+	if (which === 'desktop')
+		notes.push('A diagram’s time runs from handing it to the engine to its SVG back.');
+	notes.push(
+		which === 'desktop'
+			? 'The wait is the plugin’s setting, not a measurement.'
+			: 'The wait in 0.2.0 is its setting, not a reading.',
+	);
+	const src = source(bottom + 18, notes);
+	body += src.markup;
+	const height = src.last + 22;
+
+	const said = (v, unit) => (v === null ? 'not timed' : show(v, unit));
+	return doc(
+		which === 'desktop' ? 'new-diagram-0.2.1.svg' : 'new-diagram-iphone-0.2.1.svg',
+		height,
+		`${title}, 0.2.0 and 0.2.1, ${d.platform}`,
+		`${WORDS[rows.length] ?? rows.length} pairs of horizontal bars, a grey bar for 0.2.0 and a blue bar for ` +
+			'0.2.1, each pair on its own scale: ' +
+			rows
+				.map((r) => `${lowerFirst(r.label)}, ${said(r.before, r.unit)} and ${said(r.after, r.unit)}`)
+				.join('; ') +
+			'.',
+		body,
+		STYLE_021,
+	);
+}
+
+// The README's folded table of 0.2.1's 37 diagrams.
+function table021() {
+	const d = DATA_021.texTime;
+	const sum = (k) => d.rows.reduce((a, r) => a + r[k], 0);
+	const cell = (v) => `<td align="right">${fmt(v)}</td>`;
+	const rows = d.rows
+		.map(([n, a, b, c]) => {
+			const note = NOTE[n] ? ` (${NOTE[n]})` : '';
+			return `<tr><td><code>${n}</code>${note}</td>${cell(a)}${cell(b)}${cell(c)}<td align="right">${signed(change(a, b))}%</td></tr>`;
+		})
+		.join('\n');
+	const [a, b, c] = [sum(1), sum(2), sum(3)];
+	return (
+		'<table>\n<thead><tr><th>Test diagram</th><th>0.2.0 (ms)</th><th>0.2.1, from the start (ms)</th><th>0.2.1, saved preamble (ms)</th><th>Change from the start</th></tr></thead>\n<tbody>\n' +
+		rows +
+		`\n<tr><td>All ${d.rows.length}</td>${cell(a)}${cell(b)}${cell(c)}<td align="right">${signed(change(a, b))}%</td></tr>\n` +
+		'</tbody>\n</table>\n'
+	);
+}
+
 mkdirSync(OUT, { recursive: true });
 const written = [];
 for (const platform of ['desktop', 'iphone']) {
@@ -567,5 +995,17 @@ for (const platform of ['desktop', 'iphone']) {
 	if (DATA.engine[platform]) written.push(engine(platform));
 }
 written.push(plan());
+const waiting = [];
+for (const which of ['desktop', 'iphone']) {
+	const tex = texTime021(which);
+	const wait = wait021(which);
+	if (tex) written.push(tex);
+	else waiting.push(`tex-time-${which}-0.2.1.svg`);
+	if (wait) written.push(wait);
+	else waiting.push(`new-diagram-${which}-0.2.1.svg`);
+}
+written.push(plan(DATA_021.plan, 'roadmap-0.2.1.svg'));
 console.log(`wrote ${written.join(', ')}`);
+if (waiting.length) console.log(`left out until their IPHONE-FIGURES are filled in: ${waiting.join(', ')}`);
 if (ARGS.includes('--table')) process.stdout.write(table());
+if (ARGS.includes('--table021')) process.stdout.write(table021());

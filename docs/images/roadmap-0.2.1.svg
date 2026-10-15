@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="348" viewBox="0 0 640 348" role="img" aria-labelledby="title desc">
+<title id="title">Releases and what comes next</title>
+<desc id="desc">A vertical line of four steps. 0.1.0 to 0.2.0: Seven releases, 1 September to 13 October 2026 (released); 0.2.1: Faster new diagrams, Unicode labels (this release); 0.3.0: TeX Live 2026: newer packages, smaller main.js (planned); Then: Features, one at a time (chosen in Discussions). The first two are filled in, the rest are open circles joined by a dashed line.</desc>
+<style>
+	.card { fill: #f6f8fa; stroke: #d1d9e0; }
+	text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; }
+	.t1 { fill: #1f2328; }
+	.t2 { fill: #59636e; }
+	.num { font-variant-numeric: tabular-nums; }
+	.rule { stroke: #d1d9e0; stroke-width: 1; }
+	.base { stroke: #808893; stroke-width: 1; }
+	.link { stroke: #808893; stroke-width: 2; fill: none; }
+	.open { stroke: #808893; stroke-width: 2; stroke-dasharray: 4 4; fill: none; }
+	.old { fill: #656d76; }
+	.new { fill: #2a78d6; }
+	.dot { fill: #2a78d6; stroke: #f6f8fa; stroke-width: 2; }
+	.ring { fill: none; stroke: #2a78d6; stroke-width: 2; }
+	.todo { fill: #f6f8fa; stroke: #656d76; stroke-width: 2; }
+	@media (prefers-color-scheme: dark) {
+		.card { fill: #161b22; stroke: #3d444d; }
+		.t1 { fill: #f0f6fc; }
+		.t2 { fill: #9198a1; }
+		.rule { stroke: #3d444d; }
+		.base { stroke: #626c78; }
+		.link { stroke: #626c78; }
+		.open { stroke: #626c78; }
+		.old { fill: #6e7681; }
+		.new { fill: #3987e5; }
+		.dot { fill: #3987e5; stroke: #161b22; }
+		.ring { stroke: #3987e5; }
+		.todo { fill: #161b22; stroke: #6e7681; }
+	}
+</style>
+<rect x="0.5" y="0.5" width="639" height="347" rx="10" class="card"/>
+<text x="24" y="42" class="t1" font-size="22" font-weight="600">Releases and what comes next</text>
+<text x="24" y="70" class="t2" font-size="17">No dates: each one comes out when it is done.</text>
+<line x1="33" y1="127" x2="33" y2="167" class="link"/>
+<circle cx="33" cy="116" r="7" class="dot"/>
+<text x="56" y="122.5" class="t1" font-size="18" font-weight="600">0.1.0 to 0.2.0</text>
+<text x="187.3" y="122.5" class="t1" font-size="18">Seven releases, 1 September to 13 October 2026</text>
+<text x="187.3" y="147" class="t2" font-size="18">released</text>
+<line x1="33" y1="189" x2="33" y2="229" class="open"/>
+<circle cx="33" cy="178" r="10" class="ring"/>
+<circle cx="33" cy="178" r="6" class="dot"/>
+<text x="56" y="184.5" class="t1" font-size="18" font-weight="600">0.2.1</text>
+<text x="187.3" y="184.5" class="t1" font-size="18">Faster new diagrams, Unicode labels</text>
+<text x="187.3" y="209" class="t2" font-size="18">this release</text>
+<line x1="33" y1="251" x2="33" y2="291" class="open"/>
+<circle cx="33" cy="240" r="7" class="todo"/>
+<text x="56" y="246.5" class="t1" font-size="18" font-weight="600">0.3.0</text>
+<text x="187.3" y="246.5" class="t1" font-size="18">TeX Live 2026: newer packages, smaller main.js</text>
+<text x="187.3" y="271" class="t2" font-size="18">planned</text>
+<circle cx="33" cy="302" r="7" class="todo"/>
+<text x="56" y="308.5" class="t1" font-size="18" font-weight="600">Then</text>
+<text x="187.3" y="308.5" class="t1" font-size="18">Features, one at a time</text>
+<text x="187.3" y="333" class="t2" font-size="18">chosen in Discussions</text>
+</svg>
