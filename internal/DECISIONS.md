@@ -2449,6 +2449,10 @@ in 1.3 s instead of 0.13 s. Lockdown Mode runs Obsidian's web content without th
 the TeX engine with it. Nothing in a WebView says whether it has a JIT, and `navigator.userAgent`
 is out of bounds anyway (D21), so someone in that state saw slow diagrams and nothing to say why.
 
+The phone, written down on 2026-10-15 with the maintainer's figures for 0.2.1's notes: an iPhone 16
+Pro on iOS 27.0.1, with Obsidian 1.14.5, the same as in D38. The README gives these readings with
+that device, iOS version and date.
+
 **The probe** (`engine-src/jit.ts`). At each start, beside tex.wasm, the worker compiles a module of
 its own, 68 bytes of WebAssembly 1.0 with one function that takes a step of a linear congruential
 generator `n` times: a chain of dependent integer multiplies and adds that no compiler can shorten,
