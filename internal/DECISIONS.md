@@ -1230,6 +1230,12 @@ view renders at once or, while still parsing, 200 ms later (`queueRender`), and 
 reloads on the same notice. A longer window costs only the debounce, to a block that first appears
 in a note that was typed in within it, which is what every block paid before.
 
+**Amended by D39.** The second is measured back from the block's making, not from its cache miss: an
+edit reported after a block was made, in another run of code, did not make it, and at a desktop start
+one made the note's first diagrams wait. The keystroke Live Preview reports after remaking its widget,
+in the same update, is told by its run: the processor asks as the block is made, and the miss reads
+the answer.
+
 How each place a diagram is drawn comes out:
 
 - **Live Preview, one pane.** While the cursor is inside the fence, Live Preview shows the source
@@ -2222,6 +2228,10 @@ and nothing said so. Now circuitikz's run is saved once and not kept, TikZ's sta
 circuitikz diagrams save nothing, and every later basic resumes. A save that was not kept is the
 save's time, not TeX's, and the diagnostics say "preamble saved in N ms, not kept: no room".
 
+**Amended by D39.** Where the host asks for a run to store (D36), a run the worker could not keep is
+saved all the same, once a name in the worker's life, handed over and let go: until then a preamble
+that came after runs filling the worker was not saved at all, and so not stored from that worker.
+
 The runs go with the engine: its idle stop, the app going to the background, Restart the TeX engine
 (S3, and `TODO.md` for keeping them across restarts). Settings → Rendering → Saved preambles,
 `"preambleSnapshots"` in `data.json`, turns them off without a release: the host then sends 0, and
@@ -2846,6 +2856,11 @@ short of it, is kept for the next session and not sent again in this one, where 
 was deleted as if its bytes were wrong. A run that stands for other text under the same name, which
 a hash or a `\begin{document}` the host guessed wrong can give, is not used, and the diagram saves
 its own, which replaces it.
+
+**Amended by D39.** A run its worker had no room to keep reaches storage too: where the host asks for
+the run, the worker saves it for that alone, once a name in its life, and hands it over like any
+other. Until then one it saved and did not keep was handed over, and one it had no room to save at
+all was not.
 
 **Only when it is cheaper.** A run is sent, and kept at all, only when putting it back is likely to
 cost less than its preamble and its save did in the engine that saved it, which the worker measures
@@ -3516,6 +3531,173 @@ what a start says of the JIT), `test/runs.test.ts` (what goes first, a run that 
 first, a use from memory), `test/queue.test.ts` and `test/render-child.test.ts` (a joined compile),
 `test/report.test.ts` and `test/debug-view.test.ts` (what the view and Copy say, "checking again"
 among it), `test/settings.test.ts` (the notice's flag cleared once).
+
+---
+
+## D39 — What 0.2.1-beta.5 did on the maintainer's devices: a preamble the worker had no room to save, and the desktop's first diagrams waiting after a start
+
+**Amends D32 (which runs are saved), D36 (which reach storage) and D22 (when a block debounces), and
+DESIGN.md §3.3, §4.7 and §5.4. Found by the maintainer testing 0.2.1-beta.5 on the iPhone 16 Pro of
+D38, iOS 27.0.1, with the JIT on and the phone in its normal power state, and on the Windows desktop
+the engine is maintained on, Obsidian 1.14.4 with two engines. Date of record: 2026-10-15.**
+
+The maintainer's readings, from the diagnostics view's Copy, are the only device figures here; every
+other figure is from the desktop of D27 on 2026-10-15, with Playwright 1.63's WebKit 26.6, each named
+with how it was taken.
+
+### A preamble the worker had no room to save
+
+**What the phone said.** "#38 ad18c71e (circuitikz): TeX 212 ms · preamble saved in 3 ms, not kept:
+no room", and "#37 dd914518 (pgfplots): TeX 73 ms · resumed from a stored preamble (read 3 ms, put
+back 9 ms)", where the same diagram compiled took 187 to 211 ms; "Stored preambles: 5, 9.4 MB";
+engine 1 "3 saved preambles, 7.6 MB, stopped after it had nothing to do", engine 2 "1 saved
+preamble, 0.6 MB". circuitikz's run is 8.88 MiB as an engine holds it, the largest of the fixtures,
+and a phone's engine holds 12 MiB of runs, of which the ones resumed from within the last 16 renders
+may not go to make room (D32): beside pgfplots' 6.50, put back from storage and resumed from, it does
+not fit.
+
+**What beta.5 did with such a run**, which is not all the readings suggested. A run saved and not
+kept was handed over all the same: the worker queues for the host every run its render saved, kept
+or not, the ones it no longer keeps first (D38). In WebKit at a phone's budgets, through the harness
+of D38 (`phone.mjs`), basic, siunitx twice, pgfplots-axis twice, circuitikz and basic: circuitikz's
+run was saved, not kept, handed over and stored, and its diagram in the next session started from
+it. What never reached storage was a run the worker did not save at all. A run is not saved where the
+room there would be, once everything that may go had gone, is less than the last run saved under the
+same name took, or, for a name with none, the smallest run saved yet (`SnapshotCache.wants`, D32),
+which spares a phone without the JIT a save of a tenth of a second it would throw away. With basic,
+pgfplots-axis, siunitx and feynhand twice each and then circuitikz twice, the runs resumed from held
+11.76 of the 12 MiB, and both circuitikz diagrams compiled their preamble and saved nothing; beta.5
+stored the run only in a later session, whose worker, holding the runs it had put back from storage,
+happened to have room to save it.
+
+The phone's own reading says saved and not kept, and by the code such a run was handed over where the
+host asked for it: while storage could take a run and none was stored under its name. Why the store
+did not hold it afterwards the reading does not say. A run stored under its name and not sent with
+the diagram, as the host does not send one whose putting back looks dearer than its preamble was, or
+whose read it stopped waiting for (D36), leaves the diagram to save a run nobody asks for; and a
+hand-over is dropped when the runs waiting that the worker no longer keeps pass its budget, the oldest
+first (D38). Neither was reproduced on the desktop.
+
+**What it does now** (`engine-src/worker.ts` render). A render the host asks to hand its run over
+(`persist`) saves it where `wants` says no as well, unless the worker has already saved one of that
+name for this in its life (`savedForStore`). The run is not kept: it is handed over like any other,
+written out in its reply's own task, gzipped on the helper's thread, held to the cap on runs waiting
+and drained before the idle and background stops (D38), and let go once handed over. The store's own
+budget, cost and order of eviction (D36, D38) decide whether it is kept. Once a name in a worker's
+life, because the host goes on asking while none is stored under the name, which none is where the
+store did not keep it, and each such save costs its diagram the save's time: 4 to 6 ms in WebKit here,
+3 ms on the maintainer's iPhone, a tenth of a second without the JIT (D32). A hand-over dropped for
+room, or that fails, takes the name out again, so that the next diagram of that preamble saves it once
+more. Where the host does not ask, nothing changes.
+
+**Measured** with the persistence harness of D36 (`persist.mjs`: each build's own WorkerHost and
+RunStore driving the worker its `main.js` ships, on a persistent profile, two sessions a round, each a
+fresh browser, the second on what the first left), WebKit 26.6 at a phone's budgets, 12 MiB in the
+worker and 16 stored, one engine, the diagrams handed over one at a time as the queue does on a phone;
+this change's build against 0.2.1-beta.5 as published, three rounds, the builds interleaved. Every SVG
+was as the golden corpus has it, but for the four fixtures of D38 this harness does not reproduce,
+which both builds drew alike. Medians (ranges), in ms; the peaks are the content process's working
+set and private commit over the session, in MiB:
+
+| | beta.5, 1st session | this, 1st session | beta.5, 2nd session | this, 2nd session |
+| --- | ---: | ---: | ---: | ---: |
+| basic, pgfplots-axis, siunitx and feynhand twice each, circuitikz twice, basic: the note | 2,046 (2,038–2,054) | 2,024 (2,008–2,033) | 1,676 (1,674–1,689) | 1,273 (1,259–1,286) |
+| its first diagram, basic | 63 (51–64) | 55 (51–64) | 46 (46–47) | 37 (37–48) |
+| circuitikz's first diagram | 326 (326–326), compiled, nothing saved | 328 (328–333), saved for storage in 4 to 6 | 340 (333–341), saved, not kept | 136 (129–137), from storage, read 7 to 14, put back 13 to 17 |
+| stored at the end | 4 runs, 3.86 MiB | 5 runs, 6.69 MiB | 5 runs, 6.69 MiB | 5 runs, 6.69 MiB |
+| peak working set, commit | 378, 749 | 377, 803 | 359, 779 | 370, 771 |
+| basic, siunitx twice, pgfplots-axis twice, circuitikz, basic: the note | 1,034 (1,019–1,042) | 1,053 (1,053–1,056) | 603 (601–605) | 582 (581–592) |
+| its first diagram, basic | 52 (51–53) | 62 (51–63) | 55 (43–57) | 44 (37–45) |
+| peak working set, commit | 385, 805 | 383, 783 | 365, 749 | 367, 779 |
+| the 44 fixtures once each: the note | 5,817 (5,759–5,959) | 5,721 (5,716–5,924) | 4,659 (4,566–4,771) | 4,623 (4,559–4,752) |
+| its first diagram, arrows-meta | 83 (77–200) | 81 (76–84) | 56 (43–57) | 49 (48–57) |
+| diagrams started from storage; stored at the end | 2; 19 runs, 15.92 MiB | 2; 19 runs, 15.90–15.93 MiB | 18; 19 runs, 15.92–15.93 MiB | 17; 19 runs, 15.92 MiB |
+| peak working set, commit | 548, 1,641 | 546, 1,641 | 599, 1,680 | 598, 1,679 |
+
+In the first note circuitikz's run reaches storage in the first session, where beta.5's reached it in
+the second, and its first diagram of the second session starts from it in 129 to 137 ms against 333
+to 341 compiled; its second diagram in a session starts from it too, read and put back again, as a
+run the worker cannot keep is at every diagram of its preamble that finds it stored (D36). In the
+second note both builds store circuitikz's run saved and not kept, and take the same. Over the 44 the
+second session saved two or three runs more than beta.5's, of small preambles the full store had not
+kept, and their hand-overs made it let go of others: one diagram fewer started from storage, 17
+against 18, and the note took as long within this desktop's noise. The peaks are beta.5's within
+their ranges, but for the private commit of the first note's first session, 803 (779–832) MiB against
+749 (748–809): a run saved and handed over is memory until the collector frees it (D32).
+
+**What it costs.** `main.js` grows by 220 bytes. The worker's ENGINE_ID moves, and
+`test/fixtures/golden/REVISION.json` and `src/source/native-unicode.ts` are recorded again under it;
+what TeX draws does not change (`verify:golden`, `verify:snapshot`, `verify:reset`, and the scan finds
+the same characters native). Tests: `test/worker-handover.test.ts` (a run larger than the budget,
+handed over, let go, and put back by another worker; one saved for the host where the worker is too
+full to save it for itself, handed over, and not saved again in that worker's life).
+
+**Not measured on a phone.** Whether circuitikz's run is now in the maintainer's store after a visit
+of the note, and starts its first diagram after a force-quit.
+
+### The desktop's first diagrams waiting after a start
+
+**What the desktop said.** Right after Obsidian started, the first three diagrams of the note open
+in it said "waited 300 ms", the desktop's debounce, and the day before the first four said 302 to 323;
+later ones said 0. The iPhone's first diagrams waited 0 to 1 ms.
+
+**Why.** Under D22 a block debounced when its note's text had changed within a second of its cache
+miss: an `editor-change` in any pane, a `modify` of its file, or an `editor-change` that names no
+note, which counts for every note. So at each start something reported an edit of the open note
+within a second before its first blocks missed the cache. Read in Obsidian 1.14.4's bundle
+(`app.js`, bounded searches of the minified code), it is not Obsidian loading the note:
+
+- `editor-change` is triggered only from an editor's update listener, and only when the update
+  changed the document (`t.docChanged && this.app.workspace.trigger("editor-change", …)`).
+- A view that loads a note sets its editor with the clear flag (`onLoadFile` → `loadFileInternal(file,
+  true)` → `setViewData(text, true)` → each mode's `set(text, true)`), which replaces the editor's
+  state (`EditorView.setState`), and CodeMirror calls no update listener for that.
+- A view whose file changes re-reads it (`onModify` → `loadFileInternal(file, false)`) and returns
+  without touching the view when the text is what it last loaded or saved; where it is not, an editor
+  applies the difference as a change (`userEvent: "set"`), which does trigger `editor-change`.
+- `modify` is triggered whenever a file's modification time or size moved, whoever wrote it and
+  whether or not its text changed (the desktop adapter's `reconcileFileCreation` compares the two),
+  and `Vault.modify` writes what it is given.
+- Obsidian Sync writes a note it brings from another device with `Vault.modify`, where the other
+  device's text differs from this one's, and after a merge (`e2(base, local, remote)`) also where the
+  merge comes out as the local text.
+
+So the edit came from something acting on the note as Obsidian started: Sync bringing a change from
+another device, such as the phone beta.5 was tested on, or a community plugin acting at startup.
+Which, the maintainer's vault and its plugins would say; neither was read for this. Sync acts once it
+has reached its server, and a plugin most often once the workspace is ready or a note is opened, both
+after Obsidian has shown the note; and D22 measured the second back from the cache miss, which comes
+after an IndexedDB read, slow while Obsidian starts, so that an edit reported after the note's view
+had made its blocks, and before their reads answered, counted for blocks it had not made.
+
+**What it does now** (`src/block/edits.ts` `RecentEdits.making`, `src/block/processor.ts`). The
+second is measured from the block's making. A block is taken for one made by typing when its note's
+text changed within the second before it was made, or in the same run of code as its making, after
+it: Live Preview builds a code block's widget (`toDOM` → `initDOM`, which calls the processor) in the
+keystroke's own update, and its update listener then triggers `editor-change`, all before the
+page's queued microtasks run, which is how the run is told (`queueMicrotask`). The processor asks as
+Obsidian hands it the block, before anything yields, also on the path that resolves a preamble
+first, and the block's miss reads the answer. An edit reported after a block was made, in another
+run, does not count for it, nor does an `editor-change` that names no note then. `editWindowMs` keeps
+its second, which now runs from the keystroke to the block's making: 10 ms, and up to 200 ms while a
+Reading view is still parsing (D22).
+
+What it keeps, each held by a test that reproduces Obsidian's order of things with the plugin's own
+`RecentEdits` (`test/processor.test.ts`): typing in Live Preview waits, the block made in the
+keystroke's update and the edit reported after it; a second pane, a Reading view beside the editor
+and an embed wait, remade after the keystroke; and a note shown while a sync or another program
+changes it waits, redrawn after the `modify`, as does a block made between two changes. The two
+orders of a start, a `modify` and an `editor-change` that names no note, each reported after the
+block was made and before its miss, wait the debounce with D22's rule, tried by putting it back, and
+not with this one. `test/edits.test.ts` holds the window, the runs, the page's own `queueMicrotask`
+and the notes kept apart.
+
+**What it does not cover.** An edit reported within the second before the note's view made its
+blocks still makes them wait: something that writes the note just before Obsidian shows it. And an
+`editor-change` that names no note, in the same run as a block's making, counts for it, as it did.
+
+**What it costs.** `main.js` grows by 345 bytes for it. No Obsidian was started for this: whether the
+desktop's first diagrams now say "waited 0 ms" after a start is for the maintainer's next one.
 
 ---
 
