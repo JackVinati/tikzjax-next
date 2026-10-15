@@ -163,7 +163,9 @@ export default class TikzjaxNextPlugin extends Plugin {
 		// made comes in through `modify`, below.
 		const edits = new RecentEdits(this.budgets.editWindowMs, () => Date.now());
 		this.registerEvent(
-			this.app.workspace.on('editor-change', (_editor, info) => edits.changed(editedNote(info))),
+			this.app.workspace.on('editor-change', (_editor, info) =>
+				edits.changed(editedNote(info), 'editor'),
+			),
 		);
 
 		this.registerMarkdownCodeBlockProcessor(
@@ -287,7 +289,7 @@ export default class TikzjaxNextPlugin extends Plugin {
 				// A note rewritten by a sync or collaboration plugin, or by another program, is
 				// redrawn in a Reading view without any editor saying so; its blocks debounce like
 				// those of a note being typed in, so that changes coming in quickly compile once.
-				edits.changed(file.path);
+				edits.changed(file.path, 'modify');
 				const affected = this.preamble?.invalidate(file.path) ?? [];
 				for (const key of affected) void this.cache?.forget(key);
 				if (affected.length) this.rerenderOpenViews();

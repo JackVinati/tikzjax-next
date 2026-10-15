@@ -31,6 +31,7 @@ import { optimizeString, type SvgoLike } from '../svg/optimize';
 import { explain } from '../engine/hints';
 import type { PreambleLine } from '../preamble/resolve';
 import { STRINGS } from '../ui/strings';
+import type { MadeBy } from './edits';
 
 /** How many of the sanitizer's removals a chip names before it only counts the rest. */
 const SANITIZED_NAMED = 3;
@@ -114,10 +115,10 @@ export interface BlockDeps {
 	/** How long a block being typed in waits for the typing to pause. */
 	debounceMs: number;
 	/**
-	 * Whether the block was made by typing in its note (block/edits.ts), asked when the cache misses.
-	 * Only then does the block debounce. Omitted: never.
+	 * Whether the block was made by typing in its note (block/edits.ts), and by which edit, asked when
+	 * the cache misses. Only then does the block debounce. Omitted: never.
 	 */
-	editing?: (() => boolean) | undefined;
+	editing?: (() => MadeBy) | undefined;
 	/**
 	 * Start the engine, if none is running or starting, without waiting for it. Called when the
 	 * cache misses, so that the engine's start runs while the block waits for the viewport gate and
@@ -164,6 +165,11 @@ export class TikzBlock extends MarkdownRenderChild {
 	private submittedAt: number | null = null;
 	/** When the cache missed, which is "seen" for a block the viewport gate gives up on. */
 	private missedAt: number | null = null;
+	/**
+	 * What its miss was told of the edits of its note: the one that made it wait for the debounce, or
+	 * one after it was made, which did not (CompileTimings.edit). Not a Retry's, seen at the press.
+	 */
+	private edit: MadeBy['edit'];
 	private pipelineEndAt: number | null = null;
 
 	constructor(containerEl: HTMLElement, spec: TexJobSpec, deps: BlockDeps) {
@@ -422,11 +428,13 @@ export class TikzBlock extends MarkdownRenderChild {
 		// start it. One engine at most is started this way, and the host stops it when it has been
 		// idle for its budget, which is what happens to one started for a diagram never scrolled to.
 		if (lazy !== 'manual') this.deps.startEngine?.(this.body.doc);
+		const made = this.deps.editing?.();
+		this.edit = made?.edit;
 		this.dispatch({
 			type: 'miss',
 			isExport: this.spec.isExport,
 			lazy,
-			editing: this.deps.editing?.() ?? false,
+			editing: made?.editing ?? false,
 		});
 	}
 
@@ -489,6 +497,7 @@ export class TikzBlock extends MarkdownRenderChild {
 					...(this.seenAt !== null && this.submittedAt !== null
 						? { waitedMs: this.submittedAt - this.seenAt }
 						: {}),
+					...(this.edit === undefined ? {} : { edit: this.edit }),
 					queueMs: (started ?? asked) - asked,
 					postMs: 0,
 					...(joined ? { joined: true } : {}),
@@ -784,6 +793,7 @@ export class TikzBlock extends MarkdownRenderChild {
 	/** The card's Retry or the "Render diagram" button: a new attempt, seen at the press. */
 	private retry(): void {
 		this.seenAt = this.deps.now();
+		this.edit = undefined;
 		this.dispatch({ type: 'retry' });
 	}
 

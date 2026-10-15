@@ -1,3 +1,23 @@
+import type { BlockEdit, EditSource } from '../types';
+
+/** A note's text changing: when, its place among every edit counted, and what reported it. */
+interface Edit {
+	when: number;
+	count: number;
+	source: EditSource;
+}
+
+/** What a block's cache miss is told of the edits of its note around its making (RecentEdits.making). */
+export interface MadeBy {
+	/** An edit made the block: it waits for the debounce. */
+	editing: boolean;
+	/**
+	 * That edit, for the diagnostics; else the last edit of its note reported after the block was
+	 * made, which did not count. Absent when there was neither (internal/DECISIONS.md D39).
+	 */
+	edit?: BlockEdit | undefined;
+}
+
 /**
  * Which notes are being typed in, so that only a block of one waits for the debounce.
  * See internal/DECISIONS.md D22 and D39.
@@ -25,6 +45,12 @@
  * desktop, the first diagrams of the note open when Obsidian started, as something other than
  * Obsidian's own loading of the note reported an edit of it then (D39).
  *
+ * What reported that edit was not known, and the diagnostics could not say: a block said "waited
+ * 300 ms" whichever rule made it wait. So the miss is told which edit made the block, `editor-change`
+ * naming the note or naming none, or `modify`, and how long before its making, or that it came in the
+ * same run; and of a block no edit made, the last edit of its note reported after it was made, which
+ * did not count. The waited step says either (CompileTimings.edit).
+ *
  * Deliberately not "the block at this place in the note had other text": with two panes on one
  * note, the second pane's block for a keystroke finds the first pane's block with the same text
  * there, and would compile every keystroke at once. The note-wide rule errs the other way: a block
@@ -33,17 +59,15 @@
 export class RecentEdits {
 	private readonly windowMs: number;
 	private readonly now: () => number;
-	/** When each note's text last changed. Only entries within the window matter. */
-	private readonly at = new Map<string, number>();
-	/** When text last changed in an editor that did not say which note it is. */
-	private unnamed = Number.NEGATIVE_INFINITY;
+	/** Each note's last edit, oldest first. Only entries within the window matter. */
+	private readonly at = new Map<string, Edit>();
+	/** The last edit an editor reported without saying which note it is. */
+	private unnamed: Edit | undefined;
 	/**
-	 * Edits counted, and which of them was each note's last and the last unnamed one: a block made
-	 * before an edit in the same run of code tells it from these (`making`).
+	 * Edits counted: a block made before an edit in the same run of code tells it by its place
+	 * (`making`).
 	 */
 	private count = 0;
-	private readonly countAt = new Map<string, number>();
-	private unnamedCount = 0;
 	private readonly later: (task: () => void) => void;
 
 	/**
@@ -60,46 +84,66 @@ export class RecentEdits {
 		this.later = later;
 	}
 
-	/** The text of the note at `path` changed; `null` when the editor did not say which note. */
-	changed(path: string | null): void {
+	/**
+	 * The text of the note at `path` changed; `null` when the editor did not say which note. `source`
+	 * is what said so: an editor (`editor-change`), or the note's file changing (`modify`).
+	 */
+	changed(path: string | null, source: 'editor' | 'modify' = 'editor'): void {
 		const now = this.now();
-		this.count++;
+		const edit: Edit = { when: now, count: ++this.count, source: path === null ? 'unnamed' : source };
 		if (path === null) {
-			this.unnamed = now;
-			this.unnamedCount = this.count;
+			this.unnamed = edit;
 			return;
 		}
 		this.at.delete(path);
-		this.at.set(path, now);
-		this.countAt.delete(path);
-		this.countAt.set(path, this.count);
+		this.at.set(path, edit);
 		// Insertion order is oldest first, so what has fallen out of the window is at the front.
-		for (const [note, when] of this.at) {
-			if (now - when <= this.windowMs) break;
+		for (const [note, last] of this.at) {
+			if (now - last.when <= this.windowMs) break;
 			this.at.delete(note);
-			this.countAt.delete(note);
 		}
 	}
 
 	/**
 	 * A block of the note at `path` is being made now. Says what its cache miss asks: whether an edit
-	 * made it, one within the window before now or one in this same run of code, after it. Asked from
-	 * the block's lookup, which awaits IndexedDB, by when this run is over.
+	 * made it, one within the window before now or one in this same run of code, after it, and which
+	 * edit that was; or, for the diagnostics, the last edit of the note reported after the block was
+	 * made, by the time of asking, which did not count. Asked from the block's lookup, which awaits
+	 * IndexedDB, by when this run is over.
 	 */
-	making(path: string): () => boolean {
+	making(path: string): () => MadeBy {
 		const madeAt = this.now();
-		const last = Math.max(this.unnamed, this.at.get(path) ?? Number.NEGATIVE_INFINITY);
-		const before = this.countOf(path);
-		let sameRun = false;
+		const prior = this.lastOf(path);
+		const before = prior?.count ?? 0;
+		let withIt: Edit | undefined;
 		this.later(() => {
-			sameRun = this.countOf(path) !== before;
+			// More only through an edit of the note or one that names none: dropping a note's entry
+			// once it has left the window can only make it less, and is no edit.
+			const last = this.lastOf(path);
+			if (last !== undefined && last.count > before) withIt = last;
 		});
-		return () => sameRun || madeAt - last <= this.windowMs;
+		return () => {
+			if (withIt !== undefined)
+				return { editing: true, edit: { source: withIt.source, at: 'with', ms: 0 } };
+			if (prior !== undefined && madeAt - prior.when <= this.windowMs)
+				return {
+					editing: true,
+					edit: { source: prior.source, at: 'before', ms: madeAt - prior.when },
+				};
+			const after = this.lastOf(path);
+			return after !== undefined && after.count > before
+				? { editing: false, edit: { source: after.source, at: 'after', ms: after.when - madeAt } }
+				: { editing: false };
+		};
 	}
 
-	/** The count at the last edit of `path`, or the last unnamed one if that came later. */
-	private countOf(path: string): number {
-		return Math.max(this.unnamedCount, this.countAt.get(path) ?? 0);
+	/** The last edit of `path`, or the last unnamed one if that came later. */
+	private lastOf(path: string): Edit | undefined {
+		const named = this.at.get(path);
+		const unnamed = this.unnamed;
+		if (named === undefined) return unnamed;
+		if (unnamed === undefined) return named;
+		return named.count > unnamed.count ? named : unnamed;
 	}
 }
 

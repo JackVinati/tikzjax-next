@@ -118,7 +118,7 @@ export function timingSteps(timings: CompileTimings): string[] {
 					timings.svgMs === undefined ? null : STRINGS.timingSvg(timings.svgMs),
 				];
 	const steps = [
-		timings.waitedMs === undefined ? null : STRINGS.timingWaited(timings.waitedMs),
+		timings.waitedMs === undefined ? null : STRINGS.timingWaited(timings.waitedMs, timings.edit),
 		...engine,
 		STRINGS.timingPost(timings.postMs),
 		timings.mountMs === undefined ? null : STRINGS.timingMount(timings.mountMs),

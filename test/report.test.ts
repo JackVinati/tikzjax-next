@@ -351,6 +351,28 @@ describe('the text the diagnostics view copies', () => {
 		expect(steps({ resumed: true })).toContain('resumed from a saved preamble');
 	});
 
+	/*
+	 * On the desktop the first diagrams after a start said "waited 300 ms", and nothing said what had
+	 * made them wait, nor whether an edit had come at all (internal/DECISIONS.md D39).
+	 */
+	it('says which edit of the note made a render wait for the debounce, or came after it was made', () => {
+		const first = (timings: Partial<CompileTimings>) =>
+			timingSteps({ waitedMs: 300, queueMs: 0, postMs: 1, ...timings })[0];
+		expect(first({ edit: { source: 'modify', at: 'before', ms: 120 } })).toBe(
+			"waited 300 ms: the note's file changed 120 ms before the block was made",
+		);
+		expect(first({ edit: { source: 'editor', at: 'with', ms: 0 } })).toBe(
+			'waited 300 ms: the note was edited as the block was made',
+		);
+		expect(first({ edit: { source: 'unnamed', at: 'before', ms: 30 } })).toBe(
+			'waited 300 ms: an editor that named no note was edited 30 ms before the block was made',
+		);
+		expect(first({ waitedMs: 0, edit: { source: 'modify', at: 'after', ms: 85 } })).toBe(
+			"waited 0 ms; the note's file changed 85 ms after the block was made, which did not count",
+		);
+		expect(first({})).toBe('waited 300 ms');
+	});
+
 	it('says what is stored of saved preambles, and what storage refused', () => {
 		const line = (preambles: DiagnosticsSnapshot['preambles']) =>
 			diagnosticsText(snapshot({ preambles }))

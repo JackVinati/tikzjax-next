@@ -1,5 +1,6 @@
 import type { BootTimings, JitProbe, JitState } from '../../engine-src/protocol';
 import type { EngineStop } from '../engine/worker-host';
+import type { BlockEdit, EditSource } from '../types';
 import { compareVersions } from '../platform/version';
 import type { WebViewFeatures } from '../platform/device';
 
@@ -26,6 +27,26 @@ const STOPPED: Record<EngineStop, string> = {
 };
 
 const yesNo = (value: boolean): string => (value ? 'yes' : 'no');
+
+/** What reported an edit of a block's note, as the waited step says it (block/edits.ts). */
+const EDITED: Record<EditSource, string> = {
+	editor: 'the note was edited',
+	unnamed: 'an editor that named no note was edited',
+	modify: "the note's file changed",
+};
+
+/**
+ * The waited step: from seen to asked, and the edit of the block's note that made it wait for the
+ * debounce, or one reported after the block was made, which did not count (internal/DECISIONS.md D39).
+ */
+const waited = (ms: number, edit?: BlockEdit): string =>
+	edit === undefined
+		? `waited ${ms} ms`
+		: edit.at === 'with'
+			? `waited ${ms} ms: ${EDITED[edit.source]} as the block was made`
+			: edit.at === 'before'
+				? `waited ${ms} ms: ${EDITED[edit.source]} ${edit.ms} ms before the block was made`
+				: `waited ${ms} ms; ${EDITED[edit.source]} ${edit.ms} ms after the block was made, which did not count`;
 
 /** What storage refused this session, for the line on stored preambles; nothing when it refused nothing. */
 const storageErrors = (errors: number): string =>
@@ -118,8 +139,9 @@ export const STRINGS = {
 		'diagram would be rendered twice. Disable one of them.',
 
 	// The diagnostics view: where one compile's time went, a step at a time, in the order the steps
-	// happen. Each is a label and a number of milliseconds, never part of a sentence.
-	timingWaited: (ms: number) => `waited ${ms} ms`,
+	// happen. Each is a label and a number of milliseconds, never part of a sentence, but for the
+	// waited step's edit, which says what made a block wait for the debounce.
+	timingWaited: waited,
 	timingQueue: (ms: number) => `queue ${ms} ms`,
 	timingStart: (ms: number) => `engine start ${ms} ms`,
 	timingReset: (ms: number) => `memory reset ${ms} ms`,

@@ -28,7 +28,7 @@ describe('RecentEdits', () => {
 		const { edits: recent, endRun } = edits();
 		const made = recent.making('note.md');
 		endRun();
-		expect(made()).toBe(false);
+		expect(made().editing).toBe(false);
 	});
 
 	it('says a block was made by typing for the window after its note changed, and not after', () => {
@@ -41,8 +41,8 @@ describe('RecentEdits', () => {
 		clock.now = 6001;
 		const after = recent.making('note.md');
 		endRun();
-		expect(within()).toBe(true);
-		expect(after()).toBe(false);
+		expect(within().editing).toBe(true);
+		expect(after().editing).toBe(false);
 	});
 
 	it('is about that note only: another note opened meanwhile was not typed in', () => {
@@ -53,8 +53,8 @@ describe('RecentEdits', () => {
 		const typing = recent.making('typing.md');
 		const opened = recent.making('opened.md');
 		endRun();
-		expect(typing()).toBe(true);
-		expect(opened()).toBe(false);
+		expect(typing().editing).toBe(true);
+		expect(opened().editing).toBe(false);
 	});
 
 	it('takes an edit in an editor that did not say which note for an edit of every note', () => {
@@ -68,8 +68,8 @@ describe('RecentEdits', () => {
 		clock.now = 1001;
 		const after = recent.making('any.md');
 		endRun();
-		expect(within()).toBe(true);
-		expect(after()).toBe(false);
+		expect(within().editing).toBe(true);
+		expect(after().editing).toBe(false);
 	});
 
 	it('keeps the latest edit of a note, however many notes were edited since', () => {
@@ -86,8 +86,8 @@ describe('RecentEdits', () => {
 		const a = recent.making('a.md');
 		const n0 = recent.making('n0.md');
 		endRun();
-		expect(a()).toBe(true);
-		expect(n0()).toBe(false);
+		expect(a().editing).toBe(true);
+		expect(n0().editing).toBe(false);
 	});
 
 	it('says a block made before an edit of its note, in another run, was not made by it', () => {
@@ -100,7 +100,7 @@ describe('RecentEdits', () => {
 		recent.changed('note.md');
 		recent.changed(null);
 		endRun();
-		expect(made()).toBe(false);
+		expect(made().editing).toBe(false);
 	});
 
 	it('says a block made in the run that then reports an edit of its note was made by it', () => {
@@ -110,7 +110,7 @@ describe('RecentEdits', () => {
 		const made = recent.making('note.md');
 		recent.changed('note.md');
 		endRun();
-		expect(made()).toBe(true);
+		expect(made().editing).toBe(true);
 	});
 
 	it('takes an editor that names no note, in that run, for an edit of the block’s', () => {
@@ -118,7 +118,7 @@ describe('RecentEdits', () => {
 		const made = recent.making('note.md');
 		recent.changed(null);
 		endRun();
-		expect(made()).toBe(true);
+		expect(made().editing).toBe(true);
 	});
 
 	it('does not take another note’s edit in that run for one of the block’s', () => {
@@ -126,7 +126,7 @@ describe('RecentEdits', () => {
 		const made = recent.making('note.md');
 		recent.changed('other.md');
 		endRun();
-		expect(made()).toBe(false);
+		expect(made().editing).toBe(false);
 	});
 
 	it('still counts an edit before the block was made when another comes after it', () => {
@@ -139,7 +139,7 @@ describe('RecentEdits', () => {
 		clock.now += 100;
 		recent.changed('note.md');
 		endRun();
-		expect(made()).toBe(true);
+		expect(made().editing).toBe(true);
 	});
 
 	it('tells the runs apart with the page’s own queueMicrotask', async () => {
@@ -152,8 +152,85 @@ describe('RecentEdits', () => {
 		await Promise.resolve();
 		later.changed('note.md');
 		await Promise.resolve();
-		expect(same()).toBe(true);
-		expect(before()).toBe(false);
+		expect(same().editing).toBe(true);
+		expect(before().editing).toBe(false);
+	});
+
+	it('does not take another note’s edit in that run for one of the block’s, when the block’s note was edited long before', () => {
+		// The block's note has an entry that has left the window: another note's edit drops it, which
+		// is no edit of the block's note, and leaves an older edit that named no note as its last.
+		const { clock, edits: recent, endRun } = edits(1000);
+		recent.changed(null);
+		recent.changed('note.md');
+		endRun();
+		clock.now = 5000;
+		const made = recent.making('note.md');
+		recent.changed('other.md');
+		endRun();
+		expect(made()).toEqual({ editing: false });
+	});
+});
+
+/*
+ * The desktop's first diagrams after a start said "waited 300 ms" and nothing said which rule had made
+ * them wait, nor what reported the edit: so the miss is told which edit made the block, and of a block
+ * none did, the last one after it, which did not count (internal/DECISIONS.md D39).
+ */
+describe('the edit a block is told of', () => {
+	it('is the one before it was made that made it wait, with what reported it and how long before', () => {
+		const { clock, edits: recent, endRun } = edits(1000);
+		recent.changed('note.md', 'modify');
+		endRun();
+		clock.now = 120;
+		const made = recent.making('note.md');
+		endRun();
+		expect(made()).toEqual({ editing: true, edit: { source: 'modify', at: 'before', ms: 120 } });
+	});
+
+	it('is the one reported in the run that made it, as Live Preview reports a keystroke', () => {
+		const { edits: recent, endRun } = edits(1000);
+		const made = recent.making('note.md');
+		recent.changed('note.md', 'editor');
+		endRun();
+		expect(made()).toEqual({ editing: true, edit: { source: 'editor', at: 'with', ms: 0 } });
+	});
+
+	it('names an editor that names no note as such', () => {
+		const { clock, edits: recent, endRun } = edits(1000);
+		recent.changed(null);
+		endRun();
+		clock.now = 30;
+		const made = recent.making('note.md');
+		endRun();
+		expect(made()).toEqual({ editing: true, edit: { source: 'unnamed', at: 'before', ms: 30 } });
+	});
+
+	it('is, for a block no edit made, the last edit of its note after it was made, which did not count', () => {
+		// As at the desktop's start: the view makes the block, then something writes the note while the
+		// block's cache is read.
+		const { clock, edits: recent, endRun } = edits(1000);
+		const made = recent.making('note.md');
+		endRun();
+		clock.now = 40;
+		recent.changed('note.md', 'editor');
+		endRun();
+		clock.now = 85;
+		recent.changed('note.md', 'modify');
+		endRun();
+		expect(made()).toEqual({ editing: false, edit: { source: 'modify', at: 'after', ms: 85 } });
+	});
+
+	it('is none for a block no edit came near, nor another note’s edit after it', () => {
+		const { clock, edits: recent, endRun } = edits(1000);
+		recent.changed('note.md');
+		endRun();
+		clock.now = 5000;
+		const made = recent.making('note.md');
+		endRun();
+		clock.now = 5040;
+		recent.changed('other.md', 'modify');
+		endRun();
+		expect(made()).toEqual({ editing: false });
 	});
 });
 

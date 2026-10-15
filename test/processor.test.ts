@@ -175,7 +175,7 @@ describe('whether a block waits for typing to pause', () => {
 				asked.push(notePath);
 				return () => {
 					answered++;
-					return false;
+					return { editing: false };
 				};
 			},
 		});

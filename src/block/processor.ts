@@ -8,6 +8,7 @@ import { deriveKey, OUTPUT_REVISION } from '../cache/key';
 import { isExportContext } from '../platform/context';
 import { artifactRevision, type TikzSettings } from '../settings/schema';
 import { TikzBlock, type BlockDeps, type BlockOutcome, type TexJobSpec } from './render-child';
+import type { MadeBy } from './edits';
 import { standaloneMarkup } from './mount';
 import { asProcessorSource, asReadingView } from '../note/finalize';
 import type { QueueTimers, RenderQueue } from '../queue/queue';
@@ -51,9 +52,9 @@ export interface ProcessorDeps {
 	/**
 	 * Asked as a block of the note at this path is made, and says what its cache miss asks: whether
 	 * the block was made by typing in the note (block/edits.ts RecentEdits.making), and so waits for
-	 * the typing to pause if it is not cached. Omitted: no note ever is.
+	 * the typing to pause if it is not cached, and which edit that was. Omitted: no note ever is.
 	 */
-	editing?: ((notePath: string) => () => boolean) | undefined;
+	editing?: ((notePath: string) => () => MadeBy) | undefined;
 	/** Start the engine ahead of the first job (BlockDeps.startEngine). Omitted: it starts with the job. */
 	startEngine?: ((doc: Document) => void) | undefined;
 	/**
@@ -213,7 +214,7 @@ function attach(
 	ctx: MarkdownPostProcessorContext,
 	deps: ProcessorDeps,
 	deadline: number | undefined,
-	editing: (() => boolean) | undefined,
+	editing: (() => MadeBy) | undefined,
 ): Promise<void> {
 	const report = deps.onBlock?.(spec, el);
 	{
@@ -226,7 +227,7 @@ function attach(
 			unobserve: deps.unobserve,
 			ensureFonts: deps.ensureFonts,
 			debounceMs: deps.budgets.debounceMs,
-			editing: () => editing?.() ?? false,
+			editing,
 			startEngine: deps.startEngine,
 			now: deps.now,
 			report,
