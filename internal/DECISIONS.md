@@ -2530,6 +2530,12 @@ is likeliest to be wrong is a slow Android phone, whose V8 runs the loop compile
 measured how slowly; so the diagnostics say "on (probably)" and "off (probably)", and only iOS acts
 on it (below).
 
+**Amended by D38 (0.2.1-beta.5).** A slow attempt no longer says off by itself: a hot iPhone with its
+JIT reached the threshold with every attempt, and so did WebKit held to one efficiency core on the
+desktop. After a slow first attempt the worker pauses 4 ms and measures the loop, and weighs it
+against the platform's inflate of the core dump in the same start; the verdict is on, off or unclear.
+What follows here is the probe as it was until then.
+
 How narrow the margin is, by arithmetic from the figures above, not by measurement: compiled, the
 loop takes 0.77 to 0.83 ns a step on a core of about 5.5 to 5.8 GHz, some 4.2 to 4.8 cycles a step.
 At that, compiled code reaches WebKit's 3.3 ns on a core below about 1.4 GHz, and V8's 5 ns below
@@ -2754,6 +2760,13 @@ of the whole run, which only a run kept uncompressed needs, and without a JIT th
 step: writing out and gzipping circuitikz's run took 110 to 123 ms of the worker's time in WebKit
 with the JIT and 232 to 256 without it, gzip being native in both (the campaign of 2026-10-14). The
 next diagram of a preamble, handed over at once after the first, took what beta.3's did (below).
+
+**Amended by D38 (0.2.1-beta.5).** On a phone this left a note's heaviest preambles out of storage:
+in a note the worker is idle only at its end, the runs it let go meanwhile were capped and dropped,
+and the engine was stopped in the background with what was still waiting. A run is now written out
+between diagrams from the reply on and gzipped on a thread of its own, and an engine about to stop
+finishes handing its runs over first, for 2 s at most at the idle stop and 1 s in the background.
+And when the store is full, a run whose preamble took longer is kept longer.
 
 The runs waiting cost memory once the worker no longer keeps them itself: in a note of many
 preambles the worker is idle only at its end, and a run it has let go is held by the queue alone. So
@@ -3072,10 +3085,284 @@ to 124 at 31 s. A phone's 12 MiB still leaves its store far from full after a bu
   at each pause, and every pause longer than the idle stop costs its compile a start; nobody has
   measured how long people pause. A computer keeps its 5 minutes.
 - **What it does not change.** The peak, which is reached while the diagrams compile, and the stop
-  when Obsidian goes to the background, which comes at once as before.
+  when Obsidian goes to the background, which comes at once as before. (Since 0.2.1-beta.5 an idle
+  engine first hands over the saved runs it has not yet, for 1 s at most, and 2 s at the idle stop:
+  D38.)
 
 `TODO.md` §9 has the phone's check: the page's memory before and after the 15 s stop, under the Web
 Inspector, and the next diagram's start and putting back.
+
+---
+
+## D38 — What 0.2.1-beta.4 did on the maintainer's iPhone: a JIT probe a slow phone fooled, heavy preambles that never reached storage, and a shared compile shown as a block's own
+
+**Amends D33 (the probe's verdict), D36 (when runs are handed over, and which go when the store is
+full) and D37 (the stops), and D21's timings. Found by the maintainer testing 0.2.1-beta.4 on an
+iPhone 16 Pro, iOS 27.0.1, Obsidian 1.14.5, with Obsidian excluded from Lockdown Mode. Date of
+record: 2026-10-15.**
+
+The maintainer's readings, from the diagnostics view's Copy, are the only phone figures here; every
+other figure is from the desktop of D27 (Windows 11, i9-13900K) on 2026-10-15, with Playwright 1.63's
+WebKit 26.6 and Chromium 153 and Node 22.19, each named with how it was taken.
+
+### The JIT probe
+
+**What the phone said.** Twice. The first time the phone was slow all over, hot or in a low power
+state: the view said "JIT: off (probably)", its probe took 13 ms in four attempts all slow, the
+engine started in 194 ms (in the worker 117: decode 15, inflate 86 with the platform's gzip, compile
+2), and TeX took 867 ms for circuitikz, 749 for pgfplots, 648 for pgfplotstable. The day before, with
+0.2.1-beta.3, the same phone's probe had taken 1 ms, the inflate 26 ms, circuitikz 231 and pgfplots
+211. The platform's inflate is native code that has nothing to do with the JIT, and it took 3.3
+times as long: the processor was slow, and the JIT was on. Closed and opened again, it said on, the
+probe took 1 to 2 ms and the inflate 39 to 47. D33's threshold was absolute, 3 ms for 600,000 steps of
+its loop, and a phone slowed down enough reaches it with its JIT: the hint and the notice about
+Lockdown Mode then tell someone with nothing to fix to go and fix it.
+
+**Taken again on the desktop.** WebKit held to one efficiency core (the browser's processes given an
+affinity of logical processor 16) does the same with its JIT on: 0.2.1-beta.4's own worker, started
+as the host starts it, said off in 12 of 16 starts, and in 7 of 16 more. Through a worker of the
+harness's own that starts as the engine does (`DecompressionStream` into one buffer, beside tex.wasm's
+inflate and compile) and then runs beta.4's attempts, off in 6 of 16: each attempt finished one or
+two calls of 75,000 steps before the clock read 3 to 5 ms, and measured right after, the same loop ran
+at 0.67 to 0.92 ns a step in its fastest call of 8 ms or more. JavaScriptCore compiles a hot
+WebAssembly function on threads of its own while the loop runs on uncompiled, and on one core those
+threads and the worker's take turns.
+
+**What it does now** (`engine-src/jit.ts`):
+
+1. The first attempt is as before: done within PROBE_SLOW_MS, 3 ms, it settles the JIT on.
+2. Otherwise the worker gives its thread up for PROBE_PAUSE_MS, 4 ms, and tries again, up to four
+   attempts in all, each run on to PROBE_MEASURE_MS, 6 ms, so that it measures how slow the loop is;
+   any attempt done within 3 ms settles it on.
+3. Otherwise it is weighed (`verdict`): the loop's ns a step at the fastest attempt, from the calls
+   each finished, against the platform's inflate of the core dump in the same start, in ns a byte
+   inflated, which the worker now times by itself. Four times that or more is off; twice or less is
+   on, unless the loop took 10 ns a step or more; anything else is unclear. Where the platform has
+   no `DecompressionStream`, iOS before 16.4, pako inflated the dump, which is JavaScript and slows
+   without a JIT as the loop does: then 20 ns a step or more is off, and anything slower than step 1
+   allows but faster than that is unclear.
+
+The notice still needs two starts that said off and none that said on; an unclear start counts as
+neither, and shows no hint. `JitProbe` carries `state` (`on`, `off`, `unclear`) where it carried
+`on`, and, when it was weighed, `nsPerStep` and `inflateNsPerByte`, which the engine's line in the
+view and in Copy shows: `JIT probe 30 ms (12.5 ns a step, inflate 1.51 ns a byte)`. Those two
+figures are what a phone that says off with its JIT, or on without it, should be reported with.
+
+**The pause.** In the harness's worker, WebKit held to one efficiency core with its JIT, 24 starts
+each: attempts run on to 6 ms without a pause were off by the rule above in 20; with a timer of 0 ms
+between them, 14 off and 2 unclear; of 1 ms, 22 off; of 2 and 8 ms, all 24 on, and of 4 ms all 48 of
+two such runs, every one at its second attempt, the probe taking 8 to 17 ms. 4 ms it is, paid only
+after a slow first attempt.
+
+**Calibration**, the harness's worker, 2 rounds of 8 fresh workers each, the loop's fastest call of
+8 ms or more against the inflate of the same start, the ratio of their ns a step and ns a byte:
+
+| | with the JIT | without it (`JSC_useJIT=false`) | WebAssembly interpreted (`JSC_useBBQJIT=false`) |
+| --- | ---: | ---: | ---: |
+| WebKit, idle | 0.45–0.72 | 7.72–8.69 | 10.30–12.76 |
+| WebKit, one efficiency core | 0.45–0.62 | 13.05–20.59 | 9.14–24.21 |
+| WebKit, one efficiency core, power throttling on | 0.47–0.62 | 7.26–25.97 | 15.44–24.21 |
+| WebKit, 48 processes spinning on the 32 threads | 0.02–0.39 | 0.74–9.78 | 1.73–12.09 |
+| WebKit, the same with power throttling on | 0.27–0.94 | 4.98–19.17 | 6.62–20.72 |
+| Chromium, idle | 0.50–0.54 | | |
+| Chromium, one efficiency core | 0.32–0.45 | | |
+| Chromium, 48 processes spinning | 0.15–0.69 | | |
+| Node, idle | 0.16–0.18 | | |
+
+With every core busy at normal priority, the inflate shared its core with the spinning processes
+more than the loop's short attempts did, and the ratio fell for both; without the JIT it fell to 0.74
+in one start, which is why a loop at 10 ns a step or slower is never taken for compiled code, however
+fast it is against the inflate: the fastest interpreter measured, JavaScriptCore's on this desktop's
+fastest core, takes 12 to 13. A processor slowed down all over, as hot or in Low Power Mode, slows
+both alike: the ratio is a figure of the code, not of the processor. "Power throttling on" is
+Windows' EcoQoS, turned on for the browser's processes; it slowed neither by much on this desktop.
+
+**The shipped worker** (`--mode shipped`: the worker a build's `main.js` carries, started as the host
+starts it; a build whose probe and start are this release's, before the hand-over changes below), 2
+rounds of 8 starts each:
+
+| | starts | on | off | unclear | the probe took |
+| --- | ---: | ---: | ---: | ---: | --- |
+| WebKit with the JIT: idle, one efficiency core, with power throttling, with two processes spinning on that core, 48 on all, 48 with power throttling | 96 | 96 | | | 0–129 ms |
+| WebKit with the JIT, without the platform's decoders | 16 | 16 | | | 0–1 ms |
+| WebKit with the JIT, its clock run 3.3, 5 and 8 times fast | 48 | 48 | | | 0–80 ms |
+| Chromium: idle, one efficiency core, 48 spinning | 48 | 48 | | | 0.5–14.8 ms |
+| Chromium, its clock run 3.3, 5 and 8 times fast | 48 | 48 | | | 1.3–143 ms |
+| Node, idle | 16 | 16 | | | 0.5–1.2 ms |
+| WebKit without the JIT: idle, one efficiency core | 32 | | 32 | | 33–40 ms |
+| WebKit without the JIT, its clock run 3.3, 5 and 8 times fast | 48 | | 48 | | 66–152 ms |
+| WebKit without the JIT, 48 spinning | 16 | | 4 | 12 | 36–665 ms |
+| WebKit with WebAssembly interpreted, idle | 16 | | 16 | | 33–35 ms |
+| WebKit without the JIT and without the platform's decoders | 16 | | | 16 | 44–59 ms |
+
+A clock run `k` times fast is the worker's `performance.now()` multiplied by `k`: every step the
+start times, the inflate's and the loop's alike, reads `k` times as long, as on a processor `k` times
+slower; Chromium's clock at ×8 made 14 of its 16 starts weigh the loop, at 5.33 to 7.11 ns a step
+against an inflate of 12.16 to 13.81 ns a byte, 0.39 to 0.55, all on. WebKit's clock moves a
+millisecond at a time, and at ×3.3 to ×8 a millisecond of it reads as several, so that most of its
+starts with the JIT read 0 and settled at once. Without the JIT and the platform's decoders, as on iOS
+14.5 to 16.3, the loop ran at 11.43 to 15.56 ns a step, under the 20 needed to say off with nothing
+to weigh it against: unclear, by design.
+
+**What it costs.** With the JIT, nothing: the first attempt settles it, 0 to 1 ms in WebKit idle and
+0.5 to 0.7 in Chromium. Where the first attempt is slow and the second, after the pause, is not, 8 to
+10 ms (WebKit on one efficiency core). Without the JIT, 33 to 40 ms where beta.4's probe took 12 to 16,
+the start in WebKit 82 to 94 ms against D33's 52 to 59; the engine is twenty times slower there in
+every diagram after it. `main.js` grows by 757 bytes for it.
+
+**The phone's two readings**, as the rule takes them (`test/jit.test.ts`, a clock a millisecond at a
+time): the second, a probe of 1 to 2 ms, settles at its first attempt, as before. The first: an
+inflate of 86 ms, as beta.4 timed it with the dump's unpacking, over its 22.1 MiB is 3.71 ns a byte, and four attempts all slow put the loop
+at 3.3 ns a step or slower; slowed as much as the inflate was, about 3.3 times its usual 1 ns, it is
+0.9 to 1.8 times the inflate between 3.3 and 6.6 ns a step, on, where beta.4 said off.
+
+**Not measured on a phone.** Whether the iPhone, hot or in Low Power Mode, now says on, and what its
+engine line's two figures are; with Lockdown Mode, that it says off at two starts and shows the
+notice. `TODO.md` §9 has both.
+
+### A note's heaviest preambles never reached storage
+
+**What the phone said.** Across both sessions the heavy diagrams of the maintainer's test note, a
+circuitikz (`ad18c71e`), a pgfplots axis (`dd914518`) and a pgfplotstable (`f2198e3d`), said
+"preamble saved in N ms" every time they compiled, never "resumed from a stored preamble", with
+"Stored preambles: 4, 5.5 MB" in the second. D36 had measured why it could be so: at a phone's
+budgets, after the 37 fixtures, only 7 runs, 4.34 MiB of the 16 the store may hold, were stored.
+
+**Why**, taken again on the desktop with the persistence harness: each build's own WorkerHost and
+RunStore driving the worker its `main.js` ships, in WebKit 26.6 on a persistent profile, at a phone's
+budgets (12 MiB of runs in the worker, 16 MiB stored), one engine, the 15 s idle stop, and each
+session ended as a phone ends it: Obsidian sent to the background a while after the last diagram
+(the host's `kill('background')`, as `registerTeardown` calls it), or left to the idle stop. Three
+things, all in beta.4:
+
+- A worker handed a run over only once no render had been under way for 100 ms, which in a note is
+  at its end. Until then the runs it had let go for room waited, held to its 12 MiB between them, the
+  oldest dropped: of the 23 runs a first visit of the 44 fixtures saved, 10 were handed over and
+  stored, 6.00 MiB, none of circuitikz's, pgfplotstable's or siunitx's.
+- The engine was stopped at once when Obsidian went to the background, with whatever was still
+  waiting: sent there as the last of the 44 was drawn, none of the 23 was stored; 200 ms after a
+  single diagram, circuitikz's, pgfplots-axis's and pgfplotstable's runs were not.
+- Writing a run out and gzipping it took the worker's own thread, 7 to 75 ms a run here, which is why
+  it waited for a quiet worker in the first place (D36).
+
+**What it does now.**
+
+- **The worker writes a run out between diagrams, from the reply on** (`engine-src/worker.ts`
+  handOver): one step on its thread, 0 to 4 ms here for every run, circuitikz's 8.9 MiB included,
+  waiting only for no render to be under way, the runs it has let go for room first.
+- **It gzips them on a thread of its own**: a worker it starts, from `engine-src/gzip-helper.ts`,
+  which needs nothing but the platform's `CompressionStream`, while TeX goes on with the next diagram;
+  73 to 97 ms for circuitikz's run here, writing out included. Where it cannot start one, or it
+  fails, the gzip is sliced on the worker's own thread as before, 128 KiB a slice,
+  each when no render is under way, so that a render posted meanwhile waits at most for one. A slice
+  is a task of its own by a message the worker sends itself: timers nested that deep wait 4 ms each.
+  Where there is no `CompressionStream`, iOS 14.5 to 16.3, the run's checksum is sliced so, as before.
+  The helper goes with the worker, which the host stops with the engine.
+- **An engine about to stop hands its runs over first** (`src/engine/worker-host.ts` drain): at the
+  idle stop, for 2 s at most, and when Obsidian goes to the background on a phone, for 1 s at most,
+  the host asks it (`FlushRequest`) and stops it when it says it is done (`FlushedMessage`), at once
+  when nothing waits; a job posted to it meanwhile keeps it. An engine still starting, or one with a
+  job, is stopped at once, as before, and so is every engine at a restart or an unload.
+- **The store keeps a run whose preamble took longer for longer** (`src/cache/runs.ts` keptUntil):
+  a minute more for each millisecond its preamble and save took, counted from its last use, and a
+  run that would itself go first is not kept, evicting nothing. And a diagram that starts from a run
+  its engine held counts as a use of the run stored under that name (`StoredRuns.used`), written down
+  at most once a minute a run. With every run handed over, the least-recently-used order filled the
+  16 MiB with a note's last preambles, and the next visit, from the top, found its first ones gone
+  and stored them again over the last: in an intermediate build that handed everything over and kept
+  the old order, a second visit of the 44 started 6 diagrams from storage against beta.4's 11, and
+  took longer, 7,836 (7,836–8,570) ms against 6,703 (6,703–8,142). circuitikz's run, whose preamble
+  and save took 220 to 330 ms here, is kept four to five hours longer than plain TikZ's, 15 to 30.
+  Over a day or more, recency decides.
+
+An intermediate build that only handed runs over a slice at a time between diagrams, on the worker's
+thread, without the helper, still dropped runs in a dense note: 12 to 13 of the 23 handed over, and
+siunitx's and pgfplotstable's preambles compiled again on the second visit. Its figures are not
+compared below.
+
+**Measured**, on 2026-10-15, this release's build against 0.2.1-beta.4 as published, two rounds each,
+the builds interleaved, two sessions per round, each a fresh browser on one profile, the second on
+what the first left; every diagram's SVG as the golden corpus has it, but for four fixtures whose
+reference this harness does not reproduce (`expl3` and three of the Unicode ones), which both builds
+drew alike. Medians
+(ranges) in ms, the note handed over a diagram at a time as the queue hands them on a phone:
+
+| | stored after the first visit | second visit: from storage, preamble compiled | second visit, the note | first visit, the note |
+| --- | --- | --- | ---: | ---: |
+| 44 fixtures, background 1 s after, beta.4 | 10 runs, 6.00 MiB | 11, 11 | 6,562 (6,562–6,606) | 7,496 (7,496–7,588) |
+| the same, this release | 19 runs, 15.91–15.93 MiB | 16–18, 4 | 5,693 (5,693–5,758) | 7,454 (7,454–7,458) |
+| 44 fixtures, background at once, beta.4 | none | 0, 23 | 7,610 (7,610–7,713) | 7,529 (7,529–7,726) |
+| the same, this release | 19 runs, 15.93–15.94 MiB | 16–20, 3–4 | 5,825 (5,825–5,834) | 7,377 (7,377–7,428) |
+| 44 fixtures, idle stop, beta.4 | 10 runs, 6.00 MiB | 11, 11 | 5,249 (5,249–6,693) | 5,869 (5,869–7,484) |
+| the same, this release | 19 runs, 15.92–15.94 MiB | 16–18, 1–4 | 4,542 (4,542–4,624) | 5,762 (5,762–5,811) |
+| 74 diagrams (37 twice in a row), background 1 s after, beta.4 | 7 runs, 4.34 MiB | 8, 10 | 5,876 (5,876–5,936) | 6,508 (6,508–6,618) |
+| the same, this release | 19 runs, 15.77 MiB | 21, 0 | 4,415 (4,415–4,493) | 6,863 (6,863–7,019) |
+| 74 diagrams, idle stop, beta.4 | 7 runs, 4.34 MiB | 8, 10 | 4,585 (4,585–4,616) | 5,101 (5,101–5,267) |
+| the same, this release | 19 runs, 15.77 MiB | 21, 0 | 3,549 (3,549–3,651) | 5,210 (5,210–5,329) |
+
+On the second visit of the 44, circuitikz, pgfplots-axis, pgfplotstable, siunitx, forest, tikz-cd,
+feynhand and chemfig all started from storage with this release, in every round of every ending,
+and plain TikZ in all but one round of two endings; with beta.4, circuitikz, pgfplotstable, siunitx, feynhand and chemfig
+compiled their preambles, and after a background at once all 23 did. The first visit took what
+beta.4's did, within this desktop's noise, 6 % either way, the gzip being off the worker's thread;
+in it, two diagrams that beta.4 compiled from the start this release started from runs stored earlier
+in the same visit, which the worker had let go for room. The engine was gone 19 to 20 ms after the
+background at once, its runs handed over; 1,028 to 1,044 ms after a background 1 s after the last
+diagram, the drain taking 28 to 44.
+
+The first diagram after a fresh start of the browser, one diagram a session, the background 200 ms
+after it, median (range) of the second session, in ms:
+
+| | beta.4 | this release |
+| --- | ---: | ---: |
+| `basic` | 95 (95–97), stored | 91 (91–99), stored |
+| `siunitx` | 102 (102–105), stored | 100 (100–106), stored |
+| `tikz-cd` | 149 (149–153), stored | 147 (147–152), stored |
+| `forest` | 234 (234–237), stored | 237 (237–239), stored |
+| `circuitikz` | 438 (438–439), compiled | 217 (217–221), stored |
+| `pgfplots-axis` | 414 (414–416), compiled | 252 (252–253), stored |
+| `pgfplotstable` | 354 (354–356), compiled | 155 (155–166), stored |
+
+**What it costs.** `main.js` grows by 3,601 bytes for this. A second thread while runs are
+handed over, whose memory was not measured; the engine kept up to 1 s after Obsidian went to the
+background, up to 2 s after its idle stop, where it has runs waiting; more for the store to write:
+23 runs handed to it in a first visit of the 44, where beta.4 handed it 10.
+
+**Not measured on a phone.** That the heavy diagrams of the maintainer's note now start from storage
+after a force-quit, and what reading and putting them back take there. `TODO.md` §9 has it.
+
+### A block that joined a compile already running
+
+**What the phone said.** "#7 cb3a6fbf: … TeX 68 ms … seen to drawn 10 ms", and "#18 f2198e3d: … TeX
+599 … seen to drawn 265": a block that asked for a diagram whose compile was already under way, for
+a block a re-render had replaced or the same diagram in another pane, joined it (the queue's dedup),
+and the view showed that compile's TeX, reset, save and DVI to SVG as its own, beside a "seen to
+drawn" timed from its own first sighting, which the compile had begun before.
+
+Now the queue tells a caller, when it joins a job that has already started, that it did
+(`SubmitOptions.onStart(joined)`), the block's timings say so (`CompileTimings.joined`), and the view
+shows "joined a compile already running, whose TeX took N ms", without the compile's other steps;
+its waited, SVG pipeline, drawing and seen to drawn are its own. A block that joined a job before
+it started waited for it as the first one did, and shows its steps as before.
+
+"Resumed from a saved preamble" said so of a diagram that started from a run its engine had put back
+from storage for an earlier diagram and kept, which the engine had not saved. The worker now marks a
+run read back from storage (`SavedRun.fromStore`), and a diagram that resumes from it, put back for
+an earlier diagram, says "resumed from a stored preamble put back for an earlier diagram"
+(`RenderTimings.fromStore`); one put back for itself says what reading it and putting it back took,
+as before. `main.js` grows by 445 bytes for these two, to 12,225,559 bytes in all, 4,803 more than
+beta.4's.
+
+Tests: `test/jit.test.ts` (the attempts, the pause, the weighing at its thresholds, the phone's two
+readings, the recorded starts above), `test/worker-boot.test.ts` (the shipped worker says on in Node,
+with the inflate it weighed against, and none without the platform's gzip),
+`test/worker-handover.test.ts` (the shipped worker hands runs over while the next diagram is under way
+and before it says flushed, gzips them by a worker of its own where it can start one and on its own
+thread where that fails, and says where a run it resumed from came from), `test/worker-host.test.ts`
+(the drain at the idle stop and in the background, its limits, a job that keeps the engine, the
+stops that do not wait, the uses the store is told of), `test/runs.test.ts` (what goes first, a run
+that would itself go first, a use from memory), `test/queue.test.ts` and `test/render-child.test.ts`
+(a joined compile), `test/report.test.ts` and `test/debug-view.test.ts` (what the view and Copy say).
 
 ---
 
