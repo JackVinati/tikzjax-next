@@ -3912,7 +3912,12 @@ An edit does not count for a block whose text its note had on screen as the edit
   blocks a start makes again had not come to rest: their compiles were under way.
 - **When it is asked.** The texts the note had on screen as the burst began are noted when the run
   that made the block is over, and the miss asks whether its key is one of them: at the miss, which
-  comes after an IndexedDB read, a text unloaded in that run might no longer be remembered.
+  comes after an IndexedDB read, a text unloaded in that run might no longer be remembered. A
+  `nocache` block reads no cache, and now waits for that run to be over before it asks: with no
+  preamble to look for, the processor makes and loads a block in the run it is handed it in, and such
+  a block asked before Live Preview reported the keystroke that made it, and before what the note
+  showed was noted, so D39's edit "as the block was made" did not make it wait, nor did this rule
+  find it shown at a start (found in review).
 - **Memory.** One entry per text a note has on screen, or had within the window, and per note; the
   entries of texts no longer loaded go a window after the last unload. A text shown again by a block
   made before the last one was unloaded keeps the run its first block was made in. One shown again
@@ -3968,7 +3973,8 @@ the edits began and shown again after; not a text whose last block came to rest 
 cached, until one comes to rest with it), `test/processor.test.ts`
 (both remakes at a start, through the processor, the block and the plugin's own `RecentEdits`, in
 the order of things read in the bundle, and typing still waiting beside the editor or in an embed, in
-a second pane in Live Preview and for a sync; a diagram on an error card or never cached, in the
+a second pane in Live Preview and for a sync; a `nocache` block with no preamble to look for, made
+again at a start and made by a keystroke; a diagram on an error card or never cached, in the
 section typed in, not asked for while typing, in each of those three; the block's load, unload and
 rest told, and whether the cache holds its diagram: drawn, on a card, `nocache`, a button, a cache
 hit), `test/report.test.ts`.

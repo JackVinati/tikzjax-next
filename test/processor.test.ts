@@ -267,6 +267,11 @@ describe('whether a block waits for typing to pause', () => {
 			/** What the engine says of a diagram: by default, nothing ever. */
 			engine?: ((source: string) => Promise<TexResult>) | undefined;
 			debounceMs?: number | undefined;
+			/**
+			 * No preamble anywhere, so no file to look for: the processor makes and loads the block in
+			 * the run of code it is handed it in. By default it looks for `tikz-preamble.tex` first.
+			 */
+			synchronous?: boolean | undefined;
 		} = {},
 	) {
 		const clock = { now: 10_000 };
@@ -278,7 +283,7 @@ describe('whether a block waits for typing to pause', () => {
 			lookup: () => new Promise<undefined>((resolve) => reads.push(resolve)),
 		} as unknown as typeof cache;
 		const submitted: string[] = [];
-		const { deps } = processorDeps({
+		const { deps, settings } = processorDeps({
 			cache: held,
 			budgets: { ...budgetsFor(false), debounceMs: opts.debounceMs ?? 5 },
 			editing: (notePath) => edits.making(notePath),
@@ -292,6 +297,7 @@ describe('whether a block waits for typing to pause', () => {
 				release: () => undefined,
 			} as never,
 		});
+		if (opts.synchronous === true) settings.current = { ...settings.current, autoPreambleName: '' };
 		const processor = createProcessor(deps);
 		/**
 		 * Obsidian hands the processor the blocks of one section of `note.md`, in the run of code under
@@ -423,6 +429,39 @@ describe('whether a block waits for typing to pause', () => {
 		await flush();
 		await miss();
 		expect(submitted).toHaveLength(4);
+	});
+
+	/*
+	 * A `nocache` block reads no cache, and with no preamble to look for the processor makes and loads
+	 * it in the run it is handed it in: it asked whether an edit made it before that run was over, and
+	 * so before the edit Live Preview reports after the widget, and before what the note had on screen
+	 * as the edits began was noted.
+	 */
+	const NOCACHE = `%!tikz nocache\n${SOURCE}`;
+	const NOCACHE_OTHER = `%!tikz nocache\n${OTHER}`;
+
+	it('does not wait for a nocache block made again at a start either, with no preamble to look for', async () => {
+		const { edits, clock, make, submitted } = startingNote({ synchronous: true });
+		const first = make(NOCACHE, NOCACHE_OTHER);
+		await flush();
+		expect(submitted).toHaveLength(2);
+		clock.now += 50;
+		edits.changed('note.md');
+		await flush();
+		clock.now += 103;
+		first.unload();
+		make(NOCACHE, NOCACHE_OTHER);
+		await flush();
+		expect(submitted).toHaveLength(4);
+	});
+
+	it('waits for a nocache block a keystroke made in Live Preview, with no preamble to look for', async () => {
+		const { edits, make, submitted } = startingNote({ synchronous: true });
+		make(NOCACHE);
+		edits.changed('note.md');
+		await flush();
+		expect(submitted).toHaveLength(0);
+		await vi.waitFor(() => expect(submitted).toHaveLength(1));
 	});
 
 	/*

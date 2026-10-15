@@ -427,8 +427,11 @@ export class TikzBlock extends MarkdownRenderChild {
 	private async lookup(): Promise<void> {
 		let found: Awaited<ReturnType<DiagramCache['lookup']>>;
 		try {
+			// A `nocache` block reads nothing, and still asks below only once the run of code that made it
+			// is over: whether an edit made it is known by then, not before (block/edits.ts). Without a
+			// preamble to read, the processor makes and loads the block in that same run.
 			found = this.spec.options.nocache
-				? undefined
+				? await Promise.resolve(undefined)
 				: await this.deps.cache.lookup(this.spec.key, this.spec.legacySource);
 		} catch {
 			found = undefined;
