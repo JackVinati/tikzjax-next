@@ -25,6 +25,12 @@ interface OnScreen {
 	to: number | undefined;
 	/** When the last was unloaded: it is let go once the window has passed. */
 	at: number;
+	/**
+	 * Its last block to come to rest did not leave the diagram in the cache: an error card, a degraded
+	 * diagram, a `nocache` one, a button. A block of it made again misses the cache and joins no
+	 * compile, so it is not taken for one the note already showed (`Making.rested`).
+	 */
+	uncached: boolean;
 }
 
 /** What a block's cache miss is told of the edits of its note around its making (Making.by). */
@@ -52,6 +58,11 @@ export interface Making {
 	 * until the function returned is called, as the block is unloaded.
 	 */
 	shown(key: string): () => void;
+	/**
+	 * The block, loaded with this key, came to rest: on a diagram the cache now holds, or not, as on an
+	 * error card. Each time it does, for a Retry may change it.
+	 */
+	rested(key: string, cached: boolean): void;
 }
 
 /**
@@ -93,6 +104,12 @@ export interface Making {
  * does going back to a text the typing made; going back to the text the note had before it, by an
  * undo or a sync, does not wait, and is normally in the cache. A text is remembered while a block of
  * it is loaded, and for the window after the last is unloaded.
+ *
+ * Not a text whose last block came to rest without the diagram in the cache: an error card, a
+ * degraded diagram, a `nocache` one, a button. Reading view makes again every block of the section
+ * being typed in, and a section is a whole list, callout or blockquote; Live Preview makes again a
+ * callout it draws as one widget. Such a block made again would miss the cache and join no compile:
+ * exempt, it compiled at once at every keystroke beside it, where the debounce had it unloaded first.
  *
  * What reported an edit was not known, and the diagnostics could not say: a block said "waited
  * 300 ms" whichever rule made it wait. So the miss is told which edit made the block, `editor-change`
@@ -224,6 +241,10 @@ export class RecentEdits {
 					: { editing: false };
 			},
 			shown: (key) => this.show(path, key, madeIn),
+			rested: (key, cached) => {
+				const text = this.screens.get(path)?.get(key);
+				if (text !== undefined) text.uncached = !cached;
+			},
 		};
 	}
 
@@ -237,7 +258,8 @@ export class RecentEdits {
 		let keys = this.screens.get(note);
 		if (keys === undefined) this.screens.set(note, (keys = new Map<string, OnScreen>()));
 		let text = keys.get(key);
-		if (text === undefined) keys.set(key, (text = { key, loaded: 0, from, to: undefined, at: 0 }));
+		if (text === undefined)
+			keys.set(key, (text = { key, loaded: 0, from, to: undefined, at: 0, uncached: false }));
 		const shown = text;
 		shown.loaded++;
 		shown.from = Math.min(shown.from, from);
@@ -258,12 +280,14 @@ export class RecentEdits {
 	 * The texts the note at `note` had on screen as the edits that began in the run `burst` began: one
 	 * made in an earlier run, and still loaded or unloaded no earlier than that run. A block made in the
 	 * run of the first edit came with it, as Live Preview makes a keystroke's; one unloaded in it was
-	 * on screen as it came, as the edit's own update lets blocks go.
+	 * on screen as it came, as the edit's own update lets blocks go. Not a text whose last block came to
+	 * rest without the diagram in the cache: made again, it would compile at once at each edit near it.
 	 */
 	private onScreen(note: string, burst: number): ReadonlySet<string> {
 		this.forget();
 		const keys = new Set<string>();
 		for (const text of this.screens.get(note)?.values() ?? []) {
+			if (text.uncached) continue;
 			if (text.from < burst && (text.to === undefined || text.to >= burst)) keys.add(text.key);
 		}
 		return keys;

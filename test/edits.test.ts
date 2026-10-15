@@ -471,6 +471,36 @@ describe('a block whose text its note already showed', () => {
 		}
 	});
 
+	it('is not a text whose last block came to rest without the diagram in the cache, until one does with it', () => {
+		// A list or callout in a Reading view beside the editor: a diagram on an error card is made
+		// again with the text typed in beside it, at each keystroke.
+		const { clock, edits: recent, endRun } = edits(1000);
+		let shown = show(recent, KEY);
+		endRun();
+		shown.made.rested(KEY, false);
+		const again = (at: number) => {
+			clock.now = at;
+			recent.changed('note.md');
+			endRun();
+			clock.now = at + 10;
+			shown.hide();
+			shown = show(recent, KEY);
+			endRun();
+			return shown.made.by(KEY);
+		};
+		expect(again(5000)).toEqual({ editing: true, edit: { source: 'editor', at: 'before', ms: 10 } });
+		// Still, though a block of it was made again since and has not come to rest.
+		expect(again(5150).editing).toBe(true);
+		// A Retry that draws it, cached.
+		shown.made.rested(KEY, true);
+		expect(again(7000).editing).toBe(false);
+		// Another note's block of the same text says nothing of this note's.
+		const other = show(recent, KEY, 'other.md');
+		endRun();
+		other.made.rested(KEY, false);
+		expect(again(9000).editing).toBe(false);
+	});
+
 	it('takes an unload said twice for one', () => {
 		const { clock, edits: recent, endRun } = edits(1000);
 		const one = show(recent, KEY);

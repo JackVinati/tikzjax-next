@@ -52,8 +52,9 @@ export interface ProcessorDeps {
 	/**
 	 * Asked as a block of the note at this path is made (block/edits.ts RecentEdits.making): its cache
 	 * miss asks whether the block was made by typing in the note, and so waits for the typing to pause
-	 * if it is not cached, and which edit that was; and its load and unload say when its text is on
-	 * screen in the note. Omitted: no note ever is typed in.
+	 * if it is not cached, and which edit that was; its load and unload say when its text is on screen
+	 * in the note, and its coming to rest whether the cache holds its diagram. Omitted: no note ever
+	 * is typed in.
 	 */
 	editing?: ((notePath: string) => Making) | undefined;
 	/** Start the engine ahead of the first job (BlockDeps.startEngine). Omitted: it starts with the job. */
@@ -240,6 +241,7 @@ function attach(
 			debounceMs: deps.budgets.debounceMs,
 			editing: editing === undefined ? undefined : () => editing.by(spec.key),
 			shown: editing === undefined ? undefined : () => editing.shown(spec.key),
+			rested: editing === undefined ? undefined : (cached) => editing.rested(spec.key, cached),
 			startEngine: deps.startEngine,
 			place: order,
 			now: deps.now,

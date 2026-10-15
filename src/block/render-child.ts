@@ -125,6 +125,11 @@ export interface BlockDeps {
 	 */
 	shown?: (() => () => void) | undefined;
 	/**
+	 * The block came to rest, on a diagram the cache now holds or not: what a block made again of it will
+	 * find (block/edits.ts Making.rested). Omitted: nothing is told.
+	 */
+	rested?: ((cached: boolean) => void) | undefined;
+	/**
 	 * Start the engine, if none is running or starting, without waiting for it. Called when the
 	 * cache misses, so that the engine's start runs while the block waits for the viewport gate and
 	 * its turn in the queue rather than after them (internal/DECISIONS.md D23), with the block's own
@@ -797,6 +802,13 @@ export class TikzBlock extends MarkdownRenderChild {
 
 		if (outcome === null) return;
 		this.rested = true;
+		// What a block of this diagram made again will find: an error card, a degraded diagram, one never
+		// cached or a button leave nothing in the cache, and its edits are typing (block/edits.ts).
+		if (outcome.state !== 'cancelled')
+			this.deps.rested?.(
+				outcome.state === 'cached' ||
+					(outcome.state === 'ok' && phase === 'MOUNTED' && !this.spec.options.nocache),
+			);
 		report?.(outcome);
 	}
 

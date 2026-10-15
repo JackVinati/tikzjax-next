@@ -180,6 +180,7 @@ describe('whether a block waits for typing to pause', () => {
 						return { editing: false };
 					},
 					shown: () => () => undefined,
+					rested: () => undefined,
 				};
 			},
 		});
@@ -198,6 +199,7 @@ describe('whether a block waits for typing to pause', () => {
 					events.push(`shown ${notePath} ${key}`);
 					return () => events.push(`unloaded ${key}`);
 				},
+				rested: () => undefined,
 			}),
 		});
 		const { spec, parent } = await processBlock(deps, seen, SOURCE, { path: 'note.md' });
@@ -205,6 +207,50 @@ describe('whether a block waits for typing to pause', () => {
 		parent.unload();
 		parent.unload();
 		expect(events).toEqual([`shown note.md ${spec.key}`, `unloaded ${spec.key}`]);
+	});
+
+	/*
+	 * A block made again of a diagram the cache does not hold joins no compile: that its note showed
+	 * it before an edit does not make it a block made again unchanged (block/edits.ts).
+	 */
+	it('is told whether the cache holds the diagram each time the block comes to rest', async () => {
+		const rests: [string, boolean][] = [];
+		const SVG = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>';
+		const answers: Record<string, () => Promise<TexResult>> = {
+			drawn: () => Promise.resolve({ svg: SVG, log: [], durationMs: 1 }),
+			failed: () => Promise.reject(new TexError('tex-error', [], 'Undefined control sequence')),
+		};
+		const { deps, seen, l1 } = processorDeps({
+			editing: () => ({
+				by: () => ({ editing: false }),
+				shown: () => () => undefined,
+				rested: (key, cached) => rests.push([key, cached]),
+			}),
+			queue: {
+				submit: (_key: string, job: TexJobSpec) =>
+					(
+						answers[/% (\w+)/.exec(job.source)?.[1] ?? ''] ?? (() => new Promise(() => undefined))
+					)(),
+				release: () => undefined,
+			} as never,
+			observe: (_el, onChange) => onChange(true),
+		});
+		for (const { source, cached } of [
+			{ source: '\\draw (0,0) -- (1,1); % drawn', cached: true },
+			{ source: '\\draw (0,0) -- (2,1); % failed', cached: false },
+			{ source: '%!tikz nocache\n\\draw (0,0) -- (3,1); % drawn', cached: false },
+			{ source: '%!tikz lazy=manual\n\\draw (0,0) -- (4,1); % none', cached: false },
+		]) {
+			rests.length = 0;
+			const { spec } = await processBlock(deps, seen, source, { path: 'note.md' });
+			await vi.waitFor(() => expect(rests.at(-1), source).toEqual([spec.key, cached]));
+		}
+		// Found in the cache.
+		const probe = await processBlock(deps, seen, SOURCE, { load: false });
+		l1.set(probe.spec.key, artifact());
+		rests.length = 0;
+		const hit = await processBlock(deps, seen, SOURCE, { path: 'note.md' });
+		expect(rests).toEqual([[hit.spec.key, true]]);
 	});
 
 	/*
@@ -216,7 +262,13 @@ describe('whether a block waits for typing to pause', () => {
 	 * after the `modify`. Here with the plugin's own RecentEdits, and a cache read held until the
 	 * test lets it miss, as IndexedDB answers later.
 	 */
-	function startingNote() {
+	function startingNote(
+		opts: {
+			/** What the engine says of a diagram: by default, nothing ever. */
+			engine?: ((source: string) => Promise<TexResult>) | undefined;
+			debounceMs?: number | undefined;
+		} = {},
+	) {
 		const clock = { now: 10_000 };
 		const edits = new RecentEdits(1000, () => clock.now);
 		const reads: ((found: undefined) => void)[] = [];
@@ -228,24 +280,24 @@ describe('whether a block waits for typing to pause', () => {
 		const submitted: string[] = [];
 		const { deps } = processorDeps({
 			cache: held,
-			budgets: { ...budgetsFor(false), debounceMs: 5 },
+			budgets: { ...budgetsFor(false), debounceMs: opts.debounceMs ?? 5 },
 			editing: (notePath) => edits.making(notePath),
 			// In view at once: what decides the wait is the debounce alone.
 			observe: (_el, onChange) => onChange(true),
 			queue: {
-				submit: (key: string) => {
+				submit: (key: string, job: TexJobSpec) => {
 					submitted.push(key);
-					return new Promise(() => undefined);
+					return opts.engine?.(job.source) ?? new Promise(() => undefined);
 				},
 				release: () => undefined,
 			} as never,
 		});
 		const processor = createProcessor(deps);
 		/**
-		 * Obsidian hands the processor a block of `note.md`, in the run of code under way. Its view
-		 * unloads it with the parent this returns.
+		 * Obsidian hands the processor the blocks of one section of `note.md`, in the run of code under
+		 * way. Its view unloads them with the parent this returns.
 		 */
-		const make = (source: string) => {
+		const make = (...sources: string[]) => {
 			const parent = new Component();
 			parent.load();
 			const ctx = {
@@ -253,7 +305,7 @@ describe('whether a block waits for typing to pause', () => {
 				addChild: (child: Component) => parent.addChild(child),
 				getSectionInfo: () => null,
 			} as unknown as MarkdownPostProcessorContext;
-			void processor(source, document.body.createDiv(), ctx);
+			for (const source of sources) void processor(source, document.body.createDiv(), ctx);
 			return parent;
 		};
 		/** The cache reads under way miss. */
@@ -415,6 +467,59 @@ describe('whether a block waits for typing to pause', () => {
 			expect(submitted).toHaveLength(1);
 			await vi.waitFor(() => expect(submitted).toHaveLength(2));
 		});
+	}
+
+	/*
+	 * Reading view makes again every block of the section being typed in, and a section is a whole
+	 * list, callout or blockquote; Live Preview makes again a callout it draws as one widget. A diagram
+	 * there that the cache does not hold, one on an error card or one never cached, joins no compile
+	 * when it is made again: taken for one the note already showed, it was compiled at every keystroke
+	 * beside it. It waits, as in beta.6, and the next keystroke lets it go.
+	 */
+	const ERRORED = '\\begin{tikzpicture}\\draw (0,0) node {\\undefinedmacro};\\end{tikzpicture}';
+	const NEVER_CACHED = `%!tikz nocache\n${OTHER}`;
+	const DRAWN = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>';
+	const typedAt = (i: number) => `\\begin{tikzpicture}\\draw (0,0) circle (${i + 3});\\end{tikzpicture}`;
+	for (const beside of [
+		{ name: 'an error card', source: ERRORED },
+		{ name: 'a diagram never cached', source: NEVER_CACHED },
+	]) {
+		for (const view of typing) {
+			it(`waits again for ${beside.name} in the section typed in: ${view.name}`, async () => {
+				const { edits, clock, make, miss, submitted } = startingNote({
+					engine: (source) =>
+						source.includes('undefinedmacro')
+							? Promise.reject(new TexError('tex-error', [], 'Undefined control sequence'))
+							: source.includes('rectangle')
+								? Promise.resolve({ svg: DRAWN, log: [], durationMs: 1 })
+								: new Promise(() => undefined),
+					// Longer than the test: a block that waits is never asked for.
+					debounceMs: 60_000,
+				});
+				let section = make(beside.source, typedAt(0));
+				await flush();
+				await miss();
+				await flush();
+				expect(submitted).toHaveLength(2);
+				const asked = submitted[0];
+				clock.now += 5000;
+				for (let i = 1; i <= 5; i++) {
+					clock.now += 150;
+					view.edit(edits);
+					await flush();
+					clock.now += 10;
+					section.unload();
+					section = make(beside.source, typedAt(i));
+					view.remade(edits);
+					await flush();
+					await miss();
+				}
+				// Not asked for again while typing: it was, once a keystroke, before this.
+				expect(submitted.filter((key) => key === asked)).toHaveLength(1);
+				expect(submitted).toHaveLength(2);
+				section.unload();
+			});
+		}
 	}
 });
 

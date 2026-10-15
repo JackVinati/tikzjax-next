@@ -3898,6 +3898,18 @@ An edit does not count for a block whose text its note had on screen as the edit
   first edit, and loaded still or unloaded no earlier than that edit's run. A block made in the run of
   the first edit came with it, as Live Preview makes a keystroke's widget and then reports the edit;
   one unloaded in that run was on screen as it came, as the reset's own update lets blocks go.
+- **Not a diagram the cache does not hold.** A text whose last block came to rest without leaving
+  its diagram in the cache — on an error card, as a degraded diagram, as a `nocache` one, on a
+  button — is not taken for one the note showed, until a block of it comes to rest with its diagram
+  cached (`Making.rested`). Made again, such a block joins no compile and finds nothing cached. A
+  section of Reading view is a whole top-level block, a list, a callout or a blockquote, and
+  `parseFinish` keeps a section only while its whole text is unchanged (read in the bundle), so
+  typing anywhere in a list makes every diagram in it again; Live Preview makes again a callout it
+  draws as one widget whenever its text changes. Exempt, a diagram on an error card there was
+  compiled at once at every keystroke beside it, one compile a keystroke on the only slot a phone
+  has, where beta.6 had it wait and the next keystroke let it go (found in review, with the real
+  processor, block and `RecentEdits`: five keystrokes, five compiles; now none, as in beta.6). The
+  blocks a start makes again had not come to rest: their compiles were under way.
 - **When it is asked.** The texts the note had on screen as the burst began are noted when the run
   that made the block is over, and the miss asks whether its key is one of them: at the miss, which
   comes after an IndexedDB read, a text unloaded in that run might no longer be remembered.
@@ -3919,14 +3931,16 @@ How each place a diagram is drawn comes out, a block that misses the cache:
 | Undo, or typing back to a text the burst made | waits | waits |
 | Undo, or a sync, back to the text shown before the burst | waits | no wait; normally cached |
 | Another plugin making the widgets again within the second after a real edit | waits | no wait for the texts that did not change |
+| Typing beside a diagram on an error card, or never cached, in the same list, callout or blockquote of a Reading view or embed, or callout of a second pane | waits, and the next keystroke lets it go | waits, as in beta.6 |
+| A start where a diagram had already come to rest on an error card before it was made again | waits 300 ms | waits 300 ms |
 | A block first shown within the second after the reset, as by scrolling right after opening | waits | waits (not covered) |
 | An export, `lazy=off`, "Render all diagrams in this note", a button | unchanged | unchanged |
 
 A block made again whose text is not cached is one whose compile is under way, which it joins
-(queue dedup), or one that failed, since errors are not cached: that one compiles at once at each
-return to the text the note showed before the burst. Reading view and an embed keep a section whose
-text did not change (`parseFinish` reuses sections by their text, read in the bundle), so typing
-elsewhere in the note does not make such a block again.
+(queue dedup), or one whose last block came to rest without its diagram in the cache, which waits as
+in D39. Reading view and an embed keep a section whose text did not change (`parseFinish` reuses
+sections by their text, read in the bundle), so typing in another section of the note does not make
+a block again; typing in its own section does, and a section is a whole list, callout or blockquote.
 
 **What the diagnostics now say.** The waited step of a block an edit did not make wait, as its note
 already showed it: "waited 0 ms; the note was edited 103 ms before the block was made, which did not
@@ -3937,18 +3951,23 @@ count: the note already showed this diagram", or "… as the block was made, whi
 the second after the reset, as by scrolling right after a note opens, waits the debounce. Telling
 such an edit apart needs the editor's own update, comparing the documents before and after it,
 through an editor extension and Obsidian's `editorInfoField`, which `editor-change` does not carry;
-not done. Nor is it measured on the desktop: whether the first diagrams after a start now say
-"waited 0 ms … which did not count" is for the maintainer's next start.
+not done. A diagram that came to rest on an error card before a start made it again waits too, as
+it did in beta.6. Nor is it measured on the desktop: whether the first diagrams after a start now
+say "waited 0 ms … which did not count" is for the maintainer's next start.
 
 Tests: `test/edits.test.ts` (made again with the old block unloaded in the run that makes the new
 one, in the edit's own run, or after the new one; made before the edit and loaded after it; a text
 first shown once the burst began, through four keystrokes beside the editor, back to a text they made
 and back to the one before them; a block made in the run of the burst's first edit; the burst from
 its first edit, and a new one after a pause; an edit that named no note; any view of the note; the
-note alone; forgotten a window after the last unload; an unload said twice), `test/processor.test.ts`
+note alone; forgotten a window after the last unload; an unload said twice; not a text whose last
+block came to rest without its diagram cached, until one comes to rest with it), `test/processor.test.ts`
 (both remakes at a start, through the processor, the block and the plugin's own `RecentEdits`, in
 the order of things read in the bundle, and typing still waiting beside the editor or in an embed, in
-a second pane in Live Preview and for a sync; the block's load and unload told), `test/report.test.ts`.
+a second pane in Live Preview and for a sync; a diagram on an error card or never cached, in the
+section typed in, not asked for while typing, in each of those three; the block's load, unload and
+rest told, and whether the cache holds its diagram: drawn, on a card, `nocache`, a button, a cache
+hit), `test/report.test.ts`.
 
 ### The iPhone drawing the small diagram at the top last
 
