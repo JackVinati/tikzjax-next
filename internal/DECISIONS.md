@@ -3914,9 +3914,12 @@ An edit does not count for a block whose text its note had on screen as the edit
   that made the block is over, and the miss asks whether its key is one of them: at the miss, which
   comes after an IndexedDB read, a text unloaded in that run might no longer be remembered.
 - **Memory.** One entry per text a note has on screen, or had within the window, and per note; the
-  entries of texts no longer loaded go a window after the last unload. A text shown again within it
-  keeps the run its first block was made in, which errs towards not waiting only for a text the note
-  had a moment before.
+  entries of texts no longer loaded go a window after the last unload. A text shown again by a block
+  made before the last one was unloaded keeps the run its first block was made in. One shown again
+  after a gap keeps the time it was on screen before apart, the last such time only, so that a burst
+  begun in the gap does not find it: the first build took the two times for one, and a text a Reading
+  view let go before a pause, then shown again after an undo, was said to be on screen as the undo
+  came (found in review).
 
 How each place a diagram is drawn comes out, a block that misses the cache:
 
@@ -3960,8 +3963,9 @@ one, in the edit's own run, or after the new one; made before the edit and loade
 first shown once the burst began, through four keystrokes beside the editor, back to a text they made
 and back to the one before them; a block made in the run of the burst's first edit; the burst from
 its first edit, and a new one after a pause; an edit that named no note; any view of the note; the
-note alone; forgotten a window after the last unload; an unload said twice; not a text whose last
-block came to rest without its diagram cached, until one comes to rest with it), `test/processor.test.ts`
+note alone; forgotten a window after the last unload; an unload said twice; not a text let go of as
+the edits began and shown again after; not a text whose last block came to rest without its diagram
+cached, until one comes to rest with it), `test/processor.test.ts`
 (both remakes at a start, through the processor, the block and the plugin's own `RecentEdits`, in
 the order of things read in the bundle, and typing still waiting beside the editor or in an embed, in
 a second pane in Live Preview and for a sync; a diagram on an error card or never cached, in the

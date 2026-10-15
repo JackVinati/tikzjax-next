@@ -23,6 +23,12 @@ interface OnScreen {
 	from: number;
 	/** Undefined while one of its blocks is loaded. */
 	to: number | undefined;
+	/**
+	 * When it was on screen before, if it was shown again after a gap: kept apart, so that the gap does
+	 * not count as on screen. Only the last such time; one before it is let go, erring towards the
+	 * debounce.
+	 */
+	earlier: { from: number; to: number } | undefined;
 	/** When the last was unloaded: it is let go once the window has passed. */
 	at: number;
 	/**
@@ -250,8 +256,10 @@ export class RecentEdits {
 
 	/**
 	 * A block of `key`, made in the run `from`, is loaded in the note at `note`, until the function
-	 * returned is called. A text shown again keeps the run its first block was made in: in the window
-	 * after it was last unloaded, that errs towards not waiting only for a text the note had before.
+	 * returned is called. A text shown again before its last block was unloaded, or made by then, keeps
+	 * the run its first block was made in; one shown again after a gap begins anew, and the time it was
+	 * on screen before is kept apart (OnScreen.earlier), so that a burst begun in the gap does not find
+	 * it there.
 	 */
 	private show(note: string, key: string, from: number): () => void {
 		this.forget();
@@ -259,7 +267,14 @@ export class RecentEdits {
 		if (keys === undefined) this.screens.set(note, (keys = new Map<string, OnScreen>()));
 		let text = keys.get(key);
 		if (text === undefined)
-			keys.set(key, (text = { key, loaded: 0, from, to: undefined, at: 0, uncached: false }));
+			keys.set(
+				key,
+				(text = { key, loaded: 0, from, to: undefined, earlier: undefined, at: 0, uncached: false }),
+			);
+		else if (text.to !== undefined && from > text.to) {
+			text.earlier = { from: text.from, to: text.to };
+			text.from = from;
+		}
 		const shown = text;
 		shown.loaded++;
 		shown.from = Math.min(shown.from, from);
@@ -286,9 +301,15 @@ export class RecentEdits {
 	private onScreen(note: string, burst: number): ReadonlySet<string> {
 		this.forget();
 		const keys = new Set<string>();
+		const covers = (from: number, to: number | undefined) =>
+			from < burst && (to === undefined || to >= burst);
 		for (const text of this.screens.get(note)?.values() ?? []) {
 			if (text.uncached) continue;
-			if (text.from < burst && (text.to === undefined || text.to >= burst)) keys.add(text.key);
+			if (
+				covers(text.from, text.to) ||
+				(text.earlier !== undefined && covers(text.earlier.from, text.earlier.to))
+			)
+				keys.add(text.key);
 		}
 		return keys;
 	}

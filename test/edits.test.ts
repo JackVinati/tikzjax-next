@@ -471,6 +471,34 @@ describe('a block whose text its note already showed', () => {
 		}
 	});
 
+	it('is not a text the note had let go of as the edits began, though it showed it before and after', () => {
+		// A Reading view beside the editor, still parsing: it lets the old text go 200 ms after a
+		// keystroke. A pause, then an undo back to that text, which is shown again 10 ms after it.
+		const { clock, edits: recent, endRun } = edits(1000);
+		const x = show(recent, 'X');
+		endRun();
+		clock.now = 5000;
+		recent.changed('note.md');
+		endRun();
+		clock.now = 5200;
+		x.hide();
+		const typed = show(recent, 'Xa');
+		endRun();
+		clock.now = 6100;
+		recent.changed('note.md');
+		endRun();
+		clock.now = 6110;
+		typed.hide();
+		const back = show(recent, 'X');
+		endRun();
+		// As the undo came the note showed Xa: X had gone 900 ms before. The time X was on screen
+		// before still counts for edits begun then: going back to `k0`, above.
+		expect(back.made.by('X')).toEqual({
+			editing: true,
+			edit: { source: 'editor', at: 'before', ms: 10 },
+		});
+	});
+
 	it('is not a text whose last block came to rest without the diagram in the cache, until one does with it', () => {
 		// A list or callout in a Reading view beside the editor: a diagram on an error card is made
 		// again with the text typed in beside it, at each keystroke.
