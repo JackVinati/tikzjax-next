@@ -16,7 +16,8 @@ import { buildWorker } from '../scripts/engine-assets.mjs';
  * reached storage: the worker handed a run over only once it had had nothing to do for 100 ms, which
  * in a note is only at its end, and the engine was stopped when Obsidian went to the background,
  * with what was waiting. So a run is now written out between diagrams from the reply on and gzipped
- * on a thread of its own, and the host asks the worker to finish before it stops it.
+ * on a thread of its own, and the host asks the worker to finish before it stops it; and a diagram
+ * that resumes from a run put back from storage says so, also when an earlier diagram put it back.
  *
  * Asked of the worker that ships, built by the build's own function and run in this realm with
  * `self` shimmed, as scripts/verify-snapshot.mjs runs it, two of them, on the committed engine.
@@ -30,6 +31,7 @@ let second: (request: WorkerRequest) => void;
 const SNAPSHOTS = 12 * 1024 * 1024;
 const SIUNITX = { texPackages: { siunitx: '' }, captureLog: true };
 const PGFPLOTS = { texPackages: { pgfplots: '' }, captureLog: true };
+const PLAIN = { captureLog: true };
 const DIAGRAM = (n: number) => `\\begin{tikzpicture}\\draw (0,0) -- (${n},1);\\end{tikzpicture}`;
 
 async function waitFor<T>(find: () => T | undefined, ms = 60_000): Promise<T> {
@@ -123,6 +125,23 @@ describe('the runs a worker hands over', () => {
 	});
 });
 
+describe('a diagram that resumes from a stored run', () => {
+	it('says the run came from storage, both when it is put back for it and when an earlier one put it back', async () => {
+		const saved = await render(first, DIAGRAM(3), PLAIN, { persist: true, epoch: 0 });
+		const message = await waitFor(() => handed(saved));
+		// To the second worker, which holds none, as after the engine's stop.
+		const restored = await render(second, DIAGRAM(4), PLAIN, { stored: message.run });
+		expect(restored.timings).toMatchObject({ resumed: true, restored: true, fromStore: true });
+		const after = await render(second, DIAGRAM(5), PLAIN);
+		expect(after.timings).toMatchObject({ resumed: true, fromStore: true });
+		expect(after.timings?.restored).toBeUndefined();
+		// The first worker's own, saved there, is a saved preamble.
+		const own = await render(first, DIAGRAM(6), PLAIN);
+		expect(own.timings?.resumed).toBe(true);
+		expect(own.timings?.fromStore).toBeUndefined();
+	}, 120_000);
+});
+
 /**
  * A worker as the engine's worker starts one, run in this realm on the helper's own source, its
  * messages a task apart; `fail` makes it fail to start, as where a worker cannot start one of its own.
@@ -183,7 +202,7 @@ describe('the gzip of a run handed over', () => {
 			expect(await gunzip(message.run.data)).toBe(message.run.rawBytes);
 			// And sent back to another worker, it is put back and started from.
 			const back = await render(second, DIAGRAM(8), SIUNITX, { stored: message.run });
-			expect(back.timings).toMatchObject({ restored: true });
+			expect(back.timings).toMatchObject({ restored: true, fromStore: true });
 		} finally {
 			(globalThis as { Worker?: unknown }).Worker = real;
 		}

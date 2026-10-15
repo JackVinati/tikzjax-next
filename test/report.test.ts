@@ -283,6 +283,56 @@ describe('the text the diagnostics view copies', () => {
 		]);
 	});
 
+	/*
+	 * The maintainer's iPhone said of one diagram "TeX 68 ms ... seen to drawn 10 ms": a block that
+	 * joined a compile already under way, for a block a re-render replaced, was shown that compile's
+	 * times as its own. And a diagram that resumed from a run the engine had put back from storage
+	 * for an earlier diagram said it resumed from a saved preamble, as if this engine had saved it.
+	 */
+	it('says a render joined a compile already running, with its TeX as the compile’s, and none of its other steps', () => {
+		const joined = timingSteps({
+			waitedMs: 0,
+			queueMs: 0,
+			resetMs: 4,
+			newMemory: 0,
+			texMs: 68,
+			passes: 1,
+			saveMs: 15,
+			svgMs: 3,
+			postMs: 1,
+			mountMs: 3,
+			totalMs: 10,
+			joined: true,
+		});
+		expect(joined).toEqual([
+			'waited 0 ms',
+			'joined a compile already running, whose TeX took 68 ms',
+			'SVG pipeline 1 ms',
+			'drawing 3 ms',
+			'seen to drawn 10 ms',
+		]);
+		expect(timingSteps({ queueMs: 0, postMs: 1, joined: true })).toEqual([
+			'joined a compile already running',
+			'SVG pipeline 1 ms',
+		]);
+	});
+
+	it('says a render resumed from a stored preamble when the engine had put it back for an earlier one', () => {
+		const steps = (timings: Partial<CompileTimings>) =>
+			timingSteps({ queueMs: 1, postMs: 2, texMs: 9, passes: 1, ...timings });
+		expect(steps({ resumed: true, fromStore: true })).toEqual([
+			'queue 1 ms',
+			'TeX 9 ms',
+			'resumed from a stored preamble put back for an earlier diagram',
+			'SVG pipeline 2 ms',
+		]);
+		// Put back for this one, it says what that took; saved by this engine, that it was saved.
+		expect(steps({ resumed: true, restored: true, fromStore: true, restoreMs: 5 })).toContain(
+			'resumed from a stored preamble (put back 5 ms)',
+		);
+		expect(steps({ resumed: true })).toContain('resumed from a saved preamble');
+	});
+
 	it('says what is stored of saved preambles, and what storage refused', () => {
 		const line = (preambles: DiagnosticsSnapshot['preambles']) =>
 			diagnosticsText(snapshot({ preambles }))

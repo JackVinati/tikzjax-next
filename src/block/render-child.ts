@@ -439,6 +439,10 @@ export class TikzBlock extends MarkdownRenderChild {
 		// How long the job waits for the queue to start it, behind the diagrams ahead of it.
 		const asked = this.deps.now();
 		let started: number | undefined;
+		// The compile was under way for another block of the same diagram before this one asked: its
+		// times are that compile's, which began before this block was seen, as a block re-created by a
+		// re-render, or the same diagram in another pane, finds it.
+		let joined = false;
 		try {
 			const result = await this.deps.queue.submit(this.spec.key, this.spec, band, this.spec.timeoutMs, {
 				owner: this,
@@ -447,7 +451,8 @@ export class TikzBlock extends MarkdownRenderChild {
 				// cancelled), and those arrive as `rejected`, which SCHEDULING handles and
 				// COMPILING does not. So the queue says when — to this block, not to whichever
 				// block submitted the key first.
-				onStart: () => {
+				onStart: (running) => {
+					if (started === undefined && running) joined = true;
 					started ??= this.deps.now();
 					this.dispatch({ type: 'slot' });
 				},
@@ -486,6 +491,7 @@ export class TikzBlock extends MarkdownRenderChild {
 						: {}),
 					queueMs: (started ?? asked) - asked,
 					postMs: 0,
+					...(joined ? { joined: true } : {}),
 				},
 			};
 			this.dispatch({ type: 'ok' });

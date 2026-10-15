@@ -1033,6 +1033,7 @@ const runPass = async (job: string, spent: RenderTimings, plan?: PassPlan): Prom
 		// same up to where TeX had read it: what the run was saved under.
 		library.restoreHostState(plan.run.host, { [`${job}.tex`]: plan.input });
 		spent.resumed = true;
+		if (plan.run.fromStore === true) spent.fromStore = true;
 	} else library.setInput(`${job}.tex\n\\end\n`);
 
 	// The instance's exports, once it has them, for the save's reading of the engine's marks.
@@ -1137,6 +1138,7 @@ const rounded = (spent: RenderTimings): RenderTimings => ({
 	...(spent.resumed === true ? { resumed: true } : {}),
 	...(spent.restored === true ? { restored: true } : {}),
 	...(spent.restoreMs !== undefined ? { restoreMs: Math.round(spent.restoreMs) } : {}),
+	...(spent.fromStore === true ? { fromStore: true } : {}),
 	...(spent.saveMs !== undefined ? { saveMs: Math.round(spent.saveMs) } : {}),
 	...(spent.saveNotKept === true ? { saveNotKept: true } : {}),
 	...(spent.saveFailed === true ? { saveFailed: true } : {}),
@@ -1229,6 +1231,7 @@ async function render(
 			else {
 				storedOutcome = 'used';
 				spent.restored = true;
+				run.fromStore = true;
 				saved.set(run);
 				resumable = saved.find(text, logging) ?? run;
 			}

@@ -123,6 +123,20 @@ export const STRINGS = {
 	/** The diagram's TeX started from a run an earlier diagram with the same preamble saved. */
 	timingResumed: 'resumed from a saved preamble',
 	/**
+	 * The diagram's TeX started from a run kept in storage, which the engine had put back for an
+	 * earlier diagram with the same preamble and kept.
+	 */
+	timingResumedStored: 'resumed from a stored preamble put back for an earlier diagram',
+	/**
+	 * The block joined a compile of the same diagram already under way, for a block a re-render
+	 * replaced or the same diagram in another pane: that compile's TeX, which began before this block
+	 * was seen, and not its own.
+	 */
+	timingJoined: (texMs: number | undefined) =>
+		texMs === undefined
+			? 'joined a compile already running'
+			: `joined a compile already running, whose TeX took ${texMs} ms`,
+	/**
 	 * The same, from a run kept in storage across the engine's stops (cache/runs.ts, D36), read there
 	 * and put back in the engine in this long.
 	 */

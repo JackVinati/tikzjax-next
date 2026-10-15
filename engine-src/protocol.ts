@@ -272,6 +272,11 @@ export interface RenderTimings {
 	restored?: boolean | undefined;
 	/** What putting back a run the host sent took, whether or not the render could start from it. */
 	restoreMs?: number | undefined;
+	/**
+	 * The run it resumed from came from storage (`restored`, or put back for an earlier diagram of
+	 * this worker and kept), rather than saved by a diagram in this worker.
+	 */
+	fromStore?: boolean | undefined;
 	/** The first pass was saved for later diagrams with the same preamble, which took this long. */
 	saveMs?: number | undefined;
 	/**

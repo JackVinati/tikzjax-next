@@ -340,17 +340,20 @@ describe('start notification is per owner', () => {
 		await tick();
 
 		const started: string[] = [];
-		track(h.queue.submit('k', { id: 'k' }, 1, 1000, { owner: 'a', onStart: () => started.push('a') }));
-		track(h.queue.submit('k', { id: 'k' }, 2, 1000, { owner: 'b', onStart: () => started.push('b') }));
+		const told = (who: string) => (joined: boolean) => started.push(joined ? `${who} joined` : who);
+		track(h.queue.submit('k', { id: 'k' }, 1, 1000, { owner: 'a', onStart: told('a') }));
+		track(h.queue.submit('k', { id: 'k' }, 2, 1000, { owner: 'b', onStart: told('b') }));
 		expect(started).toEqual([]);
 
 		h.runs.finish('blocker');
 		await tick();
+		// Both waited for the start, the second as much as the first: neither joined a job under way.
 		expect(started).toEqual(['a', 'b']);
 
-		// Joining a job that is already running: told at once, not never.
-		track(h.queue.submit('k', { id: 'k' }, 1, 1000, { owner: 'c', onStart: () => started.push('c') }));
-		expect(started).toEqual(['a', 'b', 'c']);
+		// Joining a job that is already running: told at once, not never, and that it joined one, whose
+		// times began before it asked (the diagnostics view says so).
+		track(h.queue.submit('k', { id: 'k' }, 1, 1000, { owner: 'c', onStart: told('c') }));
+		expect(started).toEqual(['a', 'b', 'c joined']);
 		expect(h.runs.countOf('k')).toBe(1);
 	});
 

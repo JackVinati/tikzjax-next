@@ -77,9 +77,9 @@ export function isQueueError(error: unknown, kind?: QueueRejectionKind): error i
  * Tell one caller its job started. A notification is the caller's own business: one that throws
  * must not fail a job other callers share, nor leave the queue's bookkeeping half-done.
  */
-function notify(onStart: (() => void) | undefined): void {
+function notify(onStart: ((joined: boolean) => void) | undefined, joined: boolean): void {
 	try {
-		onStart?.();
+		onStart?.(joined);
 	} catch {
 		// Deliberately swallowed; see above.
 	}
@@ -134,14 +134,16 @@ export interface SubmitOptions {
 	resumed?: boolean | undefined;
 
 	/**
-	 * Called once when the job this caller is waiting for starts — at once, if it already has.
+	 * Called once when the job this caller is waiting for starts — at once, if it already has, with
+	 * `joined` true: the caller then shares a compile that was under way before it asked, whose times
+	 * are that compile's and not its own (the diagnostics view says so).
 	 *
 	 * Per caller, not per job, because dedup gives every caller of a key the FIRST caller's job. The
 	 * notification used to ride on that job object, so only the first caller ever heard; a second
 	 * block on the same key waited in SCHEDULING for a word that never came, and never settled. A
 	 * caller that releases before the start is not told.
 	 */
-	onStart?: (() => void) | undefined;
+	onStart?: ((joined: boolean) => void) | undefined;
 }
 
 export interface RenderQueueOptions<J, T> {
@@ -184,7 +186,7 @@ interface Entry<J, T> {
 	 *
 	 * Each owner maps to its own start notification (SubmitOptions.onStart).
 	 */
-	owners: Map<unknown, (() => void) | undefined>;
+	owners: Map<unknown, ((joined: boolean) => void) | undefined>;
 	/** Some caller submitted it `uncapped` or `resumed`: the depth cap neither evicts it nor counts it. */
 	uncapped: boolean;
 	started: boolean;
@@ -332,7 +334,7 @@ export class RenderQueue<J, T> {
 		if (existing !== undefined) {
 			// The same diagram in two panes, or twice in one note: one compile, two resolutions.
 			existing.owners.set(owner, opts?.onStart);
-			if (existing.started) notify(opts?.onStart);
+			if (existing.started) notify(opts?.onStart, true);
 			// A block queued as a prefetch and then scrolled into view must not wait out the rest of
 			// the prefetch band, so the shared job takes the most urgent caller's priority and the
 			// most generous caller's timeout (export's 30 s must not be cut to a visible block's
@@ -487,7 +489,7 @@ export class RenderQueue<J, T> {
 		};
 
 		try {
-			for (const onStart of entry.owners.values()) notify(onStart);
+			for (const onStart of entry.owners.values()) notify(onStart, false);
 
 			if (this.startupMs === undefined) {
 				running = true;

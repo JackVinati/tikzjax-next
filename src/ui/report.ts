@@ -76,35 +76,50 @@ export interface DiagnosticsSnapshot {
 /**
  * Where a compile's time went, a step to an entry, in the order the steps happen: seen and waiting
  * to be asked for, behind other diagrams, waiting for the engine to start, setting up TeX's memory
- * (its own, reset, or a new one), TeX, and whether it resumed from a saved preamble or saved its
- * own, and in how long, DVI to SVG, the SVG pipeline, drawing it in the note, and the whole of it. A
- * step nobody timed is left out.
+ * (its own, reset, or a new one), TeX, and whether it resumed from a saved preamble or a stored one,
+ * or saved its own, and in how long, DVI to SVG, the SVG pipeline, drawing it in the note, and the
+ * whole of it. A step nobody timed is left out.
+ *
+ * A block that joined a compile of the same diagram already under way, for a block a re-render
+ * replaced or the same diagram in another pane, says so, with that compile's TeX as the compile's,
+ * and none of its other steps: they began before the block was seen, and its "seen to drawn" came out
+ * shorter than the TeX inside it.
  */
 export function timingSteps(timings: CompileTimings): string[] {
+	const engine =
+		timings.joined === true
+			? [STRINGS.timingJoined(timings.texMs)]
+			: [
+					STRINGS.timingQueue(timings.queueMs),
+					timings.startMs === undefined ? null : STRINGS.timingStart(timings.startMs),
+					timings.resetMs === undefined
+						? null
+						: (timings.newMemory ?? 0) > 0
+							? STRINGS.timingNewMemory(timings.resetMs)
+							: STRINGS.timingReset(timings.resetMs),
+					timings.texMs === undefined
+						? null
+						: STRINGS.timingTex(timings.texMs, timings.passes ?? 1),
+					timings.resumed !== true
+						? timings.restoreMs === undefined
+							? null
+							: STRINGS.timingRestoreFailed(timings.restoreMs)
+						: timings.restored === true
+							? STRINGS.timingRestored(timings.fetchMs, timings.restoreMs)
+							: timings.fromStore === true
+								? STRINGS.timingResumedStored
+								: STRINGS.timingResumed,
+					timings.saveMs === undefined
+						? null
+						: timings.saveNotKept === true
+							? STRINGS.timingSaveNotKept(timings.saveMs)
+							: STRINGS.timingSaved(timings.saveMs),
+					timings.saveFailed === true ? STRINGS.timingSaveFailed : null,
+					timings.svgMs === undefined ? null : STRINGS.timingSvg(timings.svgMs),
+				];
 	const steps = [
 		timings.waitedMs === undefined ? null : STRINGS.timingWaited(timings.waitedMs),
-		STRINGS.timingQueue(timings.queueMs),
-		timings.startMs === undefined ? null : STRINGS.timingStart(timings.startMs),
-		timings.resetMs === undefined
-			? null
-			: (timings.newMemory ?? 0) > 0
-				? STRINGS.timingNewMemory(timings.resetMs)
-				: STRINGS.timingReset(timings.resetMs),
-		timings.texMs === undefined ? null : STRINGS.timingTex(timings.texMs, timings.passes ?? 1),
-		timings.resumed !== true
-			? timings.restoreMs === undefined
-				? null
-				: STRINGS.timingRestoreFailed(timings.restoreMs)
-			: timings.restored === true
-				? STRINGS.timingRestored(timings.fetchMs, timings.restoreMs)
-				: STRINGS.timingResumed,
-		timings.saveMs === undefined
-			? null
-			: timings.saveNotKept === true
-				? STRINGS.timingSaveNotKept(timings.saveMs)
-				: STRINGS.timingSaved(timings.saveMs),
-		timings.saveFailed === true ? STRINGS.timingSaveFailed : null,
-		timings.svgMs === undefined ? null : STRINGS.timingSvg(timings.svgMs),
+		...engine,
 		STRINGS.timingPost(timings.postMs),
 		timings.mountMs === undefined ? null : STRINGS.timingMount(timings.mountMs),
 		timings.totalMs === undefined ? null : STRINGS.timingTotal(timings.totalMs),

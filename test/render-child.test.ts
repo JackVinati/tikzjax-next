@@ -1279,6 +1279,70 @@ describe('what a block reports when it comes to rest', () => {
 		]);
 	});
 
+	it('a block that joined a compile already running says so, and its seen to drawn is its own', async () => {
+		const { reports, report } = reporting();
+		let now = 100;
+		const engine = { resetMs: 4, newMemory: 0, texMs: 68, svgMs: 3, passes: 1, saveMs: 15 };
+		// The queue had started this key for a block a re-render replaced: it says so at once.
+		const queue = {
+			submit: (
+				_k: string,
+				_j: TexJobSpec,
+				_p: number,
+				_t: number,
+				opts?: { onStart?: (joined: boolean) => void },
+			) => {
+				opts?.onStart?.(true);
+				now += 5;
+				return Promise.resolve({ svg: SVG, log: [], durationMs: 80, timings: engine });
+			},
+			release: () => undefined,
+		} as unknown as BlockDeps['queue'];
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ queue, now: () => now, report, observe: (_el, onChange) => onChange(true) }),
+		);
+		child.onload();
+		await child.settled;
+		await vi.waitFor(() => expect(reports).toHaveLength(2));
+		expect(reports[1]?.timings).toMatchObject({ joined: true, texMs: 68, queueMs: 0 });
+		expect(reports[1]?.timings?.totalMs).toBeLessThan(68);
+
+		// One that waited for the compile to start, as the first block of the key does, did not join.
+		const { reports: own, report: ownReport } = reporting();
+		const waiting = {
+			submit: (
+				_k: string,
+				_j: TexJobSpec,
+				_p: number,
+				_t: number,
+				opts?: { onStart?: (joined: boolean) => void },
+			) => {
+				now += 20;
+				opts?.onStart?.(false);
+				now += 70;
+				return Promise.resolve({ svg: SVG, log: [], durationMs: 80, timings: engine });
+			},
+			release: () => undefined,
+		} as unknown as BlockDeps['queue'];
+		const second = new TikzBlock(
+			container(),
+			spec(),
+			deps({
+				queue: waiting,
+				now: () => now,
+				report: ownReport,
+				observe: (_el, onChange) => onChange(true),
+			}),
+		);
+		second.onload();
+		await second.settled;
+		await vi.waitFor(() => expect(own).toHaveLength(2));
+		expect(own[1]?.timings?.joined).toBeUndefined();
+		expect(own[1]?.timings?.queueMs).toBe(20);
+	});
+
 	it('a diagram scrolled away and back while it compiles: timed from when it was first seen', async () => {
 		const { reports, report } = reporting();
 		let now = 100;

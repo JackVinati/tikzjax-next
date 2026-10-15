@@ -225,6 +225,11 @@ export interface SavedRun {
 	missing: string[];
 	/** What it holds, to keep the saved runs within their budget. */
 	bytes: number;
+	/**
+	 * Put back from bytes the host kept in storage (./stored-run), rather than saved by a diagram in
+	 * this worker: what a diagram that resumes from it says.
+	 */
+	fromStore?: boolean | undefined;
 }
 
 /** How many bytes a saved run's log lines take, near enough: two a character, and a little a line. */

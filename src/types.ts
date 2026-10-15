@@ -179,6 +179,12 @@ export interface CompileTimings extends Partial<TexTimings> {
 	waitedMs?: number | undefined;
 	/** From the block asking for a compile to the queue starting it. */
 	queueMs: number;
+	/**
+	 * The block joined a compile of the same diagram that was already under way when it asked, for a
+	 * block a re-render replaced or the same diagram in another pane: the engine's times above are
+	 * that compile's, which began before this block was seen, and not its own.
+	 */
+	joined?: boolean | undefined;
 	/** The SVG pipeline, from the engine's output to what is mounted. */
 	postMs: number;
 	/**
