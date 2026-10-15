@@ -75,8 +75,10 @@ export interface RenderRequest {
 	/**
 	 * The host keeps the runs a worker saves: once the render has replied, the worker hands over the
 	 * run it saved, if it saved one the host can name (SavedRunMessage). Absent is false. A run the
-	 * worker could not keep itself is saved for this alone, once a name in the worker's life
-	 * (internal/DECISIONS.md D39): the host asks only while none is stored under the diagram's name.
+	 * worker could not keep itself is saved for this alone, once a name in the worker's life, again
+	 * only after its hand-over was dropped for room or the store was cleared, and not where a stored
+	 * run sent with the render could not be put back for want of memory (internal/DECISIONS.md D39):
+	 * the host asks only while none is stored under the diagram's name.
 	 */
 	persist?: boolean | undefined;
 	/**
