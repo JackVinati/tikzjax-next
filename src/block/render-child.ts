@@ -486,9 +486,10 @@ export class TikzBlock extends MarkdownRenderChild {
 				// COMPILING does not. So the queue says when — to this block, not to whichever
 				// block submitted the key first.
 				onStart: (running) => {
-					if (started === undefined && running) joined = true;
 					// The last start: a job that gave its slot to a more urgent one before the engine had
-					// it went back in line, and waited there again (internal/DECISIONS.md D40).
+					// it went back in line, and waited there again (internal/DECISIONS.md D40). Its new
+					// start is after this block asked, also when the block had joined it under way.
+					joined = running;
 					started = this.deps.now();
 					this.dispatch({ type: 'slot' });
 				},

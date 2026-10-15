@@ -1421,6 +1421,40 @@ describe('what a block reports when it comes to rest', () => {
 		expect(places).toEqual([3]);
 	});
 
+	it('a block that joined a job which then gave its slot up: its compile is the one started after it asked', async () => {
+		// Another block's job had started, the engine still starting, when this block asked: it joined
+		// it. That job then gave its slot to a diagram higher in the note, and was started again 40 ms
+		// later, so the compile it waits for began after it asked.
+		const { reports, report } = reporting();
+		let now = 100;
+		const queue = {
+			submit: (
+				_k: string,
+				_j: TexJobSpec,
+				_p: number,
+				_t: number,
+				opts?: { onStart?: (joined: boolean) => void },
+			) => {
+				opts?.onStart?.(true);
+				now += 40;
+				opts?.onStart?.(false);
+				now += 30;
+				return Promise.resolve({ svg: SVG, log: [], durationMs: 30 });
+			},
+			release: () => undefined,
+		} as unknown as BlockDeps['queue'];
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ queue, now: () => now, report, observe: (_el, onChange) => onChange(true) }),
+		);
+		child.onload();
+		await child.settled;
+		await vi.waitFor(() => expect(reports).toHaveLength(2));
+		expect(reports[1]?.timings?.joined).toBeUndefined();
+		expect(reports[1]?.timings?.queueMs).toBe(40);
+	});
+
 	it("a diagram the viewport gate gave up on: waited from its cache miss, so the gate's wait is in it", async () => {
 		const { reports, report } = reporting();
 		let now = 100;

@@ -4018,7 +4018,8 @@ queue has started their jobs.
   `AbortSignal.reason`, which cannot tell a cancel from a stall, would stop the start (D25). A runner
   that says the engine has a job after it gave its slot up is ignored. The job's block stays in
   COMPILING, the queue tells it again when the job starts again, and its queue time runs to the last
-  start. Turned away afterwards, by the depth cap or the plugin unloading, the block rests on its
+  start; a block that had joined the job while it held its slot no longer says that it joined a
+  compile under way, as the compile it waits for began after it asked (found in review). Turned away afterwards, by the depth cap or the plugin unloading, the block rests on its
   "Render diagram" button, as from SCHEDULING (`machine.ts`); before, a rejection could reach a block
   in COMPILING only once it was unloaded.
 
@@ -4070,7 +4071,8 @@ paused; the randomised interleavings unchanged), `test/order.test.ts` (the phone
 had it and now, early and late, on a slow engine, where `AbortSignal` has no reason, with two
 engines), `test/processor.test.ts` (the note through the processor, the block and its machine and the
 real queue), `test/machine.test.ts` (COMPILING turned away), `test/render-child.test.ts` (the queue
-time to the last start, and the place handed to the queue).
+time to the last start, also for a block that joined the job before it gave its slot up, and the
+place handed to the queue).
 
 **What it costs.** `main.js` grows by 1,814 bytes for the first half, and 233 for the order in the
 note and 727 for the slot: 2,774 in all, from 0.2.1-beta.6's 12,230,424. The worker does not change,
