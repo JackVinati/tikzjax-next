@@ -5,257 +5,120 @@ top of its notes on GitHub, and will not publish a version that has none.
 
 ## 0.2.1-beta.5 — 2026-10-15
 
-- Updating from 0.2.0 recompiles only the diagrams that contain a character the engine has no font
-  for, such as Chinese, Greek or Cyrillic, so that their labels show it (see the next point); every
-  other diagram 0.2.0 cached is shown from the cache, as before. Updating from 0.1.x compiles every
-  cached diagram once more, the next time it is shown, as 0.2.0 did. From this release on, the cache
-  is tied to what the engine draws rather than to the exact build of it, so a release that only
-  makes the engine faster no longer compiles every cached diagram once more. A release that changes
-  what diagrams look like still does, and says so here.
-- Labels in Chinese, Greek, Cyrillic, Arabic, Hebrew, Thai, Devanagari, IPA and emoji are drawn.
-  The engine has no fonts for them, so TeX sets each character as a box one em wide, and the
-  plugin writes the character over it in your system's sans-serif font; nodes and arrows are
-  placed around it as around any other text. Until now TeX left each one out with "Unicode
-  character … not set up for use with LaTeX". `¥` `¢` `‰` `½` `№` typed in a label, which made the
-  whole diagram fail, are drawn the same way. In a `text width` node or a `\parbox` the text
-  wraps: Chinese and Japanese between characters, though never before closing punctuation, and
-  other scripts where a space is typed. Names in these scripts, of nodes, coordinates, styles,
-  colours and `\label`s, work as they did in 0.2.0. The README lists what the text drawn this way
-  cannot do. From pull request #2.
-- Pre-flight no longer warns about characters the engine cannot typeset, in a label or in a name:
-  the engine, its stand-ins for `°` `×` `£` `€` and the rest, or the sans-serif text above now draw
-  every one of them, and names in any script work since 0.2.0. In maths, TeX's own `$\alpha$`
-  still gives Computer Modern's α, where a typed `α` is drawn upright in sans-serif.
-- The diagnostics view shows the rest of a diagram's wait: how long it waited between coming into
-  view and being handed to the queue, how long it took to be drawn in the note once its SVG was
-  ready, and the whole time from coming into view to drawn. It also says how many times the engine
-  started this session, how long each start took, and why it stopped. A Copy button copies it as
-  text for a bug report: the plugin and Obsidian versions, the kind of device, what its WebView
-  supports, the engine, and every step's time, without your diagrams' code, their error messages or
-  the names of your notes. Where the device does not let the plugin copy, the text is shown, to copy
-  by hand.
-- A diagram that is not cached goes to the engine as soon as it comes into view. Until now each
-  one waited first, half a second on a phone and 300 ms on a desktop, also when you had just
-  opened the note. Only a diagram in a note you are typing in still waits for you to pause, so that
-  typing in it, in a second pane or beside a Reading view, compiles it once per pause and not at
-  every keystroke.
-- The TeX engine starts as soon as a diagram turns out not to be in the cache, while the diagram is
-  still on its way into view, instead of when it is about to be compiled. It still never starts
-  when every diagram shown is cached, and an engine started for a diagram you never scroll to stops
-  again once it has had nothing to do for a while, as before.
-- On a computer, two diagrams compile at once when several new ones are waiting, each in a TeX
-  engine of its own. Handed a note of 37 new diagrams at once, two engines drew them all in 46–47%
-  less time than one, in WebKit and in Chromium, measured on a Windows desktop with this release's
-  engine; a note you scroll through one diagram at a time gains less. The second engine starts only
-  while diagrams wait, and stops with the first; in that note it took about 100 MiB more at the
-  peak in Chromium, the browser engine of Obsidian's desktop app, measured on the same desktop. If
-  it cannot start, the first carries on alone. Phones and tablets keep one engine, and so does a
-  computer that reports less than 8 GB of memory; Settings → Second engine turns it off.
-- TeX takes about a third less time. Over 37 of the diagrams the plugin is tested with, measured on
-  a Windows desktop against 0.2.1-beta.1, TeX's time went from 4.2 s to 2.8 s in WebKit, the
-  browser engine of the iPhone and iPad, and from 2.8 s to 1.8 s in Chromium, the one Obsidian's
-  desktop app is built on. Each of the 37 took at least 28% less in both, comparing each one's
-  fastest of seven runs, but the first diagram after the engine starts only 11 to 16% less. Most of
-  it is the engine, now compiled so that TeX keeps the values it works on where the processor
-  reaches them directly, rather than in its memory, and optimised with a newer binaryen. The
-  engine's calls into the plugin, for every line and every character TeX reads or prints, no longer
-  make new arrays each time, which on its own took about 4% off. Every diagram draws as before, byte
-  for byte, so none is compiled again for this. `main.js` is 60 KB smaller than 0.2.0's, and 72 KB
-  smaller than 0.2.1-beta.1's. Nothing has been measured on a phone yet.
-- This release's engine leaves TeX less room to nest. Measured on the same desktop, 1,621 `\number`
-  nested inside each other still draw in Chromium, where 0.2.1-beta.1 drew 2,344, and 19,950 in
-  WebKit, where it drew between 20,049 and 21,281, depending on what it had compiled before.
-  Android runs the same JavaScript engine as the desktop app, and neither Android nor an iPhone has
-  been measured. Something nested deeper fails with "TeX nested deeper than the engine's stack
-  allows.", as it did past the old limit. The deepest real diagrams tried draw as before, a `forest`
-  tree 80 levels deep, 4,000 groups inside each other and a plot of 2,000 coordinates among them,
-  and those three are now among the diagrams every release is tested with.
-- A line longer than TeX's buffer of 300,000 bytes, such as thousands of definitions written on one
-  line, fails with "TeX cannot read a line longer than its buffer of 300,000 bytes." Since 0.2.0 it
-  failed with "TeX nested deeper than the engine's stack allows.", which pointed at the wrong thing.
-  Written a line each, the same definitions draw.
-- The TeX engine starts in well under half the time. Measured on a Windows desktop, from 145 to
-  57 ms in WebKit and from 160 to 51 ms in Chromium. The plugin now hands the engine its files when
-  it starts it, instead of carrying them inside the engine's own code, which every start had to read
-  through first, and the engine unpacks them with the system's own decompression where there is
-  one, from iOS 16.4 on. With that and the system's base64 decoding hidden from it, as on iOS 14.5
-  to 16.3, the start went from 155 to 114 ms in WebKit on the same desktop. The diagnostics view
-  shows, beside each engine start, how long unpacking and compiling took inside the engine, and
-  whether the system's decompression and base64 decoding were used. Nothing has been measured on a
-  phone yet.
-- The engine keeps one block of memory for TeX and, before each diagram, puts back only what the
-  diagram before it changed. It used to take a new 156 MiB block for every diagram and leave the
-  old ones for WebKit or Chromium to free when they got round to it. With this release's other
-  changes to the engine, over a run of 85 diagrams on the same desktop against 0.2.1-beta.1, the
-  most memory the page had in use at once went from 645 to 423 MiB in WebKit and from 318 to 235 MiB
-  in Chromium, and the most it had committed from 2,954 to 1,754 MiB and from 939 to 582 MiB.
-  Measured change by change, the one block alone took WebKit from 451 to 423 MiB and from 2,174 to
-  1,755 MiB committed, most of the rest coming with the calls that no longer make new arrays; in
-  Chromium it did most of it. What the page still held right after the last diagram, with the
-  engine waiting for the next, went down in Chromium, from 272 to 195 MiB, but up in WebKit, from
-  226 to 378 MiB, and from 575 to 1,423 MiB committed: the engine keeps its block while it waits,
-  and the new blocks it takes after a diagram TeX gave up on still wait for the collector. On a
-  phone the engine stops after 30 seconds without a diagram, and that gives it all back. After a
-  diagram TeX gave up on, with an emergency stop or "TeX capacity exceeded", the next one starts
-  from a new block; the diagnostics view says "new memory" for it, and "memory reset" for the
-  others. Every release now checks, after each diagram of the test set in five different orders,
-  that the block TeX is handed is the same as a new one, byte for byte.
-- Neither the faster start nor the one block of memory changes what a diagram looks like, so nothing
-  cached is compiled again for them.
-- A diagram whose preamble an earlier diagram has already compiled starts where that one stood once
-  its `\begin{document}` was done, and TeX compiles only its body. That is every diagram after the
-  first with the same packages, libraries and preamble text, the blocks of a note that are only a
-  `tikzpicture` among them, and a diagram you are typing in, each time it is compiled again. The
-  first diagram of each preamble takes a few milliseconds more, to save where TeX stands, and about
-  a tenth of a second without the JIT. Measured on a Windows desktop in headless WebKit and Chromium
-  against 0.2.1-beta.2, with the 32 MB a computer keeps, rendering each of the 44 test diagrams
-  twice in a row, the second took 35% less TeX time in WebKit, the browser engine of the iPhone and
-  iPad, and 34% less in Chromium, the one of Obsidian's desktop app: a plain TikZ diagram 6 ms
-  instead of 17 in WebKit and 4 instead of 11 in Chromium, circuitikz 101 instead of 298 and 61
-  instead of 194. With the 12 MB a phone keeps, in WebKit, it took 21% less, as three of those
-  preambles did not fit beside the others. The first diagram after the engine started took 49 ms
-  instead of 40 in WebKit and 45 instead of 34 in Chromium, of which saving its preamble was 9 and
-  12 ms. A note of 74 diagrams, 37 test diagrams twice each, one after the other, on one engine,
-  took 27% less time in WebKit and 25% less in Chromium with 32 MB, and 18% less in WebKit with 12
-  MB; spread out, every diagram and then every one again, it took about as long as before, 3% less
-  in WebKit and 1.5% more in Chromium, because one engine's budget does not hold all of its
-  preambles. The most memory the page had in use at once grew by more than the budget, by 25 to 42
-  MB in WebKit with 12 MB: what a save copies and what is let go wait for the collector. Without the
-  JIT, as with Lockdown Mode on an iPhone, with 12 MB, a save took about a tenth of a second on the
-  same desktop, and the second render of pgfplots 3.0 s of TeX instead of 7.2; circuitikz's preamble
-  did not fit there beside two others. A diagram drawn this way is the same, byte for byte, as one
-  drawn from the start: every release now checks that for every test diagram and for 33 cases
-  written to break it, with TeX's log kept and without, and a preamble that reads the diagram's own
-  file is never saved. An engine keeps up to 32 MB of saved preambles on a computer and 12 MB on a
-  phone or tablet, or on a computer that reports less than 8 GB of memory, and lets them go when it
-  stops. A preamble that does not fit beside the ones being used is not kept, and pushes none of
-  them out. Nothing has been measured on a phone yet.
-- With two engines on a computer, a diagram goes to the engine that holds its preamble when that one
-  is free. In the notes above that made no measurable difference: two diagrams of one preamble next
-  to each other start together, one on each engine, so neither has a saved preamble to start from.
-  Two engines with saved preambles took from 2% more to 2% less time than beta.2's two with the
-  diagrams in pairs, and 8 to 12% less spread out.
-- Settings → Saved preambles turns saved preambles off, on a phone or tablet as on a computer,
-  should a diagram ever draw differently from one: the README says more. Please report the diagram
-  if one does.
-- The diagnostics view says of each diagram whether it started from a saved preamble, or saved its
-  own and in how long, or saved it and did not keep it for want of room, and of each engine how many
-  preambles it holds, in how many MB, and how many saves failed; Copy includes it.
-- The TeX engine is rebuilt with the point where a diagram is saved. Nothing draws differently, so
-  nothing cached is compiled again.
-- The diagnostics view says whether TeX seems to run with the JIT compiler on your device: "on
-  (probably)", "off (probably)" or "unclear". The engine times a short loop when it starts, which
-  takes a millisecond or less with the JIT on an idle Windows desktop, and 33 to 40 ms without it in
-  WebKit. Without the JIT, as with Lockdown Mode on an iPhone or iPad, TeX is about twenty times
-  slower; there the view says that Lockdown Mode, if it is on, is the likely cause and how to exclude
-  Obsidian from it, with a link to the README, and a notice says so once, when two engine starts of a
-  session have found the JIT off. So that a device that is only slow is not taken for one without
-  the JIT, when the loop is slow the engine weighs it against the rest of its own start, which a slow
-  processor slows as much and a missing JIT hardly at all, and says "unclear" when that does not
-  settle it, which shows no notice; and where it did not find the JIT on, it times the loop again a
-  second later, by when the system has had time to compile it, and that is what it says, "checking
-  again" until then. On that desktop, in WebKit, Chromium and Node, idle, with every core busy, held
-  to one slow core, and with the engine's clock run up to eight times fast, as if the processor were
-  that much slower, 272 starts with the JIT all said on; in WebKit without it, 100 of 128 said off
-  and 28 unclear, these with every core busy or without the system's own gzip, as on iOS before 16.4.
-  With the JIT on and the loop's compiling held back in WebKit, the first timing said off in 16
-  starts and the one a second later on in all 16; held back further, the second mostly said off or
-  unclear too. When it weighed the loop, the engine's line in the view says how many nanoseconds a
-  step of it took, and a byte of the rest of its start, for both timings. None of this has been tried
-  on a phone yet.
-- 0.2.1-beta.4 went by the loop's time alone. My iPhone 16 Pro, apparently throttled at the time,
-  with Obsidian excluded from Lockdown Mode, then said "off (probably)" and showed the notice with its
-  JIT on: everything ran about three times slower, the start's own work too, and the loop past its
-  limit. Whether its loop was compiled and slow or not compiled yet, one timing cannot tell, which
-  is why it is now timed twice. On the Windows desktop held to one slow core, beta.4 said off in 19
-  of 32 starts with the JIT. A device that was shown the notice by an earlier beta may be shown it
-  once more, and only where the second timing finds the JIT off.
-- Where Lockdown Mode turns WebAssembly off altogether, as it does on some versions of iOS, the
-  engine cannot start, and the diagram's card now says that the device runs no WebAssembly, what
-  Lockdown Mode has to do with it and how to exclude Obsidian, where it said to close other apps;
-  the diagnostics view says "no WebAssembly".
+The figures below were measured on my Windows desktop, in headless Chromium, the browser engine of
+Obsidian's desktop app, and WebKit, the one of the iPhone and iPad, through Playwright rather than
+in Obsidian; where they compare with 0.2.0, it is 0.2.0 as released. None of them is from a phone.
+
+- A diagram that is not cached goes to the engine as soon as it comes into view. 0.2.0 made each one
+  wait first, 300 ms on a computer and half a second on a phone, also when you had just opened the
+  note. Only a diagram in a note you are typing in still waits for you to pause, so that it compiles
+  once per pause and not at every keystroke. The TeX engine also starts as soon as a diagram turns
+  out not to be cached, while the diagram is still on its way into view; it still never starts when
+  every diagram shown is cached.
+- TeX takes about a third less time. Over the 37 test diagrams 0.2.0 was released with, the fastest
+  of seven runs each, TeX's time went from 2,827 to 1,850 ms in Chromium and from 4,210 to 2,772 ms
+  in WebKit, and each diagram took between 25% and 63% less. The engine is compiled so that TeX
+  keeps the values it works on where the processor reaches them directly, rather than in its memory,
+  it is optimised with a newer binaryen, and its calls into the plugin, for every line and character
+  TeX reads or prints, no longer make new arrays each time. Apart from the labels in other scripts
+  below, every diagram draws as before, byte for byte.
+- The engine starts in a third of the time: 54 ms instead of 162 in Chromium and 57 instead of 152
+  in WebKit, medians of seven starts. The plugin hands the engine its files when it starts it,
+  instead of carrying them inside the engine's own code, and the engine unpacks them with the
+  system's own decompression where there is one, from iOS 16.4 on.
+- Saved preambles. A diagram whose preamble an earlier diagram has already compiled, with the same
+  packages, libraries and preamble text, starts where that one stood once its `\begin{document}` was
+  done, and TeX compiles only its body. That is every diagram after the first with the same
+  preamble, the blocks of a note that are only a `tikzpicture` among them, and a diagram you are
+  typing in, each time it compiles again. Drawn a second time in a row, circuitikz took 64 ms of TeX
+  in Chromium where 0.2.0 took 310, siunitx 10 where it took 133 and plain TikZ 4 where it took 18,
+  and the 37 test diagrams 752 ms where they took 2,787. The first diagram of each preamble pays for
+  saving it, 11 to 13 ms in Chromium, and about a tenth of a second without the JIT. A diagram drawn
+  this way is the same, byte for byte, as one drawn from the start, and every release checks that
+  for every test diagram and for 33 cases written to break it. An engine keeps up to 32 MB of saved
+  preambles on a computer and 12 MB on a phone or tablet.
+- Saved preambles are also kept in this device's own storage, in Obsidian's IndexedDB beside the
+  diagram cache, never in the vault, so they are not synced with it. After the engine has stopped,
+  after Obsidian restarts, or on a phone after the app was in the background, a diagram whose
+  preamble is stored starts from it instead of loading its packages again. In WebKit with a phone's
+  budgets, the first diagram after a fresh start of the browser, the engine's start included, took
+  223 ms for circuitikz from its stored preamble where compiling the preamble took 426, and 153 for
+  pgfplotstable where it took 358. Up to 64 MB are kept for each vault on a computer, and 16 MB on a
+  phone or tablet, the preamble used least recently going first. Clearing the diagram cache deletes
+  them too, which is the way to remove them from a device before uninstalling the plugin, since
+  Obsidian does not tell a plugin it is being removed. The README says what a stored preamble holds.
+- Labels in Chinese, Japanese, Korean, Greek, Cyrillic, Arabic, Hebrew, Thai, Devanagari, IPA and
+  emoji are drawn. The engine has no fonts for them, so TeX sets each character as a box one em wide
+  and the plugin writes the character over it in your system's sans-serif font; nodes and arrows are
+  placed around it as around any other text. 0.2.0 left each one out with "Unicode character … not
+  set up for use with LaTeX". `¥` `¢` `‰` `½` `№` typed in a label, which made the whole diagram
+  fail, are drawn the same way. In a `text width` node or a `\parbox` the text wraps: Chinese and
+  Japanese between characters, though never before closing punctuation, and other scripts where a
+  space is typed. Names in these scripts, of nodes, coordinates, styles, colours and `\label`s, work
+  as they did in 0.2.0, and the pre-flight check no longer warns about any of these characters. The
+  README lists what text drawn this way cannot do. Contributed by RepentStar in
+  [pull request #2](https://github.com/JackVinati/tikzjax-next/pull/2).
+- The diagnostics view times each diagram from coming into view to drawn in the note, with every
+  wait on the way; says how many times the engine started, how long each start took and why it
+  stopped; says of each diagram whether it started from a saved or stored preamble; and says whether
+  TeX seems to run with the JIT compiler. Its Copy button copies all of it as text for a bug report:
+  the plugin and Obsidian versions, the kind of device, what its WebView supports, the engine and
+  every step's time, without your diagrams' code, their error messages or the names of your notes.
+  Where the device does not let the plugin copy, the text is shown, to copy by hand.
+- On a computer, two diagrams compile at once when several new ones are waiting, each in an engine
+  of its own. Handed a note of 37 new diagrams at once, two engines drew them in 46 to 47% less time
+  than one, in Chromium and in WebKit; a note you scroll through one diagram at a time gains less.
+  The second engine starts only while diagrams wait, stops with the first, and took about 100 MiB
+  more at the peak in Chromium. If it cannot start, the first carries on alone. Phones and tablets
+  keep one engine, and so does a computer that reports less than 8 GB of memory.
+- Two new settings: Second engine, on a computer, turns the second engine off; Saved preambles turns
+  saved preambles off, on any device, and deletes the stored ones, should a diagram ever draw
+  differently from one. Please report the diagram if one does.
+- Without the JIT compiler, as with Lockdown Mode on an iPhone or iPad, TeX runs about twenty times
+  slower. The diagnostics view says whether TeX seems to run with the JIT: "on (probably)", "off
+  (probably)" or "unclear". On an iPhone or iPad where two engine starts of a session have found it
+  off, a notice says once that Lockdown Mode, if it is on, is the likely cause and how to exclude
+  Obsidian from it. So that a phone that is only slow, in Low Power Mode or hot, is not taken for
+  one without the JIT, the engine weighs its test against the rest of its own start, and takes it
+  again a second later. Where Lockdown Mode turns WebAssembly off altogether, as it does on some
+  versions of iOS, the diagram's card says so, where it said to close other apps.
 - When the `main.js` a device runs is not the version its `manifest.json` says, the plugin says so
   once, with how to put it right, and the diagnostics view shows both versions. Obsidian Sync
   Standard can leave a plugin like this when it carries installed plugins: it copies the new
-  `manifest.json` and not `main.js`, which is over its 5 MB limit, so the device shows the new
-  version and runs the old one. Where `manifest.json` is the older of the two, the plugin says that
-  something brought an old one back instead. Only a `main.js` from 0.2.1-beta.3 on can tell; on a
-  device whose `main.js` is older, the README says what to do.
-- A diagram that writes a file named like the metrics of a font the engine bundles, such as
-  `eufm10.tfm`, no longer writes into that font for every diagram after it until the engine stops.
+  `manifest.json` and not `main.js`, which is over its 5 MB limit. A `main.js` older than this
+  release cannot tell, so the first update this catches is the one after 0.2.1; the README says what
+  to do until then.
+- The engine keeps one block of memory and, before each diagram, puts back only what the diagram
+  before it changed, where 0.2.0 took a new 156 MiB block for every diagram and left the old ones
+  for the browser to free when it got round to it. Over a run of 85 diagrams, the most memory the
+  page had in use at once went from 318 to 278 MiB in Chromium and from 643 to 453 MiB in WebKit,
+  medians of five runs. Right after the last diagram, with the engine waiting for the next, WebKit
+  held more than with 0.2.0, 405 MiB against 226, because the engine keeps its memory and its saved
+  preambles until it stops. On a phone it now stops after 15 seconds without a diagram, where 0.2.0
+  waited 30.
 - A preamble file that ends with a comment and no newline after it, as some editors save one, no
   longer swallows the `\begin{document}` the plugin writes after it, which made every diagram under
-  it draw "Missing \begin{document}" instead of itself. Those diagrams are compiled once more, and
-  no other.
-- Saved preambles outlast the engine. Each preamble an engine saves is also kept in this device's
-  own storage, in Obsidian's IndexedDB beside the diagram cache, never in the vault, so it is not
-  synced with the vault, by Obsidian Sync or iCloud Drive. When the engine starts again, after
-  Obsidian restarts, after the engine stopped for having nothing to do, or on a phone after the app
-  was in the background, a diagram whose preamble is stored starts from it instead of loading its
-  packages again. Measured on a Windows desktop in headless WebKit and Chromium against
-  0.2.1-beta.3, the first diagram after a fresh start of the browser, the engine's start included,
-  took 97 ms instead of 104 for a plain TikZ diagram in WebKit, the browser engine of the iPhone and
-  iPad, and 72 instead of 92 in Chromium, the one of Obsidian's desktop app; siunitx 103 instead of
-  225 and 88 instead of 187; circuitikz 223 instead of 434 and 170 instead of 336. Without the JIT,
-  as with Lockdown Mode on, in WebKit, the plain diagram took 233 ms instead of 600 and circuitikz
-  2.8 s instead of 8.2. A note of 74 diagrams that were not cached, opened in a fresh browser after
-  a first visit had stored most of their preambles, took 24% less time in WebKit and 35% less in
-  Chromium with one engine, 48% less in Chromium with two, as Obsidian's desktop app runs by
-  default, and 10% less in WebKit at a phone's budgets. In WebKit on that desktop the engine's start
-  took 3 to 4 ms longer with the storage in use and nothing stored, and 2 to 14 ms longer while a
-  stored preamble was read, the engine's own start inside its thread taking the same; where the rest
-  goes was not tracked down. The engine writes each preamble out as soon as its diagram is drawn,
-  which took 4 ms at most on that desktop, and compresses it on a thread of its own while the next
-  diagram compiles; an engine about to stop, after its idle time or because Obsidian goes to the
-  background, with preambles still to store first finishes storing them, for 2 s or 1 s at most, and
-  one with none stops at once. Up to
-  64 MB are kept for each vault on a computer, and 16 MB on a phone or tablet and on a computer that
-  reports less than 8 GB of memory, compressed from iOS 16.4 on, the preamble used least recently
-  going first, one that took longer to load counting as used later; where storage runs out of room, the preambles already stored are still used. A stored
-  preamble belongs to one build of the engine, and the first start of a vault's engine after an
-  update that changes the engine deletes the old ones, without the first diagram waiting for it.
-  Settings → Saved preambles covers these too, and turning it off deletes them; clearing the diagram
-  cache deletes them too, which is the way to remove them from a device before uninstalling the
-  plugin, since Obsidian does not tell a plugin it is being removed. The README says what a stored
-  preamble holds. Every release now checks every test diagram started from a stored preamble against
-  the same diagram drawn from the start, byte for byte. On my iPhone 16 Pro the engine of
-  0.2.1-beta.2 started in 48 ms, read off the diagnostics view; nothing of this release has been
-  measured on a phone yet.
-- On a phone or tablet the engine now stops after 15 seconds without a diagram, where it waited 30.
-  Until it stops, an idle engine holds on to what its diagrams left: on the Windows desktop, in
-  WebKit, the page held 290 to 500 MB while an idle engine waited and about 120 MB once it had
-  stopped, and letting the engine give back its memory without stopping it freed nothing. Since the
-  first diagram after a stop now starts from its stored preamble, the stop costs it mainly the
-  engine's start.
-- The diagnostics view says of a diagram that started from a stored preamble "resumed from a stored
-  preamble", with how long reading it and putting it back took, or "put back for an earlier
-  diagram", and how many preambles are stored, in how many MB, and how many times storage refused,
-  or that they are off; Copy includes it. The settings say that clearing the diagram cache deletes
-  the stored preambles too.
-- On a phone, the preambles of a note's heaviest diagrams now reach storage. With 0.2.1-beta.4 the
-  engine wrote a preamble out only once it had had nothing to do for a tenth of a second, which in a
-  note is at its end, let some of those waiting go meanwhile, and was stopped with the rest when
-  Obsidian went to the background: on my iPhone 16 Pro, diagrams with circuitikz, pgfplots and
-  pgfplotstable compiled their preamble every time. Now each preamble is written out as its diagram
-  is drawn and compressed while the next one compiles, and an engine sent to the background with
-  preambles still to store finishes first, for a second at most; one with nothing left stops at once,
-  as before. Measured on a Windows desktop in headless WebKit, the browser engine of the iPhone and
-  iPad, at a phone's budgets, against beta.4: after a first visit of the plugin's 44 test diagrams,
-  19 preambles were stored instead of 10, and the second visit, in a fresh browser, started 17 to 18
-  diagrams from storage instead of 11, every heavy one among them, and took 4.6 s instead of 5.2;
-  with Obsidian sent to the background as the last diagram was drawn, where beta.4 stored nothing,
-  4.6 s instead of 5.8. A note of 74 diagrams took 3.5 s instead of 4.6 the second time, no preamble
-  compiled again, and a circuitikz diagram, after a session that went to the background 200 ms after
-  drawing it, 223 ms instead of 426 in the next. Of six heavy diagrams drawn one after the other, two
-  were still being stored when the last was drawn, and the engine had handed both over and stopped
-  within 60 ms of the background. In Chromium at a phone's budgets, as on Android, with the background at once, 22 were stored
-  where beta.4 stored none, and the second visit took 3.0 s instead of 4.1. A first visit took 2.5%
-  less to 3.5% more than with beta.4; on a computer, where beta.4 stored them too, at the note's end,
-  a first visit of the 74 took 1.6% longer in Chromium.
-- A diagram that shared a compile already under way for the same diagram, in another pane or in a
-  block the note redrew, says "joined a compile already running" in the diagnostics view, with that
-  compile's TeX time as the compile's. It used to show that compile's steps as its own, beside a
-  "seen to drawn" that could come out shorter than its TeX.
+  it draw "Missing \begin{document}" instead of itself.
+- A diagram that writes a file named like the metrics of a font the engine bundles, such as
+  `eufm10.tfm`, no longer writes into that font for every diagram after it until the engine stops.
+- A line longer than TeX's buffer of 300,000 bytes, such as thousands of definitions written on one
+  line, fails with "TeX cannot read a line longer than its buffer of 300,000 bytes.", where 0.2.0
+  said "TeX nested deeper than the engine's stack allows.". Written a line each, the same
+  definitions draw.
+- This release's engine leaves TeX less room to nest in Chromium: 1,621 `\number` nested inside each
+  other still draw where 0.2.0's engine drew 2,344, and 19,950 in WebKit, where it drew 20,049 to
+  21,281. Something nested deeper fails with "TeX nested deeper than the engine's stack allows.", as
+  it did past the old limit. The deepest real diagrams tried draw as before: a `forest` tree 80
+  levels deep, 4,000 groups inside each other and a plot of 2,000 coordinates, which are now among
+  the diagrams every release is tested with. Neither a phone nor Android has been measured.
+- Updating from 0.2.0 compiles again only the diagrams that contain a character the engine has no
+  font for, such as Chinese, Greek or Cyrillic, so that their labels show it, and the diagrams under
+  a preamble file that ends with a comment and no newline (above). Every other diagram 0.2.0 cached
+  is shown from the cache. Updating from 0.1.x compiles every cached diagram once more, the next
+  time it is shown, as 0.2.0 did. From this release on the cache is tied to what the engine draws
+  rather than to the exact build of it, so a release that only makes the engine faster no longer
+  compiles every cached diagram again; one that changes what diagrams look like still does, and says
+  so here.
 
 ## 0.2.0 — 2026-10-13
 
