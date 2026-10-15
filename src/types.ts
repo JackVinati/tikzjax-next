@@ -169,6 +169,16 @@ export interface BlockEdit {
 	ms: number;
 }
 
+/**
+ * Why a run stored for a diagram's preamble was not sent with it to an engine that did not hold it,
+ * so that the diagram compiled its preamble (engine/worker-host.ts, internal/DECISIONS.md D39):
+ * storage was slow to answer, a read of this one outlasting its wait or an earlier one not settled;
+ * the run could not be put back earlier this session for want of memory; putting it back looked
+ * dearer than its preamble; reading it failed; an engine held it when the diagram came, and another
+ * took the diagram or it let the run go; or it was stored only after the diagram came.
+ */
+export type StoredNotSent = 'slow' | 'unsendable' | 'not-worth' | 'read-failed' | 'held' | 'late';
+
 /** The worker's own steps (engine-src/protocol.ts), and what the host saw of the engine's start. */
 export interface TexTimings extends RenderTimings {
 	/**
@@ -181,6 +191,8 @@ export interface TexTimings extends RenderTimings {
 	 * with it to an engine that did not hold it (internal/DECISIONS.md D36).
 	 */
 	fetchMs?: number | undefined;
+	/** A run is stored for its preamble, and was not sent with it, for this. */
+	storedNotSent?: StoredNotSent | undefined;
 }
 
 /**

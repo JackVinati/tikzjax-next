@@ -77,8 +77,8 @@ export interface DiagnosticsSnapshot {
  * Where a compile's time went, a step to an entry, in the order the steps happen: seen and waiting
  * to be asked for, behind other diagrams, waiting for the engine to start, setting up TeX's memory
  * (its own, reset, or a new one), TeX, and whether it resumed from a saved preamble or a stored one,
- * or saved its own, and in how long, DVI to SVG, the SVG pipeline, drawing it in the note, and the
- * whole of it. A step nobody timed is left out.
+ * or why one stored was not sent, or saved its own, in how long and whether to be stored, DVI to SVG,
+ * the SVG pipeline, drawing it in the note, and the whole of it. A step nobody timed is left out.
  *
  * A block that joined a compile of the same diagram already under way, for a block a re-render
  * replaced or the same diagram in another pane, says so, with that compile's TeX as the compile's,
@@ -109,11 +109,14 @@ export function timingSteps(timings: CompileTimings): string[] {
 							: timings.fromStore === true
 								? STRINGS.timingResumedStored
 								: STRINGS.timingResumed,
+					timings.storedNotSent === undefined
+						? null
+						: STRINGS.timingStoredNotSent(timings.storedNotSent),
 					timings.saveMs === undefined
 						? null
 						: timings.saveNotKept === true
-							? STRINGS.timingSaveNotKept(timings.saveMs)
-							: STRINGS.timingSaved(timings.saveMs),
+							? STRINGS.timingSaveNotKept(timings.saveMs, timings.forStore === true)
+							: STRINGS.timingSaved(timings.saveMs, timings.forStore === true),
 					timings.saveFailed === true ? STRINGS.timingSaveFailed : null,
 					timings.svgMs === undefined ? null : STRINGS.timingSvg(timings.svgMs),
 				];
@@ -139,7 +142,8 @@ export function renderName(record: RenderRecord, index: number): string {
 /**
  * One engine's life, as a line: how long it took to start, where that went inside the worker and
  * whether it had the platform's own gzip and base64 (which iOS has from 16.4 and 18.2), what it held
- * of saved preambles after its last diagram, how many saves failed in it, and how it ended.
+ * of saved preambles after its last diagram, how many saves failed in it, what it handed over to be
+ * stored and what of that was dropped or failed, and how it ended.
  */
 export function engineLife(life: EngineReport['lives'][number]): string {
 	const started =
@@ -156,7 +160,9 @@ export function engineLife(life: EngineReport['lives'][number]): string {
 					);
 	const saved = life.snapshots;
 	const start =
-		saved === null ? started : STRINGS.engineSaved(started, saved.runs, mb(saved.bytes), saved.failures);
+		saved === null
+			? started
+			: STRINGS.engineSaved(started, saved.runs, mb(saved.bytes), saved.failures, life.handOvers);
 	return life.stop === null ? STRINGS.engineRunning(start) : STRINGS.engineStopped(start, life.stop);
 }
 
@@ -191,13 +197,16 @@ export function jitOf(engine: EngineReport): JitShown | null {
 	return null;
 }
 
-/** What is stored of saved preambles, as a line of the view and of the copied text. */
+/**
+ * What is stored of saved preambles, as a line of the view and of the copied text, with what the
+ * store kept and refused this session.
+ */
 export function preamblesLine(stats: StoredRunStats): string {
 	// Off, nothing is read: the store is never read that session, and would say "not read yet".
 	if (stats.off === true) return STRINGS.reportPreamblesOff;
 	if (!stats.available) return STRINGS.reportPreamblesUnavailable(stats.errors);
 	return stats.read
-		? STRINGS.reportPreambles(stats.runs, mb(stats.bytes), stats.errors)
+		? STRINGS.reportPreambles(stats.runs, mb(stats.bytes), stats.errors, stats.kept, stats.refused)
 		: STRINGS.reportPreamblesUnread;
 }
 

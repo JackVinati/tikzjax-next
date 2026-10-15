@@ -297,6 +297,23 @@ export interface RenderTimings {
 	saveNotKept?: boolean | undefined;
 	/** Saving the first pass failed, and nothing was kept; the diagram is drawn as without it. */
 	saveFailed?: boolean | undefined;
+	/**
+	 * The run saved, in saveMs, is to be handed to the host to store (RenderRequest.persist), kept here
+	 * or not: what became of it, the engine's hand-overs say (SnapshotState.handedOver), and the
+	 * store's line (internal/DECISIONS.md D39).
+	 */
+	forStore?: boolean | undefined;
+}
+
+/**
+ * The runs a worker handed to the host to store in its life (SavedRunMessage), and the ones that did
+ * not reach it: dropped while waiting, as the runs waiting that it no longer keeps passed its budget,
+ * or failed on the way, in the writing out, the gzip or the post (worker.ts handOver).
+ */
+export interface HandOverCounts {
+	sent: number;
+	dropped: number;
+	failed: number;
 }
 
 /** What a worker holds of saved runs once it has replied, for the host to route by and to report. */
@@ -313,6 +330,8 @@ export interface SnapshotState {
 	 * them over first (FlushRequest). Absent from a worker before 0.2.1-beta.5.
 	 */
 	pending?: number | undefined;
+	/** Its hand-overs so far, before this render's own. Absent from a worker before 0.2.1. */
+	handedOver?: HandOverCounts | undefined;
 }
 
 export interface OkMessage {
@@ -389,6 +408,8 @@ export type StoredOutcome = 'used' | 'unneeded' | 'corrupt' | 'mismatch' | 'fail
  */
 export interface FlushedMessage {
 	type: 'flushed';
+	/** Its hand-overs so far, the last one's included. Absent from a worker before 0.2.1. */
+	handedOver?: HandOverCounts | undefined;
 }
 
 /**

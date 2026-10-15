@@ -72,6 +72,7 @@ import type {
 	EngineAssets,
 	ErrorMessage,
 	FlushedMessage,
+	HandOverCounts,
 	JitMessage,
 	OkMessage,
 	RenderOptions,
@@ -715,6 +716,9 @@ interface Saving {
 const toHandOver: { id: number; epoch: number; saving: Saving }[] = [];
 let handingOver = false;
 
+/** The runs handed over in this worker's life, and those dropped or failed (SnapshotState.handedOver). */
+const handOvers: HandOverCounts = { sent: 0, dropped: 0, failed: 0 };
+
 /** Runs saved and not yet handed over, the one being among them (SnapshotState.pending). */
 const pendingHandOvers = (): number => toHandOver.length + (handingOver ? 1 : 0);
 
@@ -740,6 +744,7 @@ const queueHandOver = (id: number, epoch: number, saving: Saving, budget: number
 		toHandOver.splice(at, 1);
 		extra -= next.saving.run.bytes;
 		savedForStore.delete(next.saving.run.route);
+		handOvers.dropped++;
 	}
 	if (!handingOver) void handOverAll();
 };
@@ -760,11 +765,12 @@ const handOverAll = async (): Promise<void> => {
 	try {
 		for (let next = nextHandOver(); next !== undefined; next = nextHandOver()) {
 			await whenNoRender();
-			await handOver(next.id, next.epoch, next.saving);
+			if (await handOver(next.id, next.epoch, next.saving)) handOvers.sent++;
+			else handOvers.failed++;
 		}
 	} finally {
 		handingOver = false;
-		post({ type: 'flushed' } satisfies FlushedMessage);
+		post({ type: 'flushed', handedOver: { ...handOvers } } satisfies FlushedMessage);
 	}
 };
 
@@ -1252,6 +1258,7 @@ const snapshotState = (): SnapshotState => ({
 	held: saved.routes(),
 	bytes: saved.bytes,
 	failures: saveFailures,
+	handedOver: { ...handOvers },
 });
 
 /** A file the run wrote, or undefined if it never wrote one. */
@@ -1425,11 +1432,11 @@ async function render(
 	}
 
 	const durationMs = Math.round(performance.now() - started);
-	const timings = rounded(spent);
 	// The run this render saved, for the host to keep across the engine's stops (D36): only one the
 	// host named, which it can find again for a later diagram, and only when it keeps them.
 	const saving =
 		persist && firstPlan?.kind === 'save' && firstPlan.route !== undefined ? firstPlan.saved : undefined;
+	const timings: RenderTimings = { ...rounded(spent), ...(saving === undefined ? {} : { forStore: true }) };
 	const done = (reply: OkMessage | ErrorMessage): Rendered => ({ reply, handOver: saving });
 	const gotSvg = reported.svg.includes('<svg');
 	let transcript = readTranscript(log.slice(0, firstEnd));
@@ -1595,7 +1602,8 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 	// so, and the host stops it then, or when its limit runs out (worker-host.ts `drain`). At once when
 	// none is waiting; else when the last has been (handOverAll).
 	if (request.type === 'flush') {
-		if (pendingHandOvers() === 0) post({ type: 'flushed' } satisfies FlushedMessage);
+		if (pendingHandOvers() === 0)
+			post({ type: 'flushed', handedOver: { ...handOvers } } satisfies FlushedMessage);
 		return;
 	}
 	if (request.type === 'ping') {

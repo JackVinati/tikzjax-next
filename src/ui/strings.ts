@@ -1,6 +1,7 @@
-import type { BootTimings, JitProbe, JitState } from '../../engine-src/protocol';
+import type { BootTimings, HandOverCounts, JitProbe, JitState } from '../../engine-src/protocol';
+import type { StoreRefusal } from '../cache/runs';
 import type { EngineStop } from '../engine/worker-host';
-import type { BlockEdit, EditSource } from '../types';
+import type { BlockEdit, EditSource, StoredNotSent } from '../types';
 import { compareVersions } from '../platform/version';
 import type { WebViewFeatures } from '../platform/device';
 
@@ -51,6 +52,55 @@ const waited = (ms: number, edit?: BlockEdit): string =>
 /** What storage refused this session, for the line on stored preambles; nothing when it refused nothing. */
 const storageErrors = (errors: number): string =>
 	errors === 0 ? '' : errors === 1 ? ', 1 storage error' : `, ${errors} storage errors`;
+
+/**
+ * Why a run stored for a diagram's preamble was not sent with it (engine/worker-host.ts), so that the
+ * diagram compiled its preamble (internal/DECISIONS.md D39).
+ */
+const NOT_SENT: Record<StoredNotSent, string> = {
+	slow: 'storage was slow to answer',
+	unsendable: 'it could not be put back earlier for want of memory',
+	'not-worth': 'putting it back looked dearer than its preamble',
+	'read-failed': 'reading it failed',
+	held: 'an engine held it when the diagram came',
+	late: 'it was stored after the diagram came',
+};
+
+/** Why the store refused a run handed to it (cache/runs.ts), in the order the line lists them. */
+const REFUSED: Record<StoreRefusal, string> = {
+	'not-worth': 'not worth putting back',
+	'too-large': 'larger than the budget',
+	'goes-first': 'would have gone first',
+	full: 'storage full',
+	cleared: 'cleared meanwhile',
+	failed: 'not written',
+	unavailable: 'storage unavailable',
+};
+
+/**
+ * What the store kept and refused this session, and why, for the line on stored preambles; nothing
+ * before it was handed a run (D39).
+ */
+const storeSession = (kept: number, refused: Partial<Record<StoreRefusal, number>>): string => {
+	const reasons = (Object.keys(REFUSED) as StoreRefusal[]).flatMap((why) => {
+		const n = refused[why] ?? 0;
+		return n > 0 ? [`${n} ${REFUSED[why]}`] : [];
+	});
+	const total = Object.values(refused).reduce((sum, n) => sum + (n ?? 0), 0);
+	if (kept === 0 && total === 0) return '';
+	return `; this session ${kept} kept` + (total === 0 ? '' : `, ${total} refused: ${reasons.join(', ')}`);
+};
+
+/**
+ * What an engine handed over to be stored, and what of that was dropped for room or failed on the
+ * way, for its line; nothing where it handed over none (D39).
+ */
+const handedOver = (counts: HandOverCounts | undefined): string =>
+	counts === undefined || counts.sent + counts.dropped + counts.failed === 0
+		? ''
+		: `; ${counts.sent} handed over to be stored` +
+			(counts.dropped === 0 ? '' : `, ${counts.dropped} dropped for room`) +
+			(counts.failed === 0 ? '' : `, ${counts.failed} failed`);
 
 /** The README's answers, which the hints below link to (README.md, Questions). */
 const README = 'https://github.com/JackVinati/tikzjax-next';
@@ -181,10 +231,17 @@ export const STRINGS = {
 					.join(', ')})`),
 	/** A stored run was sent with the diagram, and could not be started from: it did not read back. */
 	timingRestoreFailed: (ms: number) => `stored preamble not used, ${ms} ms`,
-	/** The diagram's run was saved at the end of its \begin{document}, for later ones. */
-	timingSaved: (ms: number) => `preamble saved in ${ms} ms`,
+	/** A run was stored for the diagram's preamble, and not sent with it, for this (D39). */
+	timingStoredNotSent: (why: StoredNotSent) => `stored preamble not sent: ${NOT_SENT[why]}`,
+	/**
+	 * The diagram's run was saved at the end of its \begin{document}, for later ones; `forStore`, and
+	 * handed to the host to store (D36, D39).
+	 */
+	timingSaved: (ms: number, forStore = false) =>
+		`preamble saved in ${ms} ms` + (forStore ? ', sent to be stored' : ''),
 	/** The same, when the engine had no room left for it within its budget, and let it go. */
-	timingSaveNotKept: (ms: number) => `preamble saved in ${ms} ms, not kept: no room`,
+	timingSaveNotKept: (ms: number, forStore = false) =>
+		`preamble saved in ${ms} ms, not kept: no room` + (forStore ? ', sent to be stored' : ''),
 	timingSaveFailed: 'saving the preamble failed',
 	timingSvg: (ms: number) => `DVI to SVG ${ms} ms`,
 	timingPost: (ms: number) => `SVG pipeline ${ms} ms`,
@@ -210,10 +267,14 @@ export const STRINGS = {
 		(jit === undefined ? '' : `; JIT ${jitState(jit)}`) +
 		')',
 	engineNeverStarted: 'never finished starting',
-	/** What an engine held of saved preambles after its last diagram, and its saves that failed. */
-	engineSaved: (start: string, runs: number, mb: string, failures: number) =>
+	/**
+	 * What an engine held of saved preambles after its last diagram, its saves that failed, and what it
+	 * handed over to be stored.
+	 */
+	engineSaved: (start: string, runs: number, mb: string, failures: number, handOvers?: HandOverCounts) =>
 		`${start}; ${runs === 1 ? '1 saved preamble' : `${runs} saved preambles`}, ${mb}` +
-		(failures === 0 ? '' : failures === 1 ? ', 1 save failed' : `, ${failures} saves failed`),
+		(failures === 0 ? '' : failures === 1 ? ', 1 save failed' : `, ${failures} saves failed`) +
+		handedOver(handOvers),
 	engineRunning: (start: string) => `${start}, running`,
 	engineStopped: (start: string, why: EngineStop) => `${start}, ${STOPPED[why]}`,
 	engineLastStop: (why: EngineStop) => `Last stopped: ${STOPPED[why]}.`,
@@ -282,9 +343,17 @@ export const STRINGS = {
 	reportMemory: (count: number, mb: string) => `In memory: ${count} diagrams, ${mb}`,
 	reportStored: (count: number, mb: string) => `On disk: ${count} diagrams, ${mb}`,
 	reportStoredUnknown: 'On disk: unavailable',
-	/** Saved preambles kept across the engine's stops (cache/runs.ts, D36), and what storage refused. */
-	reportPreambles: (runs: number, mb: string, errors: number) =>
-		`Stored preambles: ${runs}, ${mb}${storageErrors(errors)}`,
+	/**
+	 * Saved preambles kept across the engine's stops (cache/runs.ts, D36), what storage refused, and
+	 * what the store kept and refused of the runs handed to it this session (D39).
+	 */
+	reportPreambles: (
+		runs: number,
+		mb: string,
+		errors: number,
+		kept = 0,
+		refused: Partial<Record<StoreRefusal, number>> = {},
+	) => `Stored preambles: ${runs}, ${mb}${storageErrors(errors)}${storeSession(kept, refused)}`,
 	reportPreamblesUnavailable: (errors: number) => `Stored preambles: unavailable${storageErrors(errors)}`,
 	/** Before the engine has first started this session, when what is stored has not been read. */
 	reportPreamblesUnread: 'Stored preambles: not read yet, until the engine starts',

@@ -3,6 +3,7 @@ import { buildInput, routeOf } from '../../engine-src/document';
 import type {
 	BootTimings,
 	EngineInventory,
+	HandOverCounts,
 	JitState,
 	RenderOptions,
 	RenderTimings,
@@ -20,6 +21,7 @@ import {
 	InterruptedError,
 	TexError,
 	type EngineCapabilities,
+	type StoredNotSent,
 	type TexHost,
 	type TexJob,
 	type TexResult,
@@ -64,6 +66,11 @@ export interface EngineLife {
 	 * runs, their bytes, and how many saves failed in it. Null until a diagram has said.
 	 */
 	snapshots: { runs: number; bytes: number; failures: number } | null;
+	/**
+	 * The runs it handed over to be stored, and the ones dropped for room or failed on the way, as it
+	 * last said (internal/DECISIONS.md D39). Absent until it has said.
+	 */
+	handOvers?: HandOverCounts | undefined;
 	/** Null while it runs. */
 	stop: EngineStop | null;
 }
@@ -190,8 +197,11 @@ export interface StoredRuns {
 	load(): Promise<void>;
 	/** Whether a run is stored under `route`, as far as is known yet. */
 	has(route: string): boolean;
-	/** The run kept under `route`, if one is and it is worth sending; its own copy of the bytes. */
-	read(route: string): Promise<StoredRun | undefined>;
+	/**
+	 * The run kept under `route`, if one is and it is worth sending, its own copy of the bytes; or why
+	 * one stored is not sent: not worth it, or its read failed.
+	 */
+	read(route: string): Promise<StoredRun | 'not-worth' | 'read-failed' | undefined>;
 	keep(message: SavedRunMessage): Promise<void>;
 	/** Delete the run kept under `route`: its bytes did not read back as a run. A storage error. */
 	forget(route: string): Promise<void>;
@@ -231,6 +241,12 @@ interface Job {
 	overdue: boolean;
 	/** What was sent of a stored run, for what putting it back took. */
 	sent: { bytes: number; rawBytes: number } | undefined;
+	/**
+	 * Why a run stored for its diagram was not read, or not sent (TexTimings.storedNotSent): noted
+	 * where the read is skipped or gives nothing, and settled when the job is posted, where it holds
+	 * only if the engine it goes to does not hold the run either.
+	 */
+	unsent: StoredNotSent | undefined;
 	readonly onRunning: (() => void) | undefined;
 	readonly signal: AbortSignal;
 	readonly onAbort: () => void;
@@ -442,6 +458,7 @@ export class WorkerHost implements TexHost {
 				readWait: null,
 				overdue: false,
 				sent: undefined,
+				unsent: undefined,
 				onRunning,
 				signal,
 				onAbort: () => this.abandon(entry),
@@ -599,6 +616,17 @@ export class WorkerHost implements TexHost {
 			snapshots > 0 && route !== undefined && !engine.held.has(route) ? job.stored : undefined;
 		job.stored = undefined;
 		if (stored !== undefined) job.sent = { bytes: stored.data.byteLength, rawBytes: stored.rawBytes };
+		// A run stored under its name and not sent to an engine that does not hold it: the diagram
+		// compiles its preamble, and asks for no run either (`persist`, below), and the diagnostics say
+		// why. Where nothing was noted, the read found none, and one was stored after it.
+		job.unsent =
+			stored === undefined &&
+			snapshots > 0 &&
+			route !== undefined &&
+			!engine.held.has(route) &&
+			runs?.has(route) === true
+				? (job.unsent ?? 'late')
+				: undefined;
 		// The run this job saves is asked for while storage can keep it, but not when one is stored
 		// under its name and none was sent, as when it was not worth sending or the read was not waited
 		// for: the worker would write the same run out and gzip it again for nothing. One that was sent
@@ -727,6 +755,7 @@ export class WorkerHost implements TexHost {
 		// Every run it saved has been handed over: an engine that was to stop stops now.
 		if (message.type === 'flushed') {
 			engine.handing = false;
+			if (message.handedOver !== undefined) engine.life.handOvers = { ...message.handedOver };
 			if (engine.stopping !== null) this.stopDrained(engine);
 			return;
 		}
@@ -758,6 +787,7 @@ export class WorkerHost implements TexHost {
 					message.timings,
 					job.startMs,
 					job.sent === undefined ? undefined : job.fetchMs,
+					job.unsent,
 				),
 				firstError: message.firstError,
 				line,
@@ -988,10 +1018,24 @@ export class WorkerHost implements TexHost {
 		const runs = this.runs;
 		const route = job.route;
 		if (runs === undefined || !runs.readable || route === undefined) return;
-		if (this.overdueReads > 0 || this.unsendable.has(route)) return;
+		// Why none is read, for the diagnostics, where one is stored and the job does not go to an
+		// engine that holds it after all (post).
+		if (this.overdueReads > 0) {
+			job.unsent = 'slow';
+			return;
+		}
+		if (this.unsendable.has(route)) {
+			job.unsent = 'unsendable';
+			return;
+		}
 		const holders = this.engines.filter((engine) => engine.held.has(route));
-		if (holders.some((engine) => engine.up && engine.current === null)) return;
-		if (holders.length > 0 && this.size === 1) return;
+		if (
+			holders.some((engine) => engine.up && engine.current === null) ||
+			(holders.length > 0 && this.size === 1)
+		) {
+			job.unsent = 'held';
+			return;
+		}
 		job.fetching = true;
 		const started = this.now();
 		runs.read(route)
@@ -999,7 +1043,8 @@ export class WorkerHost implements TexHost {
 				(run) => {
 					// Not waited for, or no longer needed: the bytes go.
 					if (job.overdue || !this.waiting.includes(job)) return;
-					job.stored = run;
+					if (typeof run === 'string') job.unsent = run;
+					else job.stored = run;
 					job.fetchMs = this.now() - started;
 				},
 				() => undefined,
@@ -1024,6 +1069,7 @@ export class WorkerHost implements TexHost {
 			if (!job.fetching || !this.waiting.includes(job)) return;
 			job.fetching = false;
 			job.overdue = true;
+			job.unsent = 'slow';
 			this.overdueReads++;
 			this.pump();
 		}, STORED_READ_WAIT_MS);
@@ -1062,6 +1108,7 @@ export class WorkerHost implements TexHost {
 	private heldBy(engine: Engine, state: SnapshotState): void {
 		engine.held = new Set(state.held);
 		engine.life.snapshots = { runs: state.held.length, bytes: state.bytes, failures: state.failures };
+		if (state.handedOver !== undefined) engine.life.handOvers = { ...state.handedOver };
 	}
 
 	/** Tell the plugin what an engine start says of the JIT (onJit). */
@@ -1112,19 +1159,21 @@ function blockLine(line: number | undefined, bodyLine: number | undefined): numb
 }
 
 /**
- * The worker's timings with the engine's start added, when this job waited for it, and the reading of
- * a stored run sent with it.
+ * The worker's timings with the engine's start added, when this job waited for it, the reading of a
+ * stored run sent with it, and why one stored was not sent.
  */
 function timingsOf(
 	worker: RenderTimings | undefined,
 	startMs: number | undefined,
 	fetchMs: number | undefined,
+	unsent: StoredNotSent | undefined,
 ): TexTimings | undefined {
 	if (worker === undefined) return undefined;
 	return {
 		...worker,
 		...(startMs === undefined ? {} : { startMs: Math.round(startMs) }),
 		...(fetchMs === undefined ? {} : { fetchMs: Math.round(fetchMs) }),
+		...(unsent === undefined ? {} : { storedNotSent: unsent }),
 	};
 }
 

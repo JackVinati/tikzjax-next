@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import type {
 	ErrorMessage,
+	FlushedMessage,
 	OkMessage,
 	RenderRequest,
 	SavedRunMessage,
@@ -105,6 +106,8 @@ describe('the runs a worker hands over', () => {
 	it('are handed over from the reply on, while the next diagram is under way, and all before it says flushed', async () => {
 		const a = await render(first, DIAGRAM(1), SIUNITX, { persist: true, epoch: 4 });
 		expect(a.timings?.saveMs).toBeDefined();
+		// Said with the diagram: its run is sent to be stored (internal/DECISIONS.md D39).
+		expect(a.timings?.forStore).toBe(true);
 		// The reply says the run is still to be handed over, for the host to wait for it before a stop.
 		expect(a.snapshots?.pending).toBe(1);
 		// The next diagram, of another preamble, posted at once, as the queue posts the next job.
@@ -126,9 +129,13 @@ describe('the runs a worker hands over', () => {
 		// Unasked, too, once the last had been handed over: the host then stops it at once.
 		const last = inbox.indexOf(handed(bReply)!);
 		expect(inbox.slice(last).some((m) => m.type === 'flushed')).toBe(true);
-		// And a diagram after them, whose run is not handed over, says none is waiting.
+		// Counted, for the engine's line in the diagnostics.
+		expect((flushed as FlushedMessage).handedOver).toEqual({ sent: 2, dropped: 0, failed: 0 });
+		// And a diagram after them, whose run is not handed over, says none is waiting, and that none is.
 		const c = await render(first, DIAGRAM(3), SIUNITX, { persist: false });
 		expect(c.snapshots?.pending).toBe(0);
+		expect(c.snapshots?.handedOver).toEqual({ sent: 2, dropped: 0, failed: 0 });
+		expect(c.timings?.forStore).toBeUndefined();
 	}, 120_000);
 
 	it('says flushed at once when it has nothing to hand over', async () => {
@@ -217,7 +224,8 @@ describe('a run the worker cannot keep', () => {
 	/** A worker at 1 MiB that holds plain TikZ's run and has resumed from it: too full to save another. */
 	async function full(): Promise<(request: WorkerRequest) => void> {
 		const worker = await another();
-		await render(worker, DIAGRAM(40), PLAIN, { snapshots: SMALL, persist: true });
+		const plain = await render(worker, DIAGRAM(40), PLAIN, { snapshots: SMALL, persist: true });
+		await waitFor(() => handed(plain));
 		const resumed = await render(worker, DIAGRAM(41), PLAIN, { snapshots: SMALL });
 		expect(resumed.timings?.resumed).toBe(true);
 		return worker;
@@ -238,6 +246,9 @@ describe('a run the worker cannot keep', () => {
 			expect(asked.timings).toMatchObject({ saveNotKept: true });
 			await flushedAfter(at);
 			expect(handed(asked)).toBeUndefined();
+			// Counted, for the engine's line in the diagnostics.
+			const flushed = inbox.slice(at).find((m): m is FlushedMessage => m.type === 'flushed');
+			expect(flushed?.handedOver?.failed).toBe(1);
 		} finally {
 			refuseRuns = false;
 		}
@@ -308,9 +319,10 @@ describe('a run the worker cannot keep', () => {
 		expect(siunitx.timings).toMatchObject({ saveNotKept: true });
 		const pgfplots = await render(worker, DIAGRAM(54), PGFPLOTS, { snapshots: SMALL, persist: true });
 		expect(pgfplots.timings).toMatchObject({ saveNotKept: true });
-		// pgfplots' waits: not saved again; siunitx's was dropped: saved again.
+		// pgfplots' waits: not saved again; siunitx's was dropped, and counted: saved again.
 		const waiting = await render(worker, DIAGRAM(55), PGFPLOTS, { snapshots: SMALL, persist: true });
 		expect(waiting.timings?.saveMs).toBeUndefined();
+		expect(waiting.snapshots?.handedOver).toEqual({ sent: 0, dropped: 1, failed: 0 });
 		const again = await render(worker, DIAGRAM(56), SIUNITX, { snapshots: SMALL, persist: true });
 		expect(again.timings).toMatchObject({ saveNotKept: true });
 		expect(held.length).toBeGreaterThan(0);
