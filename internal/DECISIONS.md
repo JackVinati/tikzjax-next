@@ -1201,6 +1201,9 @@ after it was made and did not, and why a run stored for its preamble was not sen
 engine, what it handed over to be stored and what of that was dropped or failed; and the line on
 stored preambles, what the store kept and refused this session, and why.
 
+**Amended by D40.** And of an edit before the block was made, or with it, that did not make it wait
+because its note already showed the diagram, that it did not count.
+
 ---
 
 ## D22 — Only a block of a note being typed in waits for the debounce
@@ -1241,6 +1244,11 @@ one made the note's first diagrams wait. The keystroke Live Preview reports afte
 in the same update, is told by its run: the processor asks as the block is made, and the miss reads
 the answer, with the edit that made the block, or one after it that did not, which the diagnostics'
 waited step says.
+
+**Amended by D40.** An edit before the block was made, or with it, does not count either where the
+note had the block's text on screen as that edit's burst of edits began: a block made again, not
+typed. Obsidian itself edits every open note once a session, resetting its syntax highlighting, and
+a block Live Preview made again within the second after that waited.
 
 How each place a diagram is drawn comes out:
 
@@ -1446,6 +1454,10 @@ What it still costs: a job the engine took before its block went away compiles t
 cached for the next time the diagram is shown. That is at most one compile per engine per switch,
 on an engine already up, where 0.2.0's debounce compiled nothing for a view shorter than itself.
 Switching notes quickly on a cold engine, on the phone, is in `TODO.md` §9.
+
+**Amended by D40.** In the same window, started and not yet in the engine, a job also gives its slot
+to a more urgent one and goes back in line, aborted with `cancelled` after the more urgent job has
+reached the host, so that a start is kept here too.
 
 Tests: `test/queue.test.ts` (dropped before the engine has it; kept once it has it, or while another
 caller wants it; a caller asking again at once gets a job of its own; the randomised interleavings
@@ -3756,6 +3768,8 @@ within a second before its first blocks missed the cache. Read in Obsidian 1.14.
 
 So the edit came from something acting on the note as Obsidian started: Sync bringing a change from
 another device, such as the phone beta.5 was tested on, or a community plugin acting at startup.
+(**Amended by D40**: it was neither, but Obsidian's own reset of its syntax highlighting, which
+replaces the note's first character with itself once a session.)
 Which, the maintainer's vault and its plugins would say; neither was read for this. Sync acts once it
 has reached its server, and a plugin most often once the workspace is ready or a note is opened, both
 after Obsidian has shown the note; and D22 measured the second back from the cache miss, which comes
@@ -3810,6 +3824,229 @@ edit told, each kind, and another note's edit with a stale entry for the block's
 **What it costs.** `main.js` grows by 345 bytes for it, and 676 for the review's diagnostics. No
 Obsidian was started for this: whether the desktop's first diagrams now say "waited 0 ms" after a
 start, and what the waited step says of the edit then, is for the maintainer's next one.
+
+---
+
+## D40 — What 0.2.1-beta.6 did on the maintainer's devices: Obsidian's own edit at a start, and a phone that drew the diagram at the top last
+
+**Amends D22 and D39 (when a block debounces), D25 (the window in which a job is dropped now also
+gives up its slot), D24's one slot on a phone (which job holds it) and D21 (what the diagnostics say),
+and DESIGN.md §3.3, §5.1 and §7.6. Found by the maintainer testing 0.2.1-beta.6 on the Windows
+desktop of D39, Obsidian 1.14.4 with two engines, and on the iPhone 16 Pro of D38, iOS 27.0.1,
+Obsidian 1.14.5, the JIT on. Date of record: 2026-10-15.**
+
+The maintainer's readings, from the diagnostics view's Copy, are the only device figures here. What
+Obsidian does is read in its 1.14.4 desktop bundle (`app.js`, bounded searches of the minified code),
+and the phone's order is simulated, each said where it comes.
+
+### The desktop's first diagrams still waiting after a start
+
+**What the desktop said.** Obsidian started again with a note of eleven diagrams open in Live
+Preview. Blocks #1 to #9, nine diagrams, were made and then all "cancelled"; the same nine were made
+again as #10 to #18, and those not cached said "waited 300 ms: the note was edited 103 ms before the
+block was made", or 104. Diagrams shown two seconds later did not wait. The note's file had not
+changed on disk since the day before. The engine had started twice, and #10 and #11 each said
+"memory reset" on an engine that had already run TeX, with no wait in the host: the first nine had
+missed the cache and gone to both engines without waiting, before they went away. So they were made
+before the edit, and D39's rule held for them; the nine made again within the second after it waited.
+
+**What the edit is**, read in the bundle: Obsidian's own, not Sync's nor a plugin's, as D39 supposed.
+The first time in a session that the editor asks for a CodeMirror 5 mode that is not there — Live
+Preview's markdown mode asks for one for each fenced block's language, and `tikz` has none, nor has
+maths until the modes have loaded — Obsidian loads its modes' script (`/lib/codemirror/modes.min.js`),
+and once it has, resets the syntax highlighting of every open Markdown view. The reset dispatches a
+change that replaces the note's first character with itself (`changes: [{from: 0, to: 1, insert:
+doc.sliceString(0, 1)}]`, `userEvent: "set"`). It changes the document, so the editor's update
+listener triggers `editor-change` naming the note; and it saves nothing, since the text is what was
+last saved. Every user who shows a `tikz` block, or maths, in an editor has it once a session, a
+moment after the note's blocks are made. The iPhone's "the note was edited 23 ms after the block was
+made, which did not count" (below) is the same reset, after the blocks, as D39 meant it to be
+counted. Read in the `main.js` of each plugin in the maintainer's vault, none changes a note's text
+on opening it or once the workspace is ready, but for one that rewrites, through `Vault.modify`, only
+notes holding blocks of its own, which would have moved the file's date.
+
+**Why the blocks were made again**, read in the bundle; which of the two it was, the readings cannot
+say:
+
+- Live Preview makes every code block's widget again when a plugin registers a code-block or
+  Markdown post-processor: the registration triggers `post-processor-change`, and 10 ms later Live
+  Preview rebuilds every code-block widget, unloading the old blocks in the update that makes the new
+  ones. Plugins finish loading before the workspace's layout does, so only a registration made later
+  does this, as a plugin's that registers its processor once the layout is ready. Another plugin in
+  the maintainer's vault does, which makes one such remake at every start, after the open note's
+  blocks exist.
+- Or the reset's own update finds the syntax tree not yet parsed past the blocks lower in the note,
+  lets those blocks go, and the parse that follows, about 100 ms later, makes them again.
+
+One start with that other plugin turned off would tell them apart. The rule below holds for both.
+
+**What it does now** (`src/block/edits.ts`, `src/block/processor.ts`, `src/block/render-child.ts`).
+An edit does not count for a block whose text its note had on screen as the edits began:
+
+- **The edits.** A note's edits, `editor-change` naming it, its file's `modify` and an
+  `editor-change` that names no note, each within the window (1 s) of the one before, are one burst,
+  which begins with the first edit after a pause longer than the window. Where a burst of the note's
+  own edits and one of edits naming no note both go on, the earlier start is taken, erring towards
+  the debounce.
+- **On screen.** A text is on screen in a note from the run of code a block of it was made in, once
+  the block is loaded, to the run in which the last block of it is unloaded, whichever view the
+  blocks are in; and it is remembered for the window after that. The block's load and unload say so
+  (`Making.shown`), and its making's run is the one asked about as the processor is handed the block
+  (D39), so a block whose preamble is read before it is loaded is on screen from its making.
+- **The rule.** A block D39 finds made by an edit still waits for the debounce, unless its note had
+  its text on screen as that edit's burst began: a block of it made in an earlier run than the burst's
+  first edit, and loaded still or unloaded no earlier than that edit's run. A block made in the run of
+  the first edit came with it, as Live Preview makes a keystroke's widget and then reports the edit;
+  one unloaded in that run was on screen as it came, as the reset's own update lets blocks go.
+- **When it is asked.** The texts the note had on screen as the burst began are noted when the run
+  that made the block is over, and the miss asks whether its key is one of them: at the miss, which
+  comes after an IndexedDB read, a text unloaded in that run might no longer be remembered.
+- **Memory.** One entry per text a note has on screen, or had within the window, and per note; the
+  entries of texts no longer loaded go a window after the last unload. A text shown again within it
+  keeps the run its first block was made in, which errs towards not waiting only for a text the note
+  had a moment before.
+
+How each place a diagram is drawn comes out, a block that misses the cache:
+
+| | beta.6 (D39) | now |
+| --- | --- | --- |
+| A start: the reset, then every block made again 103 ms later | waits 300 ms | no wait: a block made again joins the compile under way for the block it replaced, or finds it cached |
+| The iPhone: a note opened, the reset 23 ms after its blocks | no wait | no wait |
+| A note switched away from and back within the second after an edit of it | waits | no wait for a text it showed |
+| Live Preview, one pane: the widget drawn as the cursor leaves the fence | waits | waits: a text the note did not have |
+| A second pane, a Reading view beside the editor, an embed: made again after each keystroke | waits | waits: each text first shown once the burst began |
+| A sync, or another program, changing a block of a note on screen | waits | waits |
+| Undo, or typing back to a text the burst made | waits | waits |
+| Undo, or a sync, back to the text shown before the burst | waits | no wait; normally cached |
+| Another plugin making the widgets again within the second after a real edit | waits | no wait for the texts that did not change |
+| A block first shown within the second after the reset, as by scrolling right after opening | waits | waits (not covered) |
+| An export, `lazy=off`, "Render all diagrams in this note", a button | unchanged | unchanged |
+
+A block made again whose text is not cached is one whose compile is under way, which it joins
+(queue dedup), or one that failed, since errors are not cached: that one compiles at once at each
+return to the text the note showed before the burst. Reading view and an embed keep a section whose
+text did not change (`parseFinish` reuses sections by their text, read in the bundle), so typing
+elsewhere in the note does not make such a block again.
+
+**What the diagnostics now say.** The waited step of a block an edit did not make wait, as its note
+already showed it: "waited 0 ms; the note was edited 103 ms before the block was made, which did not
+count: the note already showed this diagram", or "… as the block was made, which did not count: …"
+(`BlockEdit.shown`).
+
+**What it does not cover.** An edit that changes nothing is still an edit: a block first shown within
+the second after the reset, as by scrolling right after a note opens, waits the debounce. Telling
+such an edit apart needs the editor's own update, comparing the documents before and after it,
+through an editor extension and Obsidian's `editorInfoField`, which `editor-change` does not carry;
+not done. Nor is it measured on the desktop: whether the first diagrams after a start now say
+"waited 0 ms … which did not count" is for the maintainer's next start.
+
+Tests: `test/edits.test.ts` (made again with the old block unloaded in the run that makes the new
+one, in the edit's own run, or after the new one; made before the edit and loaded after it; a text
+first shown once the burst began, through four keystrokes beside the editor, back to a text they made
+and back to the one before them; a block made in the run of the burst's first edit; the burst from
+its first edit, and a new one after a pause; an edit that named no note; any view of the note; the
+note alone; forgotten a window after the last unload; an unload said twice), `test/processor.test.ts`
+(both remakes at a start, through the processor, the block and the plugin's own `RecentEdits`, in
+the order of things read in the bundle, and typing still waiting beside the editor or in an embed, in
+a second pane in Live Preview and for a sync; the block's load and unload told), `test/report.test.ts`.
+
+### The iPhone drawing the small diagram at the top last
+
+**What the phone said.** After a restart, a note opened with four diagrams in this order: a small
+plain tikzpicture (#1), circuitikz (#2), pgfplots (#3) and pgfplotstable (#4), the three heavier with
+runs stored from the session before. All four waited 0 ms, the note "edited 23 ms after the block was
+made, which did not count" (24 for #1): D39's rule held. #2 was queued 0 ms and waited 36 of the
+engine's 38 ms start; #3 was queued 150 ms, #4 257 ms, and #1, made first, 270 ms: seen to drawn 296
+ms, against 170 for #2.
+
+**Why.** The figures add up exactly. #2, #3 and #4 were submitted together, and #2 took the one slot
+a phone has (D24) and waited in the host for the engine to start. #1 was submitted 39 ms later, 3 ms
+after the engine had taken #2, and the queue ranked a band by order of submission alone, so #1 waited
+behind #3 and #4 as well. A block is submitted after its cache read and the viewport gate (D22, D23),
+and each cache read takes its own time. #1's was most likely the slowest because it alone may be read
+in the old plugin's store, as a block that loads no package: the first such read of a session lists
+IndexedDB's databases and opens that store (`cache/index.ts`). That is not measured. Of #1's 270 ms,
+about 30 were the engine idle while #3's and #4's stored runs were read, which starts only once the
+queue has started their jobs.
+
+**What it does now** (`src/queue/queue.ts`, `src/block/processor.ts`, `src/block/render-child.ts`,
+`src/block/machine.ts`):
+
+- **Inside a band, by place in the note.** The processor numbers the blocks it makes, before anything
+  yields, and the block gives its number to the queue (`SubmitOptions.place`). Obsidian makes a view's
+  blocks from the top down, Live Preview's widgets and Reading view's sections alike, so the block
+  made first is the highest. Inside a band the queue starts the lowest number first, then the one
+  submitted first; a job two blocks want takes the lower of their numbers; a job the engine was
+  stopped under still goes ahead of its band; a caller that gives none comes after those that do. The
+  depth cap turns away, in the least urgent band, the lowest in the note, then the newest, where it
+  turned away the newest.
+- **A started job the engine does not have yet gives its slot to a more urgent one.** This is D25's
+  window: started, the runner not having said that the engine has the job, nothing paid for. When a
+  more urgent job waits and no slot is free, the least urgent job in that window goes back in line
+  with its band, place and turn, and counts against the depth cap again. The more urgent job is
+  started first and the other's signal aborted after, with `cancelled`, so that the host, still
+  starting an engine for the one, finds the other waiting for it; otherwise a WebView without
+  `AbortSignal.reason`, which cannot tell a cancel from a stall, would stop the start (D25). A runner
+  that says the engine has a job after it gave its slot up is ignored. The job's block stays in
+  COMPILING, the queue tells it again when the job starts again, and its queue time runs to the last
+  start. Turned away afterwards, by the depth cap or the plugin unloading, the block rests on its
+  "Render diagram" button, as from SCHEDULING (`machine.ts`); before, a rejection could reach a block
+  in COMPILING only once it was unloaded.
+
+**Simulated**, not measured on a phone: the real `RenderQueue` and `WorkerHost`, with a worker, stored
+runs and one clock that take the iPhone's own figures (`test/support/order-sim.ts`). Queue time / seen
+to drawn, in ms:
+
+| | | #1 | #2 | #3 | #4 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| As observed: #1 39 ms after the others, the engine's start 38 ms | beta.6 | 267 / 290 | 0 / 166 | 147 / 256 | 254 / 308 |
+| | now | 108 / 131 | 0 / 166 | 169 / 278 | 276 / 330 |
+| #1 20 ms after the others, while the engine starts | beta.6 | 286 / 309 | 0 / 166 | 147 / 256 | 254 / 308 |
+| | now | 0 / 39 | 58 / 204 | 185 / 294 | 292 / 346 |
+| An engine that starts in 900 ms, as without the JIT | beta.6 | 1,129 / 1,152 | 0 / 1,028 | 1,009 / 1,118 | 1,116 / 1,170 |
+| | now | 0 / 882 | 920 / 1,066 | 1,047 / 1,156 | 1,154 / 1,208 |
+| A computer with two engines, as observed | beta.6 | 108 / 131 | 0 / 166 | 0 / 124 | 122 / 176 |
+| | now | 83 / 106 | 0 / 166 | 0 / 124 | 144 / 198 |
+
+The simulation gives the phone's queue times within 3 ms, and its seen to drawn within 6. As observed, #2 was in the engine
+before #1 asked, and the order in the note is what helps; giving up the slot helps whenever the top
+diagram asks while the engine is still starting. A job that gave its slot up has its stored run read
+again when it starts again, with the engine idle: #2's 16 ms in the second case. The note's last
+diagram is drawn 22 to 38 ms later; the work is the same.
+
+**What else it touches.**
+
+- **The bands are as they were**: an export ahead, a fast diagram one band up, a job the engine was
+  stopped under ahead of its band. An export can now take the slot of a block in view whose job is
+  still waiting for the engine.
+- **In view and near are not told apart.** The viewport gate counts a block within its margin, 400 px
+  on a phone and 200 on a computer, as in view, the machine gives it band 1, and `priority()` reads
+  the same flag; band 2 goes only to a `lazy=off` block and to one scrolled away during its debounce.
+  A block in the margin above the view is made first, and goes first. Telling them apart, band 1 only
+  for a block truly in view, is left for later.
+- **Stored runs** are still read only once the queue has started a job, so with one engine every read
+  is made with the engine idle; reading ahead for the next job is left for later.
+- **A block made by scrolling up, or by typing,** is made later and goes later, as it did.
+
+**Not measured on a phone.** Whether #1's cache read was slow for the old plugin's store: a step in
+the diagnostics timing the cache read would say.
+
+Tests: `test/queue.test.ts` (a band by place, then by submission; a job's highest place; a resumed job
+ahead of every place; the depth cap turning away the lowest in the note; the slot going to a more
+urgent job, the one that had it starting after it, in a band or across bands, from the least urgent of
+two; never from a job the engine has, nor to one no more urgent; the depth cap counting the job put
+back, also once the queue resumes; a waiting job promoted by a second caller; a late `running`
+ignored; a job put back released, started again at once, or dropped as the queue closes; not while
+paused; the randomised interleavings unchanged), `test/order.test.ts` (the phone's note, as beta.6
+had it and now, early and late, on a slow engine, where `AbortSignal` has no reason, with two
+engines), `test/processor.test.ts` (the note through the processor, the block and its machine and the
+real queue), `test/machine.test.ts` (COMPILING turned away), `test/render-child.test.ts` (the queue
+time to the last start, and the place handed to the queue).
+
+**What it costs.** `main.js` grows by 1,814 bytes for the first half, and 233 for the order in the
+note and 727 for the slot: 2,774 in all, from 0.2.1-beta.6's 12,230,424. The worker does not change,
+nor does anything `test/fixtures/golden/REVISION.json` records: diagrams draw as before, and stay
+cached.
 
 ---
 
