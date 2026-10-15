@@ -161,8 +161,9 @@ let coreDump: CoreDump | null = null;
  *  - the bundled TeX files stay base64 text until TeX first asks for one, when that one is decoded
  *    and inflated, and library.ts keeps it inflated for the rest of the worker's life;
  *  - a loop of known cost, compiled beside tex.wasm and off this thread too, is timed once both are
- *    compiled, to say whether WebAssembly runs with a JIT here, which Lockdown Mode on an iPhone
- *    turns off (./jit, internal/DECISIONS.md D33).
+ *    compiled, and weighed against the dump's inflate where the platform did it, to say whether
+ *    WebAssembly runs with a JIT here, which Lockdown Mode on an iPhone turns off (./jit,
+ *    internal/DECISIONS.md D33).
  */
 async function boot(assets: EngineAssets): Promise<BootTimings> {
 	const started = performance.now();
@@ -179,6 +180,12 @@ async function boot(assets: EngineAssets): Promise<BootTimings> {
 	const decoded = performance.now();
 
 	const inflated = await gunzipExactly(dumpGz, packedLength(CORE_DUMP_RUNS));
+	// The platform's own inflate, a byte, is what the JIT probe is weighed against (./jit): native
+	// code, which a slow processor slows as much as the probe's loop and a missing JIT does not. Not
+	// pako's, which is JavaScript.
+	const inflateNsPerByte = inflated.native
+		? ((performance.now() - decoded) * 1e6) / inflated.bytes.length
+		: undefined;
 	const dump = unpackCoreDump(CORE_DUMP_SIZE, CORE_DUMP_RUNS, inflated.bytes);
 	checkCoreDump(dump, library.pages);
 	const ready = performance.now();
@@ -188,7 +195,7 @@ async function boot(assets: EngineAssets): Promise<BootTimings> {
 	library.setBundledFiles(new Map(Object.entries(assets.files)), (b64: string) => ungzip(fromBase64(b64)));
 	const done = performance.now();
 	const spin = await probe;
-	const jit = spin === undefined ? undefined : probeJit(undefined, spin);
+	const jit = spin === undefined ? undefined : await probeJit(undefined, spin, inflateNsPerByte, sleep);
 
 	return {
 		decodeMs: Math.round(decoded - started),

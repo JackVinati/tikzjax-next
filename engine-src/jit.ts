@@ -1,7 +1,7 @@
-import type { JitProbe } from './protocol';
+import type { JitProbe, JitState } from './protocol';
 
 /**
- * Whether this WebView runs WebAssembly with a JIT compiler, probably (internal/DECISIONS.md D33).
+ * Whether this WebView runs WebAssembly with a JIT compiler, probably (internal/DECISIONS.md D33, D38).
  *
  * Without one TeX is about twenty times slower: Lockdown Mode on an iPhone or iPad runs Obsidian's
  * web content that way, and a circuitikz diagram that took 0.27 s of TeX on the maintainer's
@@ -12,20 +12,28 @@ import type { JitProbe } from './protocol';
  * The loop is the module below, 68 bytes of WebAssembly 1.0: one function that takes a step of a
  * linear congruential generator `n` times, a chain of dependent integer multiplies and adds that no
  * compiler can shorten, whose result it returns. On the desktop the engine is maintained on it takes
- * 0.77 to 0.87 ns a step compiled, in V8 and JavaScriptCore alike, and 13.75 to 15 ns a step
- * interpreted, in JavaScriptCore with its JIT turned off, as Lockdown Mode turns it off.
+ * 0.7 to 0.9 ns a step compiled, in V8 and JavaScriptCore alike, and 12 to 15 ns a step interpreted,
+ * in JavaScriptCore with its JIT turned off, as Lockdown Mode turns it off.
  *
- * An attempt is PROBE_STEPS steps, in PROBE_CALLS calls, and it is slow when the worker's clock
- * reaches PROBE_SLOW_MS before it is done, at which point it stops. The JIT is taken to be off when
- * each of PROBE_ATTEMPTS attempts is slow, so that an attempt the system took the thread away from
- * in the middle does not make a computer with a JIT look like one without. A short call comes first,
- * untimed, so that no attempt pays for the function's first compile.
+ * An attempt is PROBE_STEPS steps, in PROBE_CALLS calls. One that is done before the worker's clock
+ * reaches PROBE_SLOW_MS settles it: only compiled code runs the loop that fast. A processor slowed
+ * down, hot or in Low Power Mode, can run it slower than that with its JIT, as the maintainer's
+ * iPhone did once, so a slow attempt is not taken for a missing JIT by itself, as it was until
+ * 0.2.1-beta.5. The first attempt stops at PROBE_SLOW_MS; once it has been slow, the worker gives
+ * its thread up for a moment, which lets the platform finish compiling the loop where no core was
+ * free to, and tries again, up to PROBE_ATTEMPTS in all, each run on to PROBE_MEASURE_MS so that it
+ * says how slow the loop is. What a step took at the fastest of them (`nsPerStep`) is then weighed
+ * against what the same start spent a byte in the platform's own inflate of the core dump, native
+ * code that a slow processor slows as much as it slows the loop and a missing JIT hardly slows: 29 to
+ * 43 ms with the JIT and 33 to 42 without, in fresh workers in WebKit on the desktop (`verdict`).
  *
  * What it costs the start: about half a millisecond with a JIT on the desktop, as it ends with the
- * first attempt that is not slow, and about three milliseconds an attempt without one, as each stops
- * at PROBE_SLOW_MS. Its module is compiled beside tex.wasm, off the worker's thread, which also pays
- * there for what the first WebAssembly module of a process costs in JavaScriptCore, about 5 ms, and
- * it runs once both are compiled (compileProbeAsync).
+ * first attempt, which is fast; 8 to 10 ms where the first was slow and the second, after the
+ * pause, was not; without one, PROBE_SLOW_MS and three more attempts of PROBE_MEASURE_MS with the
+ * pauses between them, 33 to 40 ms in WebKit on the desktop, where until 0.2.1-beta.5 it took 12 to
+ * 16. Its module is compiled beside tex.wasm, off the worker's thread, which also pays there for
+ * what the first WebAssembly module of a process costs in JavaScriptCore, about 5 ms, and it runs once
+ * both are compiled (compileProbeAsync).
  */
 
 /**
@@ -60,16 +68,63 @@ export const PROBE_STEPS = 600_000;
 export const PROBE_CALLS = 8;
 
 /**
- * When an attempt is slow: 5 ns a step. JavaScriptCore's clock moves a millisecond at a time in a
- * page that is not cross-origin isolated, which Obsidian's is not, so it can read 3 for anything
- * over 2 ms, 3.3 ns a step. Compiled code would have to run the loop four times slower than the
- * desktop does to come near it, and an interpreter almost three times faster than the desktop's to
- * stay under it.
+ * An attempt done before the clock reaches this settles it: 5 ns a step, which compiled code would
+ * have to run four times slower than the desktop does to reach, and no interpreter has come near.
+ * JavaScriptCore's clock moves a millisecond at a time in a page that is not cross-origin isolated,
+ * which Obsidian's is not, so it can read 3 for anything over 2 ms, 3.3 ns a step.
  */
 export const PROBE_SLOW_MS = 3;
 
-/** Attempts, before the JIT is taken to be off. */
+/**
+ * How long an attempt after a slow one may run, so that it says how slow the loop is: a clock that
+ * moves a millisecond at a time measures 6 ms to within a sixth, where 3 ms was within a third.
+ */
+export const PROBE_MEASURE_MS = 6;
+
+/**
+ * How long the worker gives its thread up for before each attempt after a slow one. JavaScriptCore
+ * compiles a hot WebAssembly function on threads of its own, while the loop goes on uncompiled, and
+ * where no core is free for them, the worker's thread and theirs take turns. On the desktop with WebKit held to one efficiency core, attempts that
+ * did not pause took the JIT for off in 6 of 16 starts that had it, as 0.2.1-beta.4's did, and in 20
+ * of 24 run on to PROBE_MEASURE_MS; a pause of 1 ms did no better, 22 of 24, and one of 2, 4 or 8 ms
+ * left none of 24 slow each (internal/DECISIONS.md D38).
+ */
+export const PROBE_PAUSE_MS = 4;
+
+/** Attempts, before it is weighed. */
 export const PROBE_ATTEMPTS = 4;
+
+/**
+ * How many times slower than a byte of the platform's inflate a step of the loop has to be for the
+ * JIT to be taken for off, and how many times at most for on. Measured on the desktop of D27 in fresh
+ * workers, the loop's fastest call of 8 ms or more against the inflate of the same start: with the
+ * JIT, 0.3 to 0.7 times in WebKit and Chromium, idle, held to one efficiency core or with Windows'
+ * power throttling on, and 0.02 to 0.9 with every core busy; without it, in WebKit, 7.7 to 8.7 idle,
+ * 7.3 to 26 held to one efficiency core, and 5 to 19 with every core busy and power throttling on
+ * (internal/DECISIONS.md D38). A processor slowed down all over, as one hot or in Low Power Mode,
+ * slows both alike and leaves this where it was.
+ */
+export const OFF_RATIO = 4;
+export const ON_RATIO = 2;
+
+/**
+ * However the two compare, the loop is not taken for compiled code at this many ns a step or more:
+ * the fastest interpreter measured, JavaScriptCore's on the desktop's fastest core, took 12 to 13.
+ * With all 32 of the desktop's threads busy with other work at normal priority, the inflate shared
+ * its core more than the loop did, and without the JIT the loop came out at 0.74 times its time a
+ * byte, and the shipped probe's at 0.86, which this leaves unclear rather than on.
+ */
+export const ON_MAX_NS = 10;
+
+/**
+ * A step this slow is taken for no JIT even with no native inflate to weigh it against, which is
+ * how it is where the platform has no DecompressionStream, iOS before 16.4, and pako inflated the
+ * dump: pako is JavaScript, and slows without a JIT as the loop does. Compiled code would have to run
+ * the loop twenty times slower than the desktop does; slower than PROBE_SLOW_MS and faster than this
+ * is unclear, as WebKit without the JIT and without the platform's decoders was on the desktop, at 11
+ * to 16 ns a step.
+ */
+export const OFF_NS_ALONE = 20;
 
 /** The probe's function: `n` steps of the generator from `x`. */
 export type Spin = (n: number, x: number) => number;
@@ -96,35 +151,75 @@ const spinOf = (module: WebAssembly.Module): Spin =>
 	(new WebAssembly.Instance(module).exports as { spin: Spin }).spin;
 
 /**
- * Time the loop, and say whether it ran as compiled code runs: see the top of this file. Undefined
- * when it could not be timed, where the platform refuses the module, which a WebView that runs TeX
- * does not.
+ * What a loop that took `nsPerStep` a step, none of whose attempts was fast enough to settle it,
+ * says of the JIT, against the platform's inflate of the core dump in the same start, at
+ * `inflateNsPerByte` a byte, where the platform inflated it: see the top of this file.
  */
-export function probeJit(now: () => number = () => performance.now(), spin?: Spin): JitProbe | undefined {
+export function verdict(nsPerStep: number, inflateNsPerByte: number | undefined): JitState {
+	if (!(nsPerStep > 0) || !Number.isFinite(nsPerStep)) return 'unclear';
+	if (inflateNsPerByte === undefined || !(inflateNsPerByte > 0) || !Number.isFinite(inflateNsPerByte))
+		return nsPerStep >= OFF_NS_ALONE ? 'off' : 'unclear';
+	const ratio = nsPerStep / inflateNsPerByte;
+	if (ratio >= OFF_RATIO) return 'off';
+	if (ratio <= ON_RATIO && nsPerStep < ON_MAX_NS) return 'on';
+	return 'unclear';
+}
+
+/**
+ * Gives the thread up for `ms`: the worker's own timer, which the worker passes (worker.ts `sleep`).
+ * Without one the attempts follow each other at once.
+ */
+export type Pause = (ms: number) => Promise<void>;
+
+const noPause: Pause = () => Promise.resolve();
+
+/**
+ * Time the loop, and say what it makes of the JIT: see the top of this file. `inflateNsPerByte` is
+ * what the platform's own inflate of the core dump took in this start, a byte; undefined where it
+ * did not inflate it, and `pause` gives the thread up between attempts. Undefined when the loop
+ * could not be timed, where the platform refuses the module, which a WebView that runs TeX does not.
+ */
+export async function probeJit(
+	now: () => number = () => performance.now(),
+	spin?: Spin,
+	inflateNsPerByte?: number,
+	pause: Pause = noPause,
+): Promise<JitProbe | undefined> {
 	try {
 		const started = now();
 		const run = spin ?? compileProbe();
 		let x = run(2000, 1);
 		const steps = PROBE_STEPS / PROBE_CALLS;
 		let fastest = Infinity;
+		let nsPerStep = Infinity;
 		let attempts = 0;
-		while (attempts < PROBE_ATTEMPTS && !(fastest < PROBE_SLOW_MS)) {
+		let fast = false;
+		while (attempts < PROBE_ATTEMPTS && !fast) {
+			if (attempts > 0) await pause(PROBE_PAUSE_MS);
+			const limit = attempts === 0 ? PROBE_SLOW_MS : PROBE_MEASURE_MS;
 			attempts++;
 			const from = now();
 			let took = 0;
-			for (let call = 0; call < PROBE_CALLS && took < PROBE_SLOW_MS; call++) {
+			let calls = 0;
+			while (calls < PROBE_CALLS && took < limit) {
 				x = run(steps, x);
+				calls++;
 				took = now() - from;
 			}
+			fast = calls === PROBE_CALLS && took < PROBE_SLOW_MS;
 			fastest = Math.min(fastest, took);
+			if (took > 0) nsPerStep = Math.min(nsPerStep, (took * 1e6) / (calls * steps));
 		}
 		// Each call takes the last one's result, and none can be left out as unused: nothing outside
 		// WebAssembly knows what a call into it does.
+		const weighed = !fast && Number.isFinite(nsPerStep);
 		return {
-			on: fastest < PROBE_SLOW_MS,
+			state: fast ? 'on' : verdict(nsPerStep, inflateNsPerByte),
 			fastestMs: tenths(fastest),
 			attempts,
 			spentMs: tenths(now() - started),
+			...(weighed ? { nsPerStep: hundredths(nsPerStep) } : {}),
+			...(inflateNsPerByte === undefined ? {} : { inflateNsPerByte: hundredths(inflateNsPerByte) }),
 		};
 	} catch {
 		return undefined;
@@ -132,3 +227,4 @@ export function probeJit(now: () => number = () => performance.now(), spin?: Spi
 }
 
 const tenths = (ms: number): number => Math.round(ms * 10) / 10;
+const hundredths = (x: number): number => Math.round(x * 100) / 100;

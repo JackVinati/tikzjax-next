@@ -1,3 +1,4 @@
+import type { JitState } from '../../engine-src/protocol';
 import type { BlockOutcome } from '../block/render-child';
 import type { StoredRunStats } from '../cache/runs';
 import type { EngineReport } from '../engine/worker-host';
@@ -146,10 +147,10 @@ function mb(bytes: number): string {
  * Whether WebAssembly runs with a JIT, probably, as the latest engine to say found it
  * (engine-src/jit.ts): null until an engine that times it has started.
  */
-export function jitOf(engine: EngineReport): boolean | null {
+export function jitOf(engine: EngineReport): JitState | null {
 	for (let i = engine.lives.length - 1; i >= 0; i--) {
 		const jit = engine.lives[i]?.boot?.jit;
-		if (jit !== undefined) return jit.on;
+		if (jit !== undefined) return jit.state;
 	}
 	return null;
 }

@@ -602,7 +602,14 @@ describe('what the diagnostics view is told about the engine', () => {
 			totalMs: 61,
 			nativeInflate: true,
 			nativeBase64: true,
-			jit: { on: false, fastestMs: 3, attempts: 4, spentMs: 12 },
+			jit: {
+				state: 'off',
+				fastestMs: 3,
+				attempts: 4,
+				spentMs: 30,
+				nsPerStep: 12.5,
+				inflateNsPerByte: 1.51,
+			},
 		};
 		void host.ready();
 		worker(0).boot(off);

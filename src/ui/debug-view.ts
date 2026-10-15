@@ -310,9 +310,9 @@ export class DebugView extends ItemView {
 			}
 			return;
 		}
-		const on = jitOf(report);
-		this.fact(facts, STRINGS.jitFact, STRINGS.jitState(on));
-		if (on === false && about.os === 'iOS') {
+		const state = jitOf(report);
+		this.fact(facts, STRINGS.jitFact, STRINGS.jitState(state));
+		if (state === 'off' && about.os === 'iOS') {
 			const hint = section.createDiv({ cls: 'tikzjax-debug-warning' });
 			withReadme(hint, STRINGS.jitHint, STRINGS.jitHintLink, README_LOCKDOWN);
 		}

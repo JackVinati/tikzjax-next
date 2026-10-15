@@ -15,6 +15,7 @@ export function startWorker(source, payload, { legacy = false, timeoutMs = 60_00
 		(legacy ? 'delete globalThis.DecompressionStream;\ndelete Uint8Array.fromBase64;\n' : '') +
 		'globalThis.self = {\n' +
 		'	postMessage: (message) => parentPort.postMessage(message),\n' +
+		'	setTimeout: (fn, ms) => setTimeout(fn, ms),\n' +
 		"	set onmessage(fn) { parentPort.on('message', (data) => fn({ data })); },\n" +
 		'};\n';
 	return new Promise((resolve) => {

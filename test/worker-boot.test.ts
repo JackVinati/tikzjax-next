@@ -53,15 +53,20 @@ describe('the engine starting from the payload the host sends it', { timeout: 12
 		);
 		// Node runs WebAssembly with a JIT, and the probe that says so is part of the start
 		// (engine-src/jit.ts, internal/DECISIONS.md D33).
-		expect(boot.jit).toMatchObject({ on: true });
+		expect(boot.jit).toMatchObject({ state: 'on' });
 		expect(boot.jit!.spentMs).toBeLessThanOrEqual(boot.totalMs + 1);
+		// What it is weighed against when its loop is slow: the platform's inflate of the dump, a byte.
+		expect(boot.jit!.inflateNsPerByte).toBeGreaterThan(0);
 	});
 
 	it('answers ready without DecompressionStream and Uint8Array.fromBase64, as on iOS 14.5 to 16.3', async () => {
 		const outcome = await startWorker(source, payload, { legacy: true });
 		expect(outcome.type).toBe('ready');
-		if (outcome.type === 'ready')
+		if (outcome.type === 'ready') {
 			expect(outcome.boot).toMatchObject({ nativeInflate: false, nativeBase64: false });
+			// pako is JavaScript, and slows without a JIT as the probe's loop does: not weighed against.
+			expect(outcome.boot?.jit?.inflateNsPerByte).toBeUndefined();
+		}
 	});
 
 	const broken: [string, () => Record<string, unknown>][] = [

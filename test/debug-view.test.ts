@@ -252,8 +252,23 @@ const warningsOf = (view: DebugView): HTMLElement[] => [
 ];
 
 describe('the JIT in the diagnostics view', () => {
-	const OFF = { on: false, fastestMs: 3, attempts: 4, spentMs: 13 };
-	const ON = { on: true, fastestMs: 0.5, attempts: 1, spentMs: 0.7 };
+	const OFF = {
+		state: 'off',
+		fastestMs: 3,
+		attempts: 4,
+		spentMs: 30,
+		nsPerStep: 12.5,
+		inflateNsPerByte: 1.51,
+	} as const;
+	const ON = { state: 'on', fastestMs: 0.5, attempts: 1, spentMs: 0.7 } as const;
+	const UNCLEAR = {
+		state: 'unclear',
+		fastestMs: 3,
+		attempts: 4,
+		spentMs: 29,
+		nsPerStep: 6,
+		inflateNsPerByte: 1.6,
+	} as const;
 
 	it('is not measured until an engine that times it has started', async () => {
 		expect(factsOf(await opened(source([])))['JIT']).toBe('not measured yet');
@@ -282,6 +297,16 @@ describe('the JIT in the diagnostics view', () => {
 		const link = hint?.querySelector('a');
 		expect(link?.getAttribute('href')).toBe(README_LOCKDOWN);
 		expect(link?.textContent).toBe('Lockdown Mode in the README');
+	});
+
+	it('says what the probe measured when it was slow, and that it is unclear, with no hint', async () => {
+		const off = await opened(source([], startedOnce(OFF), { platform: 'phone', os: 'iOS' }));
+		expect(off.contentEl.querySelector('.tikzjax-debug-starts')?.textContent).toContain(
+			'JIT probe 30 ms (12.5 ns a step, inflate 1.51 ns a byte); native gzip yes, native base64 yes; JIT off (probably)',
+		);
+		const unclear = await opened(source([], startedOnce(UNCLEAR), { platform: 'phone', os: 'iOS' }));
+		expect(factsOf(unclear)['JIT']).toBe('unclear');
+		expect(warningsOf(unclear)).toEqual([]);
 	});
 
 	it('says only that it is off elsewhere, where Lockdown Mode is not the cause', async () => {

@@ -64,7 +64,10 @@ export default class TikzjaxNextPlugin extends Plugin {
 	private readonly records: RenderRecord[] = [];
 	/** The "Render all diagrams in this note" runs under way, each counting its own blocks. */
 	private readonly tallies = new Set<BlockTally>();
-	/** How many engine starts this session found the JIT on, and how many off (warnIfNoJit). */
+	/**
+	 * How many engine starts this session found the JIT on, and how many off (warnIfNoJit). One whose
+	 * probe was unclear counts as neither.
+	 */
 	private readonly jitStarts = { on: 0, off: 0 };
 
 	get engineInventory(): EngineInventory | null {
@@ -322,7 +325,8 @@ export default class TikzjaxNextPlugin extends Plugin {
 	 * once; the diagnostics view says it whenever it is opened.
 	 */
 	private warnIfNoJit(boot: BootTimings | null): void {
-		if (boot?.jit !== undefined) this.jitStarts[boot.jit.on ? 'on' : 'off']++;
+		const state = boot?.jit?.state;
+		if (state === 'on' || state === 'off') this.jitStarts[state]++;
 		const message = noJitNotice(this.jitStarts, device().os, this.settings.jitNoticeShown);
 		if (message === null) return;
 		new Notice(message, 0);

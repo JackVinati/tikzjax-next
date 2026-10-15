@@ -1,4 +1,4 @@
-import type { BootTimings } from '../../engine-src/protocol';
+import type { BootTimings, JitProbe, JitState } from '../../engine-src/protocol';
 import type { EngineStop } from '../engine/worker-host';
 import { compareVersions } from '../platform/version';
 import type { WebViewFeatures } from '../platform/device';
@@ -38,9 +38,31 @@ export const README_LOCKDOWN = `${README}#lockdown-mode`;
 /** "After an update, another device shows the new version but nothing changed": Sync Standard. */
 export const README_OUT_OF_STEP = `${README}#out-of-step`;
 
-/** What the probe of the JIT found (engine-src/jit.ts), as the diagnostics say it: it is a guess. */
-const jitState = (on: boolean | null): string =>
-	on === null ? 'not measured yet' : on ? 'on (probably)' : 'off (probably)';
+/**
+ * What the probe of the JIT found (engine-src/jit.ts), as the diagnostics say it: it is a guess, and
+ * `unclear` where the loop was slow and so was the rest of the start, or nothing native was there to
+ * weigh it against.
+ */
+const jitState = (state: JitState | null): string =>
+	state === null
+		? 'not measured yet'
+		: state === 'on'
+			? 'on (probably)'
+			: state === 'off'
+				? 'off (probably)'
+				: 'unclear';
+
+/**
+ * What the probe took, and when its first attempt was slow, what a step of its loop took and what a
+ * byte of the platform's inflate took in the same start, which it was weighed against.
+ */
+const jitProbe = (jit: JitProbe): string =>
+	`JIT probe ${jit.spentMs} ms` +
+	(jit.nsPerStep === undefined
+		? ''
+		: ` (${jit.nsPerStep} ns a step` +
+			(jit.inflateNsPerByte === undefined ? '' : `, inflate ${jit.inflateNsPerByte} ns a byte`) +
+			')');
 
 /**
  * main.js and manifest.json of different versions, and what to do about it (src/platform/version.ts):
@@ -139,9 +161,9 @@ export const STRINGS = {
 	engineStartedWith: (ms: number, boot: BootTimings) =>
 		`started in ${ms} ms (in the worker ${boot.totalMs} ms: decode ${boot.decodeMs} ms, ` +
 		`inflate ${boot.inflateMs} ms, compile ${boot.compileMs} ms` +
-		(boot.jit === undefined ? '' : `, JIT probe ${boot.jit.spentMs} ms`) +
+		(boot.jit === undefined ? '' : `, ${jitProbe(boot.jit)}`) +
 		`; native gzip ${yesNo(boot.nativeInflate)}, native base64 ${yesNo(boot.nativeBase64)}` +
-		(boot.jit === undefined ? '' : `; JIT ${jitState(boot.jit.on)}`) +
+		(boot.jit === undefined ? '' : `; JIT ${jitState(boot.jit.state)}`) +
 		')',
 	engineNeverStarted: 'never finished starting',
 	/** What an engine held of saved preambles after its last diagram, and its saves that failed. */

@@ -178,16 +178,35 @@ export interface BootTimings {
 	jit?: JitProbe | undefined;
 }
 
+/**
+ * What the worker's timing of a loop of known cost made of the JIT (./jit, internal/DECISIONS.md D33):
+ * `on` when the loop ran as only compiled code runs it, or ran slowly but no slower than the rest of
+ * the start, as on a processor slowed down by heat or Low Power Mode; `off` when it ran far slower
+ * than the rest, as an interpreter runs it; `unclear` in between, or where there was nothing native
+ * to weigh it against and it was not slow enough to tell.
+ */
+export type JitState = 'on' | 'off' | 'unclear';
+
 /** What the worker's timing of a loop of known cost found (./jit, internal/DECISIONS.md D33). */
 export interface JitProbe {
-	/** The loop ran as compiled code runs: false when every attempt was slow, as without a JIT. */
-	on: boolean;
-	/** The fastest attempt by the worker's clock, in ms, cut short at the threshold when slow. */
+	state: JitState;
+	/** The fastest attempt by the worker's clock, in ms, cut short at its limit when slow. */
 	fastestMs: number;
 	/** How many attempts it took: 1 unless the first was slow. */
 	attempts: number;
 	/** What the probe took of the start, in all. */
 	spentMs: number;
+	/**
+	 * What a step of the loop took, in ns, at the fastest of the attempts, from the calls each
+	 * finished: when none was fast enough to settle it at once, which is when it was weighed.
+	 */
+	nsPerStep?: number | undefined;
+	/**
+	 * What the platform's own inflate of the core dump took, in ns a byte inflated: the work in the
+	 * same start that a slow processor slows as much and a missing JIT does not, which the loop was
+	 * weighed against. Absent where pako inflated it, which is JavaScript.
+	 */
+	inflateNsPerByte?: number | undefined;
 }
 
 export interface ReadyMessage {
