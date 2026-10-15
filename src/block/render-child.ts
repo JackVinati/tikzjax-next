@@ -120,6 +120,11 @@ export interface BlockDeps {
 	 */
 	editing?: (() => MadeBy) | undefined;
 	/**
+	 * The block is loaded: its text is on screen in its note until the function returned is called,
+	 * as it is unloaded (block/edits.ts Making.shown). Omitted: nothing is told.
+	 */
+	shown?: (() => () => void) | undefined;
+	/**
 	 * Start the engine, if none is running or starting, without waiting for it. Called when the
 	 * cache misses, so that the engine's start runs while the block waits for the viewport gate and
 	 * its turn in the queue rather than after them (internal/DECISIONS.md D23), with the block's own
@@ -171,6 +176,8 @@ export class TikzBlock extends MarkdownRenderChild {
 	 */
 	private edit: MadeBy['edit'];
 	private pipelineEndAt: number | null = null;
+	/** Says the block's text is no longer on screen in its note (BlockDeps.shown), while it is. */
+	private hidden: (() => void) | undefined;
 
 	constructor(containerEl: HTMLElement, spec: TexJobSpec, deps: BlockDeps) {
 		super(containerEl);
@@ -194,10 +201,15 @@ export class TikzBlock extends MarkdownRenderChild {
 	}
 
 	override onload(): void {
+		// Its text is on screen in its note until it is unloaded: what tells a block made again from one
+		// typed (block/edits.ts).
+		this.hidden = this.deps.shown?.();
 		this.dispatch({ type: 'load' });
 	}
 
 	override onunload(): void {
+		this.hidden?.();
+		this.hidden = undefined;
 		this.dispatch({ type: 'unload' });
 	}
 

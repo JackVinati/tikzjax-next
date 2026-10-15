@@ -8,6 +8,9 @@ import { editedNote, RecentEdits } from '../src/block/edits';
  * another run, did not make it (D39).
  */
 
+/** The cache key of the block asked about. */
+const KEY = 'key';
+
 function edits(windowMs = 1000) {
 	const clock = { now: 0 };
 	const queued: (() => void)[] = [];
@@ -28,7 +31,7 @@ describe('RecentEdits', () => {
 		const { edits: recent, endRun } = edits();
 		const made = recent.making('note.md');
 		endRun();
-		expect(made().editing).toBe(false);
+		expect(made.by(KEY).editing).toBe(false);
 	});
 
 	it('says a block was made by typing for the window after its note changed, and not after', () => {
@@ -41,8 +44,8 @@ describe('RecentEdits', () => {
 		clock.now = 6001;
 		const after = recent.making('note.md');
 		endRun();
-		expect(within().editing).toBe(true);
-		expect(after().editing).toBe(false);
+		expect(within.by(KEY).editing).toBe(true);
+		expect(after.by(KEY).editing).toBe(false);
 	});
 
 	it('is about that note only: another note opened meanwhile was not typed in', () => {
@@ -53,8 +56,8 @@ describe('RecentEdits', () => {
 		const typing = recent.making('typing.md');
 		const opened = recent.making('opened.md');
 		endRun();
-		expect(typing().editing).toBe(true);
-		expect(opened().editing).toBe(false);
+		expect(typing.by(KEY).editing).toBe(true);
+		expect(opened.by(KEY).editing).toBe(false);
 	});
 
 	it('takes an edit in an editor that did not say which note for an edit of every note', () => {
@@ -68,8 +71,8 @@ describe('RecentEdits', () => {
 		clock.now = 1001;
 		const after = recent.making('any.md');
 		endRun();
-		expect(within().editing).toBe(true);
-		expect(after().editing).toBe(false);
+		expect(within.by(KEY).editing).toBe(true);
+		expect(after.by(KEY).editing).toBe(false);
 	});
 
 	it('keeps the latest edit of a note, however many notes were edited since', () => {
@@ -86,8 +89,8 @@ describe('RecentEdits', () => {
 		const a = recent.making('a.md');
 		const n0 = recent.making('n0.md');
 		endRun();
-		expect(a().editing).toBe(true);
-		expect(n0().editing).toBe(false);
+		expect(a.by(KEY).editing).toBe(true);
+		expect(n0.by(KEY).editing).toBe(false);
 	});
 
 	it('says a block made before an edit of its note, in another run, was not made by it', () => {
@@ -100,7 +103,7 @@ describe('RecentEdits', () => {
 		recent.changed('note.md');
 		recent.changed(null);
 		endRun();
-		expect(made().editing).toBe(false);
+		expect(made.by(KEY).editing).toBe(false);
 	});
 
 	it('says a block made in the run that then reports an edit of its note was made by it', () => {
@@ -110,7 +113,7 @@ describe('RecentEdits', () => {
 		const made = recent.making('note.md');
 		recent.changed('note.md');
 		endRun();
-		expect(made().editing).toBe(true);
+		expect(made.by(KEY).editing).toBe(true);
 	});
 
 	it('takes an editor that names no note, in that run, for an edit of the block’s', () => {
@@ -118,7 +121,7 @@ describe('RecentEdits', () => {
 		const made = recent.making('note.md');
 		recent.changed(null);
 		endRun();
-		expect(made().editing).toBe(true);
+		expect(made.by(KEY).editing).toBe(true);
 	});
 
 	it('does not take another note’s edit in that run for one of the block’s', () => {
@@ -126,7 +129,7 @@ describe('RecentEdits', () => {
 		const made = recent.making('note.md');
 		recent.changed('other.md');
 		endRun();
-		expect(made().editing).toBe(false);
+		expect(made.by(KEY).editing).toBe(false);
 	});
 
 	it('still counts an edit before the block was made when another comes after it', () => {
@@ -139,7 +142,7 @@ describe('RecentEdits', () => {
 		clock.now += 100;
 		recent.changed('note.md');
 		endRun();
-		expect(made().editing).toBe(true);
+		expect(made.by(KEY).editing).toBe(true);
 	});
 
 	it('tells the runs apart with the page’s own queueMicrotask', async () => {
@@ -152,8 +155,8 @@ describe('RecentEdits', () => {
 		await Promise.resolve();
 		later.changed('note.md');
 		await Promise.resolve();
-		expect(same().editing).toBe(true);
-		expect(before().editing).toBe(false);
+		expect(same.by(KEY).editing).toBe(true);
+		expect(before.by(KEY).editing).toBe(false);
 	});
 
 	it('does not take another note’s edit in that run for one of the block’s, when the block’s note was edited long before', () => {
@@ -167,7 +170,7 @@ describe('RecentEdits', () => {
 		const made = recent.making('note.md');
 		recent.changed('other.md');
 		endRun();
-		expect(made()).toEqual({ editing: false });
+		expect(made.by(KEY)).toEqual({ editing: false });
 	});
 });
 
@@ -184,7 +187,7 @@ describe('the edit a block is told of', () => {
 		clock.now = 120;
 		const made = recent.making('note.md');
 		endRun();
-		expect(made()).toEqual({ editing: true, edit: { source: 'modify', at: 'before', ms: 120 } });
+		expect(made.by(KEY)).toEqual({ editing: true, edit: { source: 'modify', at: 'before', ms: 120 } });
 	});
 
 	it('is the one reported in the run that made it, as Live Preview reports a keystroke', () => {
@@ -192,7 +195,7 @@ describe('the edit a block is told of', () => {
 		const made = recent.making('note.md');
 		recent.changed('note.md', 'editor');
 		endRun();
-		expect(made()).toEqual({ editing: true, edit: { source: 'editor', at: 'with', ms: 0 } });
+		expect(made.by(KEY)).toEqual({ editing: true, edit: { source: 'editor', at: 'with', ms: 0 } });
 	});
 
 	it('names an editor that names no note as such', () => {
@@ -202,7 +205,7 @@ describe('the edit a block is told of', () => {
 		clock.now = 30;
 		const made = recent.making('note.md');
 		endRun();
-		expect(made()).toEqual({ editing: true, edit: { source: 'unnamed', at: 'before', ms: 30 } });
+		expect(made.by(KEY)).toEqual({ editing: true, edit: { source: 'unnamed', at: 'before', ms: 30 } });
 	});
 
 	it('is, for a block no edit made, the last edit of its note after it was made, which did not count', () => {
@@ -217,7 +220,7 @@ describe('the edit a block is told of', () => {
 		clock.now = 85;
 		recent.changed('note.md', 'modify');
 		endRun();
-		expect(made()).toEqual({ editing: false, edit: { source: 'modify', at: 'after', ms: 85 } });
+		expect(made.by(KEY)).toEqual({ editing: false, edit: { source: 'modify', at: 'after', ms: 85 } });
 	});
 
 	it('is none for a block no edit came near, nor another note’s edit after it', () => {
@@ -230,7 +233,263 @@ describe('the edit a block is told of', () => {
 		clock.now = 5040;
 		recent.changed('other.md', 'modify');
 		endRun();
-		expect(made()).toEqual({ editing: false });
+		expect(made.by(KEY)).toEqual({ editing: false });
+	});
+});
+
+/**
+ * Obsidian hands the processor a block of `note` with this text, and loads it, in the run of code
+ * under way. `hide` is its unload.
+ */
+function show(recent: RecentEdits, key: string, note = 'note.md') {
+	const made = recent.making(note);
+	return { made, hide: made.shown(key) };
+}
+
+/*
+ * At a start on the desktop, Obsidian's own reset of its syntax highlighting replaced the note's first
+ * character with itself, an edit that changed nothing, and Live Preview then made the note's blocks
+ * again: they waited for the debounce, though the note had shown each of them before the edit. An edit
+ * makes a block wait only when the note did not have its text on screen as the edits began
+ * (internal/DECISIONS.md D40).
+ */
+describe('a block whose text its note already showed', () => {
+	it('does not wait when Live Preview makes it again after an edit, unloading the old one in that run', () => {
+		// The start of beta.6 on the desktop: another plugin's processor, registered once the
+		// workspace was ready, had Live Preview make every code block again, 103 ms after the edit.
+		const { clock, edits: recent, endRun } = edits(1000);
+		const old = show(recent, KEY);
+		endRun();
+		clock.now = 50;
+		recent.changed('note.md');
+		endRun();
+		clock.now = 153;
+		old.hide();
+		const again = show(recent, KEY);
+		endRun();
+		expect(again.made.by(KEY)).toEqual({
+			editing: false,
+			edit: { source: 'editor', at: 'before', ms: 103, shown: true },
+		});
+	});
+
+	it('nor when the old block was unloaded in the run of the edit, and the new one made later', () => {
+		// The edit's own update finds a stale syntax tree and lets the blocks past it go; the parse
+		// that comes after makes them again.
+		const { clock, edits: recent, endRun } = edits(1000);
+		const old = show(recent, KEY);
+		endRun();
+		clock.now = 50;
+		old.hide();
+		recent.changed('note.md');
+		endRun();
+		clock.now = 150;
+		const again = show(recent, KEY);
+		endRun();
+		expect(again.made.by(KEY)).toEqual({
+			editing: false,
+			edit: { source: 'editor', at: 'before', ms: 100, shown: true },
+		});
+	});
+
+	it('nor when the old block is unloaded only after the new one was made', () => {
+		const { clock, edits: recent, endRun } = edits(1000);
+		const old = show(recent, KEY);
+		endRun();
+		clock.now = 50;
+		recent.changed('note.md');
+		endRun();
+		clock.now = 150;
+		const again = show(recent, KEY);
+		old.hide();
+		endRun();
+		expect(again.made.by(KEY).editing).toBe(false);
+	});
+
+	it('nor for a block made before the edit and loaded after it, as one whose preamble is read first', () => {
+		const { clock, edits: recent, endRun } = edits(1000);
+		const made = recent.making('note.md');
+		endRun();
+		clock.now = 20;
+		recent.changed('note.md');
+		endRun();
+		clock.now = 30;
+		const hide = made.shown(KEY);
+		endRun();
+		clock.now = 120;
+		hide();
+		const again = show(recent, KEY);
+		endRun();
+		expect(again.made.by(KEY).editing).toBe(false);
+	});
+
+	it('waits for a text first shown after the edits began, as a Reading view beside the editor makes one at each keystroke', () => {
+		const { clock, edits: recent, endRun } = edits(1000);
+		const typed = show(recent, 'k0');
+		endRun();
+		// Each keystroke, and 10 ms later the Reading view lets the old block go and makes the new one.
+		const keystroke = (at: number, from: { hide: () => void }, to: string) => {
+			clock.now = at;
+			recent.changed('note.md');
+			endRun();
+			clock.now = at + 10;
+			from.hide();
+			const next = show(recent, to);
+			endRun();
+			return next;
+		};
+		const k1 = keystroke(1000, typed, 'k1');
+		expect(k1.made.by('k1')).toEqual({ editing: true, edit: { source: 'editor', at: 'before', ms: 10 } });
+		const k2 = keystroke(1300, k1, 'k2');
+		expect(k2.made.by('k2').editing).toBe(true);
+		// Back to a text the keystrokes made, as an undo makes it: shown only once they had begun.
+		const back = keystroke(1600, k2, 'k1');
+		expect(back.made.by('k1').editing).toBe(true);
+		// Back to the text shown before the first keystroke, which normally is in the cache.
+		const first = keystroke(1900, back, 'k0');
+		expect(first.made.by('k0')).toEqual({
+			editing: false,
+			edit: { source: 'editor', at: 'before', ms: 10, shown: true },
+		});
+	});
+
+	it('waits for a block made in the update of the edit that began the edits, as Live Preview makes a keystroke’s', () => {
+		const { clock, edits: recent, endRun } = edits(1000);
+		const made = show(recent, KEY);
+		recent.changed('note.md');
+		endRun();
+		expect(made.made.by(KEY)).toEqual({ editing: true, edit: { source: 'editor', at: 'with', ms: 0 } });
+		// Made again a moment later, by a second pane: shown first in the edit's own run, so not before it.
+		clock.now = 10;
+		made.hide();
+		const again = show(recent, KEY);
+		recent.changed('note.md');
+		endRun();
+		expect(again.made.by(KEY).editing).toBe(true);
+	});
+
+	it('counts the edits from the first of those each within the window of the one before', () => {
+		const { clock, edits: recent, endRun } = edits(1000);
+		clock.now = 0;
+		recent.changed('note.md');
+		endRun();
+		clock.now = 10;
+		const shown = show(recent, KEY);
+		endRun();
+		for (const at of [900, 1800, 2700]) {
+			clock.now = at;
+			recent.changed('note.md');
+			endRun();
+		}
+		clock.now = 2710;
+		shown.hide();
+		const typing = show(recent, KEY);
+		endRun();
+		// Shown 10 ms after the first of those edits: 2.7 s of typing later, still not before it.
+		expect(typing.made.by(KEY).editing).toBe(true);
+		// After a pause longer than the window, the next edit begins anew, and the text was on screen.
+		clock.now = 4000;
+		recent.changed('note.md');
+		endRun();
+		clock.now = 4010;
+		typing.hide();
+		const paused = show(recent, KEY);
+		endRun();
+		expect(paused.made.by(KEY).editing).toBe(false);
+	});
+
+	it('takes an editor that named no note with the edits of the block’s note, from the earlier of the two', () => {
+		const { clock, edits: recent, endRun } = edits(1000);
+		recent.changed(null);
+		endRun();
+		clock.now = 10;
+		const shown = show(recent, KEY);
+		endRun();
+		clock.now = 600;
+		recent.changed('note.md');
+		endRun();
+		clock.now = 610;
+		shown.hide();
+		const again = show(recent, KEY);
+		endRun();
+		// On screen before the note's own edit, but not before the one that named no note.
+		expect(again.made.by(KEY).editing).toBe(true);
+	});
+
+	it('keeps a text on screen while any block of it is, in any view of the note', () => {
+		const { clock, edits: recent, endRun } = edits(1000);
+		const pane = show(recent, KEY);
+		const reading = show(recent, KEY);
+		endRun();
+		pane.hide();
+		endRun();
+		clock.now = 5000;
+		recent.changed('note.md');
+		endRun();
+		clock.now = 5010;
+		reading.hide();
+		const again = show(recent, KEY);
+		endRun();
+		expect(again.made.by(KEY).editing).toBe(false);
+	});
+
+	it('is about the note: the same text on screen in another note does not count', () => {
+		const { clock, edits: recent, endRun } = edits(1000);
+		show(recent, KEY, 'other.md');
+		endRun();
+		clock.now = 50;
+		recent.changed('note.md');
+		endRun();
+		clock.now = 60;
+		const made = show(recent, KEY);
+		endRun();
+		expect(made.made.by(KEY).editing).toBe(true);
+	});
+
+	it('is a text unloaded no longer than the window ago, and then forgotten', () => {
+		for (const [madeAt, editing] of [
+			[1010, false],
+			[1011, true],
+		] as const) {
+			const { clock, edits: recent, endRun } = edits(1000);
+			const old = show(recent, KEY);
+			endRun();
+			recent.changed('note.md');
+			endRun();
+			clock.now = 10;
+			old.hide();
+			endRun();
+			for (const at of [500, 1000]) {
+				clock.now = at;
+				recent.changed('note.md');
+				endRun();
+			}
+			clock.now = madeAt;
+			const again = show(recent, KEY);
+			endRun();
+			expect(again.made.by(KEY).editing, `made at ${madeAt}`).toBe(editing);
+		}
+	});
+
+	it('takes an unload said twice for one', () => {
+		const { clock, edits: recent, endRun } = edits(1000);
+		const one = show(recent, KEY);
+		show(recent, KEY);
+		endRun();
+		one.hide();
+		one.hide();
+		endRun();
+		clock.now = 50;
+		recent.changed('note.md');
+		endRun();
+		clock.now = 2000;
+		recent.changed('note.md');
+		endRun();
+		clock.now = 2010;
+		// The other block is still on screen: had the second unload counted, the text would be gone.
+		const again = show(recent, KEY);
+		endRun();
+		expect(again.made.by(KEY).editing).toBe(false);
 	});
 });
 

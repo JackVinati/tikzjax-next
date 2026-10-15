@@ -38,16 +38,22 @@ const EDITED: Record<EditSource, string> = {
 
 /**
  * The waited step: from seen to asked, and the edit of the block's note that made it wait for the
- * debounce, or one reported after the block was made, which did not count (internal/DECISIONS.md D39).
+ * debounce, or one reported after the block was made, which did not count (internal/DECISIONS.md D39);
+ * or one before it or with it that did not count either, as the note already had the block's text on
+ * screen (D40).
  */
 const waited = (ms: number, edit?: BlockEdit): string =>
 	edit === undefined
 		? `waited ${ms} ms`
-		: edit.at === 'with'
-			? `waited ${ms} ms: ${EDITED[edit.source]} as the block was made`
-			: edit.at === 'before'
-				? `waited ${ms} ms: ${EDITED[edit.source]} ${edit.ms} ms before the block was made`
-				: `waited ${ms} ms; ${EDITED[edit.source]} ${edit.ms} ms after the block was made, which did not count`;
+		: edit.at === 'after'
+			? `waited ${ms} ms; ${EDITED[edit.source]} ${edit.ms} ms after the block was made, which did not count`
+			: edit.shown === true
+				? edit.at === 'with'
+					? `waited ${ms} ms; ${EDITED[edit.source]} as the block was made, which did not count: the note already showed this diagram`
+					: `waited ${ms} ms; ${EDITED[edit.source]} ${edit.ms} ms before the block was made, which did not count: the note already showed this diagram`
+				: edit.at === 'with'
+					? `waited ${ms} ms: ${EDITED[edit.source]} as the block was made`
+					: `waited ${ms} ms: ${EDITED[edit.source]} ${edit.ms} ms before the block was made`;
 
 /** What storage refused this session, for the line on stored preambles; nothing when it refused nothing. */
 const storageErrors = (errors: number): string =>

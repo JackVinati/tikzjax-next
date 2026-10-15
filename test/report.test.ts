@@ -426,6 +426,22 @@ describe('the text the diagnostics view copies', () => {
 		expect(first({})).toBe('waited 300 ms');
 	});
 
+	/*
+	 * After a start beta.6's blocks made again said "waited 300 ms: the note was edited 103 ms before
+	 * the block was made": the edit was Obsidian's own, and the note had their text on screen before
+	 * it, which now does not count (internal/DECISIONS.md D40).
+	 */
+	it('says an edit before the block was made, or with it, did not count when the note already showed it', () => {
+		const first = (edit: CompileTimings['edit']) =>
+			timingSteps({ waitedMs: 0, queueMs: 0, postMs: 1, edit })[0];
+		expect(first({ source: 'editor', at: 'before', ms: 103, shown: true })).toBe(
+			'waited 0 ms; the note was edited 103 ms before the block was made, which did not count: the note already showed this diagram',
+		);
+		expect(first({ source: 'modify', at: 'with', ms: 0, shown: true })).toBe(
+			"waited 0 ms; the note's file changed as the block was made, which did not count: the note already showed this diagram",
+		);
+	});
+
 	it('says what is stored of saved preambles, and what storage refused', () => {
 		const line = (preambles: DiagnosticsSnapshot['preambles']) =>
 			diagnosticsText(snapshot({ preambles }))

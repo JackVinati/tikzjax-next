@@ -8,7 +8,7 @@ import { deriveKey, OUTPUT_REVISION } from '../cache/key';
 import { isExportContext } from '../platform/context';
 import { artifactRevision, type TikzSettings } from '../settings/schema';
 import { TikzBlock, type BlockDeps, type BlockOutcome, type TexJobSpec } from './render-child';
-import type { MadeBy } from './edits';
+import type { Making } from './edits';
 import { standaloneMarkup } from './mount';
 import { asProcessorSource, asReadingView } from '../note/finalize';
 import type { QueueTimers, RenderQueue } from '../queue/queue';
@@ -50,11 +50,12 @@ export interface ProcessorDeps {
 	timers: QueueTimers;
 	preamble: PreambleService;
 	/**
-	 * Asked as a block of the note at this path is made, and says what its cache miss asks: whether
-	 * the block was made by typing in the note (block/edits.ts RecentEdits.making), and so waits for
-	 * the typing to pause if it is not cached, and which edit that was. Omitted: no note ever is.
+	 * Asked as a block of the note at this path is made (block/edits.ts RecentEdits.making): its cache
+	 * miss asks whether the block was made by typing in the note, and so waits for the typing to pause
+	 * if it is not cached, and which edit that was; and its load and unload say when its text is on
+	 * screen in the note. Omitted: no note ever is typed in.
 	 */
-	editing?: ((notePath: string) => () => MadeBy) | undefined;
+	editing?: ((notePath: string) => Making) | undefined;
 	/** Start the engine ahead of the first job (BlockDeps.startEngine). Omitted: it starts with the job. */
 	startEngine?: ((doc: Document) => void) | undefined;
 	/**
@@ -148,6 +149,7 @@ export function createProcessor(deps: ProcessorDeps) {
 		};
 		// Whether an edit made this block is told by what came before it and in this same run, not by
 		// what comes while its cache is read (block/edits.ts): so asked here, before anything yields.
+		// Its text is on screen in the note from this run, once it is loaded (D40).
 		const editing = deps.editing?.(ctx.sourcePath);
 		const prepared = prepare(readingViewSource(source, el, ctx), deps, ctx.sourcePath, place);
 
@@ -214,7 +216,7 @@ function attach(
 	ctx: MarkdownPostProcessorContext,
 	deps: ProcessorDeps,
 	deadline: number | undefined,
-	editing: (() => MadeBy) | undefined,
+	editing: Making | undefined,
 ): Promise<void> {
 	const report = deps.onBlock?.(spec, el);
 	{
@@ -227,7 +229,8 @@ function attach(
 			unobserve: deps.unobserve,
 			ensureFonts: deps.ensureFonts,
 			debounceMs: deps.budgets.debounceMs,
-			editing,
+			editing: editing === undefined ? undefined : () => editing.by(spec.key),
+			shown: editing === undefined ? undefined : () => editing.shown(spec.key),
 			startEngine: deps.startEngine,
 			now: deps.now,
 			report,

@@ -169,20 +169,41 @@ describe('whether a block waits for typing to pause', () => {
 	 */
 	it('is asked of the note the block is rendered from as it is made, and answered once the cache has missed', async () => {
 		const asked: string[] = [];
-		let answered = 0;
+		const answered: string[] = [];
 		const { deps, seen } = processorDeps({
 			editing: (notePath) => {
 				asked.push(notePath);
-				return () => {
-					answered++;
-					return { editing: false };
+				return {
+					by: (key) => {
+						answered.push(key);
+						return { editing: false };
+					},
+					shown: () => () => undefined,
 				};
 			},
 		});
-		await processBlock(deps, seen, SOURCE, { path: 'Folder/Typed in.md' });
+		const { spec } = await processBlock(deps, seen, SOURCE, { path: 'Folder/Typed in.md' });
 		expect(asked).toEqual(['Folder/Typed in.md']);
 		await flush();
-		expect(answered).toBe(1);
+		expect(answered).toEqual([spec.key]);
+	});
+
+	it('is told the text the block shows in its note, from its load to its unload', async () => {
+		const events: string[] = [];
+		const { deps, seen } = processorDeps({
+			editing: (notePath) => ({
+				by: () => ({ editing: false }),
+				shown: (key) => {
+					events.push(`shown ${notePath} ${key}`);
+					return () => events.push(`unloaded ${key}`);
+				},
+			}),
+		});
+		const { spec, parent } = await processBlock(deps, seen, SOURCE, { path: 'note.md' });
+		expect(events).toEqual([`shown note.md ${spec.key}`]);
+		parent.unload();
+		parent.unload();
+		expect(events).toEqual([`shown note.md ${spec.key}`, `unloaded ${spec.key}`]);
 	});
 
 	/*
@@ -219,7 +240,10 @@ describe('whether a block waits for typing to pause', () => {
 			} as never,
 		});
 		const processor = createProcessor(deps);
-		/** Obsidian hands the processor a block of `note.md`, in the run of code under way. */
+		/**
+		 * Obsidian hands the processor a block of `note.md`, in the run of code under way. Its view
+		 * unloads it with the parent this returns.
+		 */
 		const make = (source: string) => {
 			const parent = new Component();
 			parent.load();
@@ -229,6 +253,7 @@ describe('whether a block waits for typing to pause', () => {
 				getSectionInfo: () => null,
 			} as unknown as MarkdownPostProcessorContext;
 			void processor(source, document.body.createDiv(), ctx);
+			return parent;
 		};
 		/** The cache reads under way miss. */
 		const miss = async () => {
@@ -298,6 +323,98 @@ describe('whether a block waits for typing to pause', () => {
 		await miss();
 		expect(submitted).toHaveLength(0);
 	});
+
+	/*
+	 * At a start on the desktop, once the note's blocks had been made and queued, Obsidian reset its
+	 * syntax highlighting, which replaces the note's first character with itself, and `editor-change`
+	 * named the note; Live Preview then made every block again, 103 ms later, and beta.6 made those
+	 * wait for the debounce (internal/DECISIONS.md D40). Live Preview lets the first blocks go in one
+	 * of two ways, read in the 1.14.4 bundle: in the update that makes them again, which another
+	 * plugin's processor registered once the workspace is ready causes; or in the reset's own update,
+	 * past a syntax tree not parsed that far yet, and the parse that follows makes them again.
+	 */
+	const OTHER = '\\begin{tikzpicture}\\draw (0,0) rectangle (1,1);\\end{tikzpicture}';
+	const TYPED = '\\begin{tikzpicture}\\draw (0,0) circle (2);\\end{tikzpicture}';
+
+	it('does not wait for the blocks Live Preview makes again after Obsidian’s own edit at a start', async () => {
+		const { edits, clock, make, miss, submitted } = startingNote();
+		const first = [make(SOURCE), make(OTHER)];
+		await flush();
+		await miss();
+		expect(submitted).toHaveLength(2);
+		clock.now += 50;
+		edits.changed('note.md');
+		await flush();
+		clock.now += 103;
+		for (const block of first) block.unload();
+		make(SOURCE);
+		make(OTHER);
+		await flush();
+		await miss();
+		// Queued at once: beta.6 waited the debounce.
+		expect(submitted).toHaveLength(4);
+	});
+
+	it('nor for those it lets go in the edit’s own update and makes again with the parse', async () => {
+		const { edits, clock, make, miss, submitted } = startingNote();
+		const first = [make(SOURCE), make(OTHER)];
+		await flush();
+		await miss();
+		clock.now += 50;
+		for (const block of first) block.unload();
+		edits.changed('note.md');
+		await flush();
+		clock.now += 100;
+		make(SOURCE);
+		make(OTHER);
+		await flush();
+		await miss();
+		expect(submitted).toHaveLength(4);
+	});
+
+	/*
+	 * Typing still waits wherever a diagram is drawn while its text changes (D22): a Reading view
+	 * beside the editor or an embed of the note, each made again 10 ms after the keystroke, letting the
+	 * old block go; a second pane in Live Preview, which makes its block in the update that tells it of
+	 * the keystroke, and reports that update as an edit of its own; a sync writing the note on screen.
+	 */
+	const typing = [
+		{
+			name: 'a Reading view beside the editor, or an embed of the note',
+			edit: (edits: RecentEdits) => edits.changed('note.md'),
+			remade: () => undefined,
+		},
+		{
+			name: 'a second pane in Live Preview',
+			edit: (edits: RecentEdits) => edits.changed('note.md'),
+			remade: (edits: RecentEdits) => edits.changed('note.md'),
+		},
+		{
+			name: 'a sync writing the note',
+			edit: (edits: RecentEdits) => edits.changed('note.md', 'modify'),
+			remade: () => undefined,
+		},
+	];
+	for (const view of typing) {
+		it(`still waits for a text that was typed: ${view.name}`, async () => {
+			const { edits, clock, make, miss, submitted } = startingNote();
+			const shown = make(SOURCE);
+			await flush();
+			await miss();
+			expect(submitted).toHaveLength(1);
+			clock.now += 5000;
+			view.edit(edits);
+			await flush();
+			clock.now += 10;
+			shown.unload();
+			make(TYPED);
+			view.remade(edits);
+			await flush();
+			await miss();
+			expect(submitted).toHaveLength(1);
+			await vi.waitFor(() => expect(submitted).toHaveLength(2));
+		});
+	}
 });
 
 describe('the engine', () => {

@@ -167,6 +167,12 @@ export interface BlockEdit {
 	source: EditSource;
 	at: 'before' | 'with' | 'after';
 	ms: number;
+	/**
+	 * Before or with the block's making, but its note had the block's text on screen as the edits
+	 * began, so it did not count either: the block was made again, not typed (internal/DECISIONS.md
+	 * D40).
+	 */
+	shown?: true | undefined;
 }
 
 /**
