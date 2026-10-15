@@ -3,7 +3,7 @@
 What changed in each release, newest first. The release workflow puts a version's section at the
 top of its notes on GitHub, and will not publish a version that has none.
 
-## 0.2.1-beta.6 — 2026-10-15
+## 0.2.1 — 2026-10-15
 
 The figures below were measured on my Windows desktop, in headless Chromium, the browser engine of
 Obsidian's desktop app, and WebKit, the browser engine of the iPhone and iPad, through Playwright
@@ -21,9 +21,17 @@ from a phone.
 - A diagram that is not cached goes to the engine as soon as it comes into view. 0.2.0 made each one
   wait first, 300 ms on a computer and half a second on a phone, also when you had just opened the
   note. Only a diagram in a note you are typing in still waits for you to pause, so that it compiles
-  once per pause and not at every keystroke. The TeX engine also starts as soon as a diagram turns
-  out not to be cached, while the diagram is still on its way into view; it still never starts when
-  every diagram shown is cached.
+  once per pause and not at every keystroke. An edit that leaves a diagram as the note already
+  showed it does not count as typing: once a session, as it first shows a code block, Obsidian makes
+  such an edit to every open note without changing its text, and the diagrams Live Preview draws
+  again just after it go to the engine at once. The TeX engine also starts as soon as a diagram
+  turns out not to be cached, while the diagram is still on its way into view; it still never starts
+  when every diagram shown is cached.
+- Diagrams that come into view together go to the engine from the top of the note down, so the
+  first one you see is the first drawn, also while the engine is still starting: a diagram waiting
+  for the engine gives its turn to one higher in the note. When a note has more new diagrams than
+  the queue keeps, 16 on a phone or tablet and 64 on a computer, the "Render diagram" button goes to
+  the ones the plugin met last, which, as a note opens, are the lowest in it.
 - TeX takes about a third less time. Over the 37 test diagrams 0.2.0 was released with, the fastest
   of seven runs each, TeX's time went from 2,827 to 1,850 ms in Chromium and from 4,210 to 2,772 ms
   in WebKit, and each diagram took 29% to 63% less in Chromium and 25% to 54% less in WebKit. The
@@ -74,12 +82,13 @@ from a phone.
   [pull request #2](https://github.com/JackVinati/tikzjax-next/pull/2).
 - The diagnostics view times each diagram from coming into view to drawn in the note, with every
   wait on the way, and of a diagram that waited for you to pause typing, which change to its note
-  made it wait; says how many times the engine started, how long each start took and why it
-  stopped; says of each diagram whether it started from a saved or stored preamble, and where a
-  preamble meant for storage went; and says whether TeX seems to run with the JIT compiler. Its Copy button copies all of it as text for a bug report:
-  the plugin and Obsidian versions, the kind of device, what its WebView supports, the engine and
-  every step's time, without your diagrams' code, their error messages or the names of your notes.
-  Where the device does not let the plugin copy, the text is shown, to copy by hand.
+  made it wait, or why a change did not; says how many times the engine started, how long each start
+  took and why it stopped; says of each diagram whether it started from a saved or stored preamble,
+  and where a preamble meant for storage went; and says whether TeX seems to run with the JIT
+  compiler. Its Copy button copies all of it as text for a bug report: the plugin and Obsidian
+  versions, the kind of device, what its WebView supports, the engine and every step's time, without
+  your diagrams' code, their error messages or the names of your notes. Where the device does not
+  let the plugin copy, the text is shown, to copy by hand.
 - On a computer, two diagrams compile at once when several new ones are waiting, each in an engine
   of its own. Handed a note of 37 new diagrams at once, two engines drew them in 46 to 47% less time
   than one, in Chromium and in WebKit; a note you scroll through one diagram at a time gains less.
