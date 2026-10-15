@@ -41,11 +41,6 @@ Five of the plugin's test diagrams, as 0.2.1 draws them.
 
 ## 0.2.1
 
-0.2.1 is about the time a new diagram takes to appear. A diagram that is not cached no longer waits
-before it goes to the engine, TeX takes about a third less time, and a diagram skips a preamble an
-earlier diagram has already compiled. Labels in Chinese, Greek, Cyrillic and other scripts the
-engine has no fonts for are drawn too.
-
 <div align="center">
 
 <img src="docs/images/tex-time-0.2.1.svg" width="640" alt="Three horizontal bars for each of 8 of the 37 test diagrams, slowest first: grey for 0.2.0, blue for 0.2.1 compiling the diagram from the start, green for 0.2.1 starting from a saved preamble; every blue bar is about a third shorter than the grey one, and the green bars are shorter still, most of all for the diagrams that load packages">
@@ -54,17 +49,17 @@ engine has no fonts for are drawn too.
 
 Grey is 0.2.0. Blue is 0.2.1 compiling the diagram from the start, as it does the first time it sees
 a preamble. Green is 0.2.1 drawing the same diagram a second time in a row, when it starts from the
-preamble it saved the first time. Over the 37 test diagrams 0.2.0 was released with, TeX's time went
-from 2,827 ms to 1,850 ms from the start, 35% less, and each diagram took between 29% and 63% less.
-From a saved preamble the 37 took 752 ms. In WebKit, the browser engine of the iPhone and iPad, run
-on the same desktop, the same sums went from 4,210 ms to 2,772 ms, and to 1,192 ms from a saved
-preamble.
+preamble it saved the first time. In Chromium, over the 37 test diagrams 0.2.0 was released with,
+TeX's time went from 2,827 ms to 1,850 ms from the start, 35% less, and each diagram took between
+29% and 63% less. From a saved preamble the 37 took 752 ms. In WebKit, the browser engine of the
+iPhone and iPad, run on the same desktop, the same sums went from 4,210 ms to 2,772 ms, each diagram
+taking between 25% and 54% less, and to 1,192 ms from a saved preamble.
 
 I measured this on my Windows desktop, in headless Chromium 153, which is what Obsidian's desktop
 app is built on, and WebKit 26.6, through Playwright rather than inside Obsidian, with 0.2.0's
 `main.js` as released beside 0.2.1's. Each figure is the fastest of seven runs, each run in a fresh
-browser. Apart from those labels, every diagram draws as on 0.2.0, byte for byte, which CI checks
-for every test diagram.
+browser. Every test diagram 0.2.0 had draws as it did then, byte for byte, which CI checks; what
+draws differently is labels in other scripts, which 0.2.0 left out, and the two fixes below.
 
 The gain from the start is the engine. It is compiled so that TeX keeps the values it works on where
 the processor reaches them directly, rather than in its memory; it is optimised with a newer
@@ -80,7 +75,7 @@ starts where that one stood at that point (see [Questions](#questions)).
 <thead><tr><th>Test diagram</th><th>0.2.0 (ms)</th><th>0.2.1, from the start (ms)</th><th>0.2.1, saved preamble (ms)</th><th>Change from the start</th></tr></thead>
 <tbody>
 <tr><td><code>arrows-meta</code></td><td align="right">44</td><td align="right">28</td><td align="right">6</td><td align="right">−36%</td></tr>
-<tr><td><code>basic</code></td><td align="right">18</td><td align="right">12</td><td align="right">4</td><td align="right">−33%</td></tr>
+<tr><td><code>basic</code> (plain TikZ)</td><td align="right">18</td><td align="right">12</td><td align="right">4</td><td align="right">−33%</td></tr>
 <tr><td><code>batchmode-errors</code></td><td align="right">27</td><td align="right">10</td><td align="right">2</td><td align="right">−63%</td></tr>
 <tr><td><code>batchmode-missing-file</code></td><td align="right">12</td><td align="right">8</td><td align="right">0</td><td align="right">−33%</td></tr>
 <tr><td><code>broken</code> (an error on purpose)</td><td align="right">14</td><td align="right">9</td><td align="right">2</td><td align="right">−36%</td></tr>
@@ -125,9 +120,12 @@ preamble, so it saves nothing to start from.
 
 </details>
 
+A new diagram also waits before TeX starts on it: for the plugin to hand it to the engine, and for
+the engine to start.
+
 <div align="center">
 
-<img src="docs/images/new-diagram-0.2.1.svg" width="640" alt="Four pairs of horizontal bars, a grey bar for 0.2.0 and a blue bar for 0.2.1, each pair on its own scale: the wait before a new diagram goes to the engine, 300 ms and 0 ms; engine start, 162 ms and 54 ms; the first small diagram after the start, 38 ms and 46 ms; the same diagram with the engine running, 24 ms and 7 ms">
+<img src="docs/images/new-diagram-0.2.1.svg" width="640" alt="Three pairs of horizontal bars on one scale, a grey bar for 0.2.0 and a blue bar for 0.2.1: the wait before a new diagram goes to the engine, 300 ms and 0 ms; engine start, 162 ms and 54 ms; the first small diagram after the start, 38 ms and 46 ms; added up, 500 ms and 100 ms">
 
 </div>
 
@@ -136,57 +134,61 @@ went to the engine, so that typing in a diagram would not compile it at every ke
 also when you had just opened the note. 0.2.1 keeps that wait only for a note you are typing in. The
 engine starts in a third of the time, and as soon as a diagram turns out not to be cached rather
 than when it is about to be compiled. The first diagram after the engine starts takes a few
-milliseconds longer than in 0.2.0, because it saves its preamble for the diagrams after it; the same
-diagram, once the engine runs, takes 7 ms instead of 24. Added up, the first new diagram of a
-session spent about 500 ms on these three in 0.2.0 and about 100 ms in 0.2.1, before the plugin's
-SVG pipeline and drawing it in the note, which this harness does not include. The wait is the
-plugin's setting; the other figures are medians of the same seven runs, in Chromium.
+milliseconds longer than in 0.2.0, because it saves its preamble for the diagrams after it. Added
+up, the first new diagram of a session spent about 500 ms on these three in 0.2.0 and about 100 ms
+in 0.2.1, before the plugin's SVG pipeline and drawing it in the note, which this harness does not
+include. After it, a small diagram with the same preamble takes 7 ms instead of 24, because it
+starts from the saved preamble, and 14 with saved preambles off; the harness timed the same diagram
+drawn a second time. The wait is the plugin's setting; the other figures are medians of the same
+seven runs, in Chromium, and a diagram's time runs from handing it to the engine to its SVG back.
 
 On my iPhone 16 Pro, on iOS 27.0.1 with Obsidian 1.14.5, 0.2.0's engine started in 134 ms and a
 small diagram took 15 to 40 ms of TeX after the 500 ms wait, read off the diagnostics view on 14
 October 2026. I will add 0.2.1's figures from the same phone here once I have read them off it the
-same way; until then nothing on this page says what 0.2.1 does on a phone.
+same way; until then, every figure on this page that compares 0.2.1 with 0.2.0 is from the desktop.
 
-<!-- IPHONE-FIGURES: 0.2.1 on the maintainer's iPhone. When the readings are in: fill the null entries of `texTimeIphone` and `wait.iphone` in scripts/readme-charts.mjs (each 0.2.1 value and `date021`), run `node scripts/readme-charts.mjs`, and add the two charts it then writes, docs/images/new-diagram-iphone-0.2.1.svg and docs/images/tex-time-iphone-0.2.1.svg, here, each as an <img> inside <div align="center"> like the desktop ones, with alt text that gives its figures. Then replace "I will add 0.2.1's figures ... what 0.2.1 does on a phone." with a sentence giving them, with the device, iOS version, Obsidian version and date, and say in the introduction at the top what 0.2.1 does there. -->
+<!-- IPHONE-FIGURES: 0.2.1 on the maintainer's iPhone. When the readings are in: fill the null entries of `texTimeIphone` and `wait.iphone` in scripts/readme-charts.mjs (each 0.2.1 value and `date021`), run `node scripts/readme-charts.mjs`, and add the two charts it then writes, docs/images/new-diagram-iphone-0.2.1.svg and docs/images/tex-time-iphone-0.2.1.svg, here, each as an <img> inside <div align="center"> like the desktop ones, with alt text that gives its figures. Then replace "I will add 0.2.1's figures ... is from the desktop." with a sentence giving them, with the device, iOS version, Obsidian version and date, say in the introduction at the top what 0.2.1 does there, and in Platforms add the build that was read to "0.2.1's betas, from beta.2 to beta.4". -->
 
 Also in 0.2.1:
 
-- **Labels in other scripts.** Chinese, Japanese, Korean, Greek, Cyrillic, Arabic, Hebrew, Thai,
-  Devanagari, IPA and emoji in a label are drawn, where 0.2.0 left them out with an error. The
-  engine has no fonts for them, so TeX sets each character as a box one em wide and the plugin
-  writes the character over it in your system's sans-serif font; nodes and arrows are placed around
-  it as around any other text, and in a `text width` node Chinese and Japanese wrap between
-  characters. What text drawn this way cannot do is under [Known limitations](#known-limitations).
-  RepentStar contributed it, in
+- Labels in Chinese, Japanese, Korean, Greek, Cyrillic, Arabic, Hebrew, Thai, Devanagari, IPA and
+  emoji are drawn, where 0.2.0 left them out with an error. The engine has no fonts for them, so TeX
+  sets each character as a box one em wide and the plugin writes the character over it in your
+  system's sans-serif font; nodes and arrows are placed around it as around any other text, and in a
+  `text width` node Chinese and Japanese wrap between characters. What text drawn this way cannot do
+  is under [Known limitations](#known-limitations). RepentStar contributed it, in
   [pull request #2](https://github.com/JackVinati/tikzjax-next/pull/2).
-- **Saved preambles outlast the engine.** They are kept in this device's own storage, never in the
-  vault, so after Obsidian restarts, or on a phone after the app was in the background, a diagram
-  whose preamble is stored still starts from it ([Questions](#stored-preambles) has more).
-- **A second engine on a computer.** Two diagrams compile at once when several new ones are waiting.
-  A note of 37 new diagrams handed over at once took 46 to 47% less time with two engines than with
-  one, on the same desktop; a note you scroll through one diagram at a time gains less. Phones and
-  tablets keep one.
-- **Diagnostics you can copy.** The diagnostics view shows each diagram's time from coming into view
-  to drawn, every engine start, whether TeX runs with the JIT compiler, and whether a diagram
-  started from a saved preamble. Its Copy button copies that as text for a bug report, without your
-  diagrams' code or the names of your notes.
-- **Two settings**, should you need them: Second engine, on a computer, and Saved preambles, on any
-  device. Both are on by default.
-- **A slow iPhone says why.** Where TeX seems to run without the JIT, as with Lockdown Mode on, the
-  diagnostics view says so, and a notice says it once ([below](#lockdown-mode)).
-- **A device left out of step says so.** Where Obsidian Sync left an old `main.js` beside a new
-  `manifest.json`, the plugin says so once, from 0.2.1 on ([below](#out-of-step)).
-- **Less memory at the peak.** The engine keeps one block of memory for TeX instead of taking a new
-  one for every diagram. Over a run of 85 diagrams on the same desktop, the most memory the page had
-  in use at once went from 318 to 278 MiB in Chromium and from 643 to 453 MiB in WebKit.
-- **Fixes.** A preamble file that ends with a comment and no newline no longer breaks every diagram
-  under it with "Missing \begin{document}", and a diagram that writes a file named like a bundled
-  font's metrics no longer breaks that font for the diagrams after it.
+- Saved preambles are also kept in this device's own storage, never in the vault, so after Obsidian
+  restarts, or on a phone after the app was in the background, a diagram whose preamble is stored
+  still starts from it ([Questions](#stored-preambles) has more).
+- On a computer, two diagrams compile at once, each in an engine of its own, when several new ones
+  are waiting. A note of 37 new diagrams handed over at once took 46 to 47% less time with two
+  engines than with one, on the same desktop; a note you scroll through one diagram at a time gains
+  less. Phones and tablets keep one engine.
+- The diagnostics view shows each diagram's time from coming into view to drawn, every engine start,
+  whether TeX runs with the JIT compiler, and whether a diagram started from a saved preamble. Its
+  Copy button copies that as text for a bug report, without your diagrams' code or the names of your
+  notes.
+- There are two new settings, both on by default: Second engine, on a computer, and Saved preambles,
+  on any device.
+- Where TeX seems to run without the JIT, as with Lockdown Mode on, the diagnostics view says so,
+  and a notice says it once ([below](#lockdown-mode)).
+- Where Obsidian Sync left an old `main.js` beside a new `manifest.json`, the plugin says so once,
+  from 0.2.1 on ([below](#out-of-step)).
+- The engine keeps one block of memory for TeX instead of taking a new one for every diagram. Over a
+  run of 85 diagrams on the same desktop, the most memory the page had in use at once went from 318
+  to 278 MiB in Chromium and from 643 to 453 MiB in WebKit. Right after the last diagram, WebKit
+  held more than with 0.2.0, 405 MiB against 226, because the engine keeps its memory and its saved
+  preambles until it stops: after 15 seconds without a diagram on a phone, and five minutes on a
+  computer.
+- A preamble file that ends with a comment and no newline no longer breaks every diagram under it
+  with "Missing \begin{document}", and a diagram that writes a file named like a bundled font's
+  metrics no longer breaks that font for the diagrams after it.
 
 After updating from 0.2.0, only the diagrams with a character the engine has no font for, such as
-Chinese, Greek or Cyrillic, and those under a preamble file that ends with a comment and no
-newline, are compiled again; every other diagram comes from the cache as before. Everything that changed is in the
-[changelog](CHANGELOG.md).
+Chinese, Greek or Cyrillic, and those under a preamble file that ends with a comment and no newline,
+are compiled again; every other diagram comes from the cache as before. Everything that changed is
+in the [changelog](CHANGELOG.md).
 
 ## Installing
 
@@ -452,16 +454,16 @@ node, style and colour names in them, and Chinese and Japanese wrapped in a `tex
 | iPhone and iPad | Works: the engine compiles and diagrams render on the device, as checked on an iPhone (below). It is slower than on a desktop, and the first diagram that is not cached is the slowest, because it starts the engine. |
 | Android | Not tried yet. A report either way is welcome, in [Q&A](https://github.com/JackVinati/tikzjax-next/discussions/categories/q-a) or as an issue. |
 
-My iPhone is an iPhone 16 Pro on iOS 27.0.1, with Obsidian 1.14.5. On it I have checked that 0.1.5,
-0.2.0 and the betas of 0.2.1 load and render, that Settings opens, that a diagram still compiling
-when you switch away from the app finishes when you come back instead of failing with a timeout, and
-that the diagnostics view's Copy button copies its text. The phone figures on this page are read off
-that view. With 0.2.0 I also timed diagrams with Lockdown Mode on and off
-([Questions](#lockdown-mode)). The iPad runs the same build; I have not checked it separately.
-0.2.1's engine uses only WebAssembly 1.0, as 0.2.0's did, so it compiles in the same WebViews as
-before, iOS 14.5's among them; a check in CI decodes the engine to make sure. Before iOS 16.4, which
-has no decompression of its own for the engine to use, the engine unpacks itself in JavaScript, as
-0.2.0 did.
+My iPhone is an iPhone 16 Pro on iOS 27.0.1, with Obsidian 1.14.5. On it I have checked that 0.1.5
+and 0.2.0 load and render and that Settings opens, and with 0.1.5 that a diagram still compiling
+when you switch away from the app finishes when you come back, instead of failing with a timeout.
+0.2.1's betas, from beta.2 to beta.4, load and render on it too, and the diagnostics view's Copy
+button copies its text. The phone figures on this page are read off that view. With 0.2.0 I also
+timed diagrams with Lockdown Mode on and off ([Questions](#lockdown-mode)). The iPad runs the same
+build; I have not checked it separately. 0.2.1's engine uses only WebAssembly 1.0, as 0.2.0's did,
+so it compiles in the same WebViews as before, iOS 14.5's among them; a check in CI decodes the
+engine to make sure. Before iOS 16.4, which has no decompression of its own for the engine to use,
+the engine unpacks itself in JavaScript, as 0.2.0 did.
 
 <!-- DEVICE-CHECK: still to try on a phone: a note with twenty diagrams that are not cached, scrolling it, and a PDF export; and anything on an iPad. When they are done, replace "The iPad runs the same build; I have not checked it separately." with what was checked on it, and drop from "Not tried there yet" whatever has now been tried. -->
 
@@ -504,7 +506,7 @@ the community store's review again, so I would rather put out fewer, bigger rele
 change with what people ask for.
 
 - **0.2.1: shorter waits for new diagrams.** This release: no wait before a new diagram goes to the
-  engine, TeX about a third faster, saved preambles that later diagrams start from, kept across
+  engine, a third less time in TeX, saved preambles that later diagrams start from, kept across
   restarts, a second engine on a computer, and labels in other scripts (see [0.2.1](#021)).
 - **0.3.0: TeX Live 2026.** Newer pgf/TikZ, pgfplots, circuitikz, chemfig and siunitx, which means
   new circuitikz components, chemfig's `\hreac` and three years of fixes. `main.js` should shrink
@@ -530,11 +532,11 @@ thumbs-up counts as a vote.
 
 **Why does the first diagram take a while?** It starts the engine. On my desktop, in headless
 Chromium, the browser engine of Obsidian's desktop app, that takes about 54 ms with 0.2.1, where
-0.2.0 took about 160 ms. On my iPhone 16 Pro, read off the diagnostics view, 0.2.0 started in about
-130 ms, unless Lockdown Mode was on (below). The first diagram of each preamble also saves it, which
-costs it a few milliseconds and spares the diagrams after it their packages. Later diagrams in the
-session are faster, and a diagram you have already seen comes from the cache without running TeX at
-all.
+0.2.0 took about 160 ms. On my iPhone 16 Pro, on iOS 27.0.1, 0.2.0's engine started in 134 ms, read
+off the diagnostics view on 14 October 2026, with Obsidian excluded from Lockdown Mode (below). The
+first diagram of each preamble also saves it, which costs it a few milliseconds and spares the
+diagrams after it their packages. Later diagrams in the session are faster, and a diagram you have
+already seen comes from the cache without running TeX at all.
 
 <!-- IPHONE-FIGURES: the iPhone engine start above is one reading of 0.2.0 on the maintainer's iPhone 16 Pro (iOS 27.0.1, Obsidian 1.14.5, diagnostics view, 14 October 2026). Add 0.2.1's from the same phone once `wait.iphone` in scripts/readme-charts.mjs is filled in. -->
 
@@ -552,11 +554,11 @@ in Chromium, the engine of Obsidian's desktop app, and circuitikz 64 where it to
 the engine of the iPhone and iPad, 6 instead of 17 and 105 instead of 318. The first diagram of each
 preamble takes a few milliseconds more, to save it, and about a tenth of a second without the JIT
 (below). An engine keeps up to 32 MB of saved preambles in memory on a computer and 12 MB on a phone
-or tablet. In 12 MB a large preamble does not always fit beside the ones in use, and is then not
-kept there. A diagram drawn this way is the same, byte for byte, as one drawn from the start, and
-every release checks that for every test diagram; a preamble that asks the size of the diagram's own
-file, or reads it, is never saved. The diagnostics view says of each diagram whether it started from
-a saved preamble.
+or tablet, or on a computer that reports less than 8 GB of memory. In 12 MB a large preamble does
+not always fit beside the ones in use, and is then not kept there. A diagram drawn this way is the
+same, byte for byte, as one drawn from the start, and every release checks that for every test
+diagram; a preamble that asks the size of the diagram's own file, or reads it, is never saved. The
+diagnostics view says of each diagram whether it started from a saved preamble.
 
 <a id="stored-preambles"></a>**Do saved preambles survive a restart?** Yes. The engine stops when it
 has had nothing to do for a while, on a phone after 15 seconds and whenever Obsidian goes to the
@@ -630,22 +632,24 @@ cable; then in Safari on the Mac, Develop → the device → the Obsidian window
 report on the original repository is untriageable for want of this paragraph, so if you are filing
 one, this is how to get something worth attaching.
 
-<a id="lockdown-mode"></a>**Diagrams are very slow on my iPhone or iPad.** See whether Lockdown
-Mode is on: Settings → Privacy & Security → Lockdown Mode. It runs Obsidian's web content without
-the JIT compiler, and the TeX engine with it, which makes TeX about twenty times slower. On my
-iPhone 16 Pro with 0.2.0, on 14 October 2026, a circuitikz diagram took 7.3 s of TeX with Lockdown
-Mode on and 0.27 s with Obsidian excluded from it, and the engine started in 1.3 s instead of
-0.13 s. Lockdown Mode can stay on for everything else: under Configure Web Browsing in its settings
-you can exclude Obsidian alone, then restart Obsidian. The exclusion takes Lockdown Mode's
-protection away from Obsidian's web content, so whether it is worth it is your call. On some
-versions of iOS, Lockdown Mode turns WebAssembly off altogether: then the engine does not start at
-all, the diagram's card says that the device runs no WebAssembly, and on some of those versions
-excluding Obsidian has been reported not to bring it back.
+<a id="lockdown-mode"></a>**Diagrams are very slow on my iPhone or iPad.** See whether Lockdown Mode
+is on: Settings → Privacy & Security → Lockdown Mode. It runs Obsidian's web content without the JIT
+compiler, and the TeX engine with it, which makes TeX twenty to thirty times slower. On my iPhone 16
+Pro, on iOS 27.0.1 with 0.2.0, on 14 October 2026, a circuitikz diagram took 7.3 s of TeX with
+Lockdown Mode on and 0.27 s with Obsidian excluded from it, 27 times as long, and the engine started
+in 1.3 s instead of 0.13 s. Lockdown Mode can stay on for everything else: under Configure Web
+Browsing in its settings you can exclude Obsidian alone, then restart Obsidian. The exclusion takes
+Lockdown Mode's protection away from Obsidian's web content, so whether it is worth it is your call.
+On some versions of iOS, Lockdown Mode turns WebAssembly off altogether: then the engine does not
+start at all, the diagram's card says that the device runs no WebAssembly, and on some of those
+versions excluding Obsidian has been reported not to bring it back.
 
 Low Power Mode, a phone that is hot, and a nearly empty battery slow the whole phone down, the
-plugin with everything else, though not by as much. On my iPhone, in Low Power Mode with the battery
-at 18%, diagrams took three to four times as long as the day before. That passes with its cause, and
-needs nothing changed in Obsidian.
+plugin with everything else, though not by as much. On my iPhone 16 Pro, on iOS 27.0.1, in Low Power
+Mode with the battery at 18% on 15 October 2026, 0.2.1-beta.4 took 867 ms of TeX for circuitikz and
+749 for pgfplots, where beta.3 had taken 231 and 211 the day before; one reading each. The engine's
+unpacking, which does not use the JIT, took more than three times as long too, so it was the phone
+that was slow, and there was nothing to change in Obsidian.
 
 The diagnostics view tells the two apart: run "Open TikZ diagnostics" from the command palette and
 read its JIT line. "on (probably)" means TeX runs with the JIT, and a slow diagram is the phone
@@ -655,7 +659,7 @@ second after the engine started, so that a phone that is only slow is not taken 
 JIT. "no WebAssembly" means the engine cannot run at all. When two engine starts in a session find
 the JIT off on an iPhone or iPad, a notice says so once.
 
-<!-- IPHONE-FIGURES: the 7.3 s, 0.27 s, 1.3 s and 0.13 s above are one reading each of 0.2.0 on the maintainer's iPhone 16 Pro (iOS 27.0.1, Obsidian 1.14.5, diagnostics view, 14 October 2026), and the Low Power Mode figure is the maintainer's reading of 15 October 2026 against the day before (circuitikz 867 against 231 ms of TeX, pgfplots 749 against 211). Add 0.2.1's own figures with Lockdown Mode on, from TODO.md §9's JIT probe check, once they exist. -->
+<!-- IPHONE-FIGURES: the 7.3 s, 0.27 s, 1.3 s and 0.13 s above are one reading each of 0.2.0 on the maintainer's iPhone 16 Pro (iOS 27.0.1, Obsidian 1.14.5, diagnostics view, 14 October 2026). The Low Power Mode figures are his readings of 0.2.1-beta.4 on 15 October 2026 against 0.2.1-beta.3 on 14 October (internal/DECISIONS.md D38; the inflate took 86 ms against 26). Add 0.2.1's own figures with Lockdown Mode on, from TODO.md §9's JIT probe check, once they exist. -->
 
 <a id="out-of-step"></a>**After an update, another device shows the new version but nothing changed.**
 Obsidian Sync Standard does not copy a file over 5 MB, and `main.js` is about 12 MB. When Sync
