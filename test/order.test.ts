@@ -101,6 +101,33 @@ describe('the order a phone draws a note in after a start', () => {
 		expect(queued(p, '#1')).toBeLessThan(120);
 	});
 
+	it('draws it first when it asks while the engine is still starting', async () => {
+		const p = await open({ late: 20, place: true });
+		expect(p.posted).toEqual(['#1', '#2', '#3', '#4']);
+		expect(queued(p, '#1')).toBe(0);
+		expect(p.host.report().starts).toBe(1);
+	});
+
+	it('draws it first on a phone whose engine starts slowly, as without the JIT', async () => {
+		const p = await open({ late: 39, bootMs: 900, place: true });
+		expect(p.posted).toEqual(['#1', '#2', '#3', '#4']);
+	});
+
+	it('keeps the engine starting for the job that took the slot where AbortSignal has no reason', async () => {
+		// An older iOS WebKit: the host cannot tell a cancel from a stall (D25), and would stop a start
+		// that nobody waits for. The job that takes the slot reaches it before the other is let go.
+		const reason = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'reason');
+		if (reason === undefined) throw new Error('AbortSignal.reason');
+		Object.defineProperty(AbortSignal.prototype, 'reason', { configurable: true, get: () => undefined });
+		try {
+			const p = await open({ late: 20, place: true });
+			expect(p.posted).toEqual(['#1', '#2', '#3', '#4']);
+			expect(p.host.report().starts).toBe(1);
+		} finally {
+			Object.defineProperty(AbortSignal.prototype, 'reason', reason);
+		}
+	});
+
 	it('on a computer with two engines, puts the top one in the first engine free', async () => {
 		const before = await open({ late: 39, engines: 2 });
 		expect(before.posted.slice(0, 3)).toEqual(['#2', '#3', '#4']);

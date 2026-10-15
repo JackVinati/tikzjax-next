@@ -1212,6 +1212,211 @@ describe('a block’s place in its note', () => {
 	});
 });
 
+describe('a slot held for a job the engine does not have yet', () => {
+	/**
+	 * A started job waits for the engine to start, or for its stored run to be read, and nothing has
+	 * been paid for it (D25). A more urgent job submitted meanwhile takes its slot, and it goes back in
+	 * line: which diagram the engine takes first is chosen when the engine can take one (D40).
+	 */
+	const placed = (
+		h: ReturnType<typeof harness>,
+		key: string,
+		priority: Priority,
+		place: number,
+		onStart?: () => void,
+	) => track(h.queue.submit(key, { id: key }, priority, 1000, { place, ...(onStart ? { onStart } : {}) }));
+
+	it('goes to a more urgent job, and the job that had it goes back in line and runs after it', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		let lowStarts = 0;
+		const low = placed(h, 'low', 1, 2, () => lowStarts++);
+		await tick();
+		expect(h.runs.started).toEqual(['low']);
+		const lowSignal = h.runs.signals.get('low');
+
+		// The runner is handed the more urgent job before the other is aborted: an engine still
+		// starting for the one then has the other waiting for it.
+		let abortedWhenTopStarted: boolean | undefined;
+		const top = placed(h, 'top', 1, 1, () => (abortedWhenTopStarted = lowSignal?.aborted));
+		await tick();
+		expect(abortedWhenTopStarted).toBe(false);
+		expect(h.runs.started).toEqual(['low', 'top']);
+		expect(lowSignal?.aborted).toBe(true);
+		expect(isQueueError(lowSignal?.reason, 'cancelled')).toBe(true);
+		expect(low.status).toBe('pending');
+		expect(h.queue.inflightCount()).toBe(1);
+		expect(h.queue.size()).toBe(1);
+
+		h.runs.running.get('top')?.();
+		h.runs.finish('top');
+		await tick();
+		expect(top.status).toBe('fulfilled');
+		expect(h.runs.started).toEqual(['low', 'top', 'low']);
+		expect(lowStarts).toBe(2);
+		h.runs.running.get('low')?.();
+		h.runs.finish('low', 'low:second');
+		await tick();
+		expect(low.value).toBe('low:second');
+		expect(h.queue.inflightCount()).toBe(0);
+		expect(h.timers.outstanding).toBe(0);
+	});
+
+	it('is never taken from a job the engine has', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		placed(h, 'low', 1, 2);
+		await tick();
+		h.runs.running.get('low')?.();
+		placed(h, 'top', 0, 1);
+		await tick();
+		expect(h.runs.started).toEqual(['low']);
+		expect(h.runs.signals.get('low')?.aborted).toBe(false);
+	});
+
+	it('is not taken by a job no more urgent: the same band and place, submitted later', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		h.submit('first', 1);
+		h.submit('second', 1);
+		await tick();
+		expect(h.runs.started).toEqual(['first']);
+	});
+
+	it('is taken across bands too, without places: an export ahead of a visible block', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		h.submit('visible', 1);
+		await tick();
+		h.submit('export', 0);
+		await tick();
+		expect(h.runs.started).toEqual(['visible', 'export']);
+	});
+
+	it('is taken from the least urgent of the jobs that hold one, with two', async () => {
+		const h = harness({ concurrency: 2, depthCap: 64, startupMs: 5000 });
+		placed(h, 'a', 1, 1);
+		placed(h, 'c', 1, 3);
+		await tick();
+		placed(h, 'b', 1, 2);
+		await tick();
+		expect(h.runs.started).toEqual(['a', 'c', 'b']);
+		expect(h.runs.signals.get('a')?.aborted).toBe(false);
+		expect(h.runs.signals.get('c')?.aborted).toBe(true);
+	});
+
+	it('counts a job put back in line against the depth cap, which turns away the lowest on the page', async () => {
+		const h = harness({ concurrency: 1, depthCap: 1, startupMs: 5000 });
+		const low = placed(h, 'low', 1, 3);
+		await tick();
+		placed(h, 'top', 1, 1);
+		await tick();
+		expect(low.status).toBe('pending');
+		const mid = placed(h, 'mid', 1, 2);
+		await tick();
+		expect(isQueueError(low.error, 'depth-cap')).toBe(true);
+		expect(mid.status).toBe('pending');
+		expect(h.queue.size()).toBe(1);
+	});
+
+	it('counts it against the depth cap when the queue resumes, too', async () => {
+		const h = harness({ concurrency: 1, depthCap: 1, startupMs: 5000 });
+		const low = placed(h, 'low', 1, 1);
+		await tick();
+		h.queue.pause();
+		// An export, which takes none of the cap, and a block below `low` in the note.
+		const exported = track(h.queue.submit('export', { id: 'export' }, 0, 1000, { uncapped: true }));
+		const below = placed(h, 'below', 1, 2);
+		await tick();
+		expect(h.queue.size()).toBe(2);
+		h.queue.resume();
+		await tick();
+		expect(h.runs.started).toEqual(['low', 'export']);
+		expect(isQueueError(below.error, 'depth-cap')).toBe(true);
+		expect(low.status).toBe('pending');
+		expect(exported.status).toBe('pending');
+	});
+
+	it('is taken by a waiting job once a block higher in the note asks for it too', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		placed(h, 'mid', 1, 2);
+		placed(h, 'low', 1, 3);
+		await tick();
+		expect(h.runs.started).toEqual(['mid']);
+		// The same diagram, higher in the note: another pane, or the same block twice.
+		track(h.queue.submit('low', { id: 'low' }, 1, 1000, { place: 1, owner: 'another pane' }));
+		await tick();
+		expect(h.runs.started).toEqual(['mid', 'low']);
+		expect(h.runs.signals.get('mid')?.aborted).toBe(true);
+	});
+
+	it('ignores a runner that says the engine has a job after it gave its slot up', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		const low = placed(h, 'low', 1, 2);
+		await tick();
+		const late = h.runs.running.get('low');
+		placed(h, 'top', 1, 1);
+		// Started again at once, in a second slot; then the first start hears, too late, that the
+		// engine has it. Taken for the new start's, it would leave nothing to drop it with.
+		h.queue.setConcurrency(2);
+		late?.();
+		h.queue.release('low');
+		await tick();
+		expect(isQueueError(low.error, 'cancelled')).toBe(true);
+	});
+
+	it('drops a job put back in line when its last caller lets it go', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		const low = placed(h, 'low', 1, 2);
+		await tick();
+		placed(h, 'top', 1, 1);
+		await tick();
+		h.queue.release('low');
+		await tick();
+		expect(isQueueError(low.error, 'cancelled')).toBe(true);
+		h.runs.running.get('top')?.();
+		h.runs.finish('top');
+		await tick();
+		expect(h.runs.started).toEqual(['low', 'top']);
+		expect(h.queue.inflightCount()).toBe(0);
+	});
+
+	it('leaves a job started again before its first start wound down with that start’s cancel', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		const low = placed(h, 'low', 1, 2);
+		await tick();
+		placed(h, 'top', 1, 1);
+		// In the same turn, a second slot: `low` starts again before its first start has wound down.
+		h.queue.setConcurrency(2);
+		await tick();
+		expect(h.runs.started).toEqual(['low', 'top', 'low']);
+		h.queue.release('low');
+		await tick();
+		expect(isQueueError(low.error, 'cancelled')).toBe(true);
+		expect(h.queue.inflightCount()).toBe(1);
+	});
+
+	it('settles a job put back in line when the queue closes', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		const low = placed(h, 'low', 1, 2);
+		await tick();
+		placed(h, 'top', 1, 1);
+		await tick();
+		h.queue.close();
+		await tick();
+		expect(isQueueError(low.error, 'cancelled')).toBe(true);
+	});
+
+	it('is not taken while the queue is paused', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64, startupMs: 5000 });
+		placed(h, 'low', 1, 2);
+		await tick();
+		h.queue.pause();
+		placed(h, 'top', 1, 1);
+		await tick();
+		expect(h.runs.started).toEqual(['low']);
+		h.queue.resume();
+		await tick();
+		expect(h.runs.started).toEqual(['low', 'top']);
+	});
+});
+
 describe('QueueError', () => {
 	it('is an Error with a matchable kind', () => {
 		const error = new QueueError('timeout', 'k');

@@ -479,7 +479,9 @@ export class TikzBlock extends MarkdownRenderChild {
 				// block submitted the key first.
 				onStart: (running) => {
 					if (started === undefined && running) joined = true;
-					started ??= this.deps.now();
+					// The last start: a job that gave its slot to a more urgent one before the engine had
+					// it went back in line, and waited there again (internal/DECISIONS.md D40).
+					started = this.deps.now();
 					this.dispatch({ type: 'slot' });
 				},
 				...(this.deps.place === undefined ? {} : { place: this.deps.place }),

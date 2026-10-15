@@ -146,9 +146,10 @@ export interface SubmitOptions {
 	place?: number | undefined;
 
 	/**
-	 * Called once when the job this caller is waiting for starts — at once, if it already has, with
+	 * Called when the job this caller is waiting for starts — at once, if it already has, with
 	 * `joined` true: the caller then shares a compile that was under way before it asked, whose times
-	 * are that compile's and not its own (the diagnostics view says so).
+	 * are that compile's and not its own (the diagnostics view says so). Called again when the job gave
+	 * its slot to a more urgent one before the engine had it, and was started again (RenderQueue.pump).
 	 *
 	 * Per caller, not per job, because dedup gives every caller of a key the FIRST caller's job. The
 	 * notification used to ride on that job object, so only the first caller ever heard; a second
@@ -212,6 +213,11 @@ interface Entry<J, T> {
 	 * slot. Undefined before the start, and once the engine has the job or it has settled.
 	 */
 	cancel: (() => void) | undefined;
+	/**
+	 * Puts a started job the engine does not have yet back in line, its signal aborted with
+	 * `cancelled`, so that a more urgent job can have its slot (pump). Defined while `cancel` is.
+	 */
+	yieldSlot: (() => void) | undefined;
 	promise: Promise<T>;
 	resolve: (value: T) => void;
 	reject: (error: unknown) => void;
@@ -376,6 +382,8 @@ export class RenderQueue<J, T> {
 			existing.place = Math.min(existing.place, placeOf(opts));
 			if (timeoutMs > existing.timeoutMs) existing.timeoutMs = timeoutMs;
 			if (opts?.uncapped === true || opts?.resumed === true) existing.uncapped = true;
+			// More urgent now, a job still waiting may take the slot of one the engine does not have yet.
+			if (!existing.started) this.pump();
 			return existing.promise;
 		}
 
@@ -398,6 +406,7 @@ export class RenderQueue<J, T> {
 			uncapped: opts?.uncapped === true || resumed,
 			started: false,
 			cancel: undefined,
+			yieldSlot: undefined,
 			promise,
 			resolve,
 			reject,
@@ -464,13 +473,41 @@ export class RenderQueue<J, T> {
 		entry.reject(new QueueError('cancelled', key, `${key} was released before it started`));
 	}
 
+	/**
+	 * Start the most urgent waiting jobs while slots are free; and while none is, give the slot of a
+	 * started job the engine does not have yet to a waiting job more urgent than it.
+	 *
+	 * Such a job waits for the engine to start, or for its stored run to be read, and nothing has been
+	 * paid for it (internal/DECISIONS.md D25). On a phone there is one slot, and it went to the job
+	 * submitted first for the whole of the engine's start: which diagram the engine took first was
+	 * chosen while it could take none. Now it is chosen when the engine takes one (D40). The job put
+	 * back keeps its band, its place and its turn, and counts against the depth cap again, which turns
+	 * away the least urgent. The more urgent job is handed to the runner before the other is aborted,
+	 * so that a host still starting an engine for the one finds the other waiting for it, also where
+	 * an abort says nothing of why (D25).
+	 */
 	private pump(): void {
-		while (!this.paused && !this.closed && this.inflight < this.concurrency) {
+		while (!this.paused && !this.closed) {
 			const entry = this.nextToStart();
 			if (entry === undefined) return;
+			let displaced: (() => void) | undefined;
+			if (this.inflight >= this.concurrency) {
+				const holder = this.leastUrgentStarting();
+				if (holder?.yieldSlot === undefined || !before(entry, holder)) return;
+				displaced = holder.yieldSlot;
+				holder.yieldSlot = undefined;
+				holder.cancel = undefined;
+				holder.started = false;
+				this.pending.push(holder);
+				this.inflight -= 1;
+			}
 			this.drop(entry);
 			entry.started = true;
 			void this.start(entry);
+			if (displaced !== undefined) {
+				displaced();
+				this.enforceDepthCap();
+			}
 		}
 	}
 
@@ -480,6 +517,8 @@ export class RenderQueue<J, T> {
 		let timerId: number | undefined;
 		let done = false;
 		let running = false;
+		/** Gave its slot to a more urgent job (pump): back in line, its slot handed over already. */
+		let yielded = false;
 
 		// §5.3: a bare setTimeout around the await is not enough — `Worker.terminate()` fires no
 		// message, so the pending deferred inside the host never settles and the await hangs forever.
@@ -507,10 +546,11 @@ export class RenderQueue<J, T> {
 
 		// The job reached the engine: its own budget starts now, and not a moment before.
 		const begin = (): void => {
-			if (running || done) return;
+			if (running || done || yielded) return;
 			running = true;
-			// Paid for from here on: a release leaves it to finish and cache.
+			// Paid for from here on: a release leaves it to finish and cache, and it keeps its slot.
 			entry.cancel = undefined;
+			entry.yieldSlot = undefined;
 			if (timerId !== undefined) this.timers.clearTimeout(timerId);
 			try {
 				arm();
@@ -530,6 +570,19 @@ export class RenderQueue<J, T> {
 			} else {
 				timerId = this.timers.setTimeout(() => expire({ kind: 'stalled' }), this.startupMs);
 				entry.cancel = () => expire({ kind: 'cancelled' });
+				entry.yieldSlot = () => {
+					yielded = true;
+					// At once rather than once the race has settled, a few microtasks on: by then the
+					// runner could have handed the job to an engine that came up for it.
+					controller.abort(
+						new QueueError(
+							'cancelled',
+							entry.key,
+							`${entry.key} gave its slot to a more urgent job before it reached the engine`,
+						),
+					);
+					expire({ kind: 'cancelled' });
+				};
 			}
 
 			const outcome = await Promise.race<Outcome<T>>([
@@ -537,7 +590,10 @@ export class RenderQueue<J, T> {
 				timer,
 			]);
 
-			if (outcome.kind === 'ok') {
+			if (yielded) {
+				// Back in line (pump), its callers still waiting: nothing to settle, whatever the runner
+				// made of the abort.
+			} else if (outcome.kind === 'ok') {
 				entry.resolve(outcome.value);
 			} else if (outcome.kind === 'error') {
 				entry.reject(outcome.error);
@@ -576,16 +632,22 @@ export class RenderQueue<J, T> {
 			// throw out of it would free the slot while leaving the caller's promise pending for the
 			// rest of the session, visible only as an unhandled rejection off `void this.start()`. An
 			// entry that never settles is the one failure this module exists to make impossible, so
-			// the guarantee is structural rather than by inspection of the code above.
-			entry.reject(error);
+			// the guarantee is structural rather than by inspection of the code above. One back in line
+			// settles once it is started again.
+			if (!yielded) entry.reject(error);
 		} finally {
 			done = true;
-			entry.cancel = undefined;
 			if (timerId !== undefined) this.timers.clearTimeout(timerId);
-			this.inflight -= 1;
-			// A cancelled job left the map at its release, and the key may be another job's by now.
-			if (this.entries.get(entry.key) === entry) this.entries.delete(entry.key);
-			this.pump();
+			// Its slot went to the more urgent job as it yielded, and it may have been started again
+			// since, with a `cancel` of that start's.
+			if (!yielded) {
+				entry.cancel = undefined;
+				entry.yieldSlot = undefined;
+				this.inflight -= 1;
+				// A cancelled job left the map at its release, and the key may be another job's by now.
+				if (this.entries.get(entry.key) === entry) this.entries.delete(entry.key);
+				this.pump();
+			}
 		}
 	}
 
@@ -635,6 +697,16 @@ export class RenderQueue<J, T> {
 		let worst: Entry<J, T> | undefined;
 		for (const entry of this.pending) {
 			if (entry.uncapped) continue;
+			if (worst === undefined || before(worst, entry)) worst = entry;
+		}
+		return worst;
+	}
+
+	/** Of the started jobs the engine does not have yet, the least urgent: the one to give its slot up. */
+	private leastUrgentStarting(): Entry<J, T> | undefined {
+		let worst: Entry<J, T> | undefined;
+		for (const entry of this.entries.values()) {
+			if (!entry.started || entry.yieldSlot === undefined) continue;
 			if (worst === undefined || before(worst, entry)) worst = entry;
 		}
 		return worst;

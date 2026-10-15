@@ -461,8 +461,16 @@ export function reduce(state: State, event: Event): [State, Effect[]] {
 				case 'rejected':
 					// The queue dropped the job because every block that wanted it let go before the
 					// engine had it (DECISIONS.md D25), which only an unloaded block can have done.
-					// Any other rejection here is a late one, and `ok` / `err` / `timeout` own it.
 					if (state.unloaded) return go(state, { phase: 'DISPOSED' }, []);
+					// Or the job gave its slot to a more urgent one before the engine had it, went back
+					// in line, and was then turned away by the depth cap or by the plugin unloading
+					// (D40): the button, as from SCHEDULING. Any other rejection here is a late one, and
+					// `ok` / `err` / `timeout` own it.
+					if (event.reason === 'depthCap') {
+						return go(state, { phase: 'IDLE_MANUAL', reason: 'depthCap' }, [
+							{ kind: 'mountManualButton', reason: 'depthCap' },
+						]);
+					}
 					return noop(state);
 				default:
 					return noop(state);

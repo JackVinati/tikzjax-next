@@ -1383,6 +1383,44 @@ describe('what a block reports when it comes to rest', () => {
 		expect(reports[1]?.timings?.totalMs).toBe(200);
 	});
 
+	it('a job that gave its slot to a more urgent one: queued until it was last started', async () => {
+		// Started 10 ms after it asked, while the engine was starting; a diagram higher in the note
+		// took the slot, and the queue started this one again 40 ms later (internal/DECISIONS.md D40).
+		const { reports, report } = reporting();
+		let now = 100;
+		const places: unknown[] = [];
+		const queue = {
+			submit: (
+				_k: string,
+				_j: TexJobSpec,
+				_p: number,
+				_t: number,
+				opts?: { onStart?: (joined: boolean) => void; place?: number },
+			) => {
+				places.push(opts?.place);
+				now += 10;
+				opts?.onStart?.(false);
+				now += 40;
+				opts?.onStart?.(false);
+				now += 30;
+				return Promise.resolve({ svg: SVG, log: [], durationMs: 30 });
+			},
+			release: () => undefined,
+		} as unknown as BlockDeps['queue'];
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ queue, now: () => now, report, place: 3, observe: (_el, onChange) => onChange(true) }),
+		);
+		child.onload();
+		await child.settled;
+		await vi.waitFor(() => expect(reports).toHaveLength(2));
+		expect(reports[1]?.timings?.queueMs).toBe(50);
+		expect(reports[1]?.timings?.joined).toBeUndefined();
+		// Where it is in its note, as the processor numbered the blocks it made.
+		expect(places).toEqual([3]);
+	});
+
 	it("a diagram the viewport gate gave up on: waited from its cache miss, so the gate's wait is in it", async () => {
 		const { reports, report } = reporting();
 		let now = 100;

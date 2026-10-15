@@ -875,6 +875,15 @@ describe('a queue rejection before the job starts', () => {
 		expect(reduce(compiling, { type: 'rejected', reason: 'timeout' })[0]).toBe(compiling);
 	});
 
+	it('COMPILING + rejected(depthCap) -> IDLE_MANUAL: a job put back in line before the engine had it, then turned away', () => {
+		// A job gives its slot to a more urgent one while it waits for the engine to start, and goes
+		// back in line with its block still in COMPILING (internal/DECISIONS.md D40). The depth cap or
+		// the plugin unloading may then let it go, and the block must come to rest, once.
+		const [state, fx] = reduce(stateFor('COMPILING'), { type: 'rejected', reason: 'depthCap' });
+		expect(state).toMatchObject({ phase: 'IDLE_MANUAL', reason: 'depthCap' });
+		expect(kinds(fx)).toEqual(['mountManualButton', 'settle']);
+	});
+
 	it('COMPILING, unloaded + rejected -> DISPOSED: the queue dropped a job the engine never had', () => {
 		// Every block that wanted it let go while it waited for the engine to start (D25). The
 		// unloaded block has settled nowhere yet, and must, once.

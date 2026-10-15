@@ -477,6 +477,21 @@ describe('a note opened on a cold engine', () => {
 		return { make, miss, ran, running, finish };
 	}
 
+	it('starts the diagram at the top first, whichever cache read answered first', async () => {
+		const n = note();
+		for (const name of ['#1', '#2', '#3', '#4']) n.make(name);
+		await flush();
+		for (const name of ['#2', '#3', '#4']) await n.miss(name);
+		expect(n.ran).toEqual(['#2']);
+		// The top one's read answers while the engine is still starting: #2 gives up its slot.
+		await n.miss('#1');
+		expect(n.ran).toEqual(['#2', '#1']);
+		n.running.get('#1')?.();
+		n.finish.get('#1')?.({ svg: SVG_OUT, log: [], durationMs: 1 });
+		await flush();
+		expect(n.ran).toEqual(['#2', '#1', '#2']);
+	});
+
 	it('leaves the engine the diagram it has, and starts the one at the top next', async () => {
 		const n = note();
 		for (const name of ['#1', '#2', '#3', '#4']) n.make(name);
