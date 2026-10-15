@@ -6,9 +6,18 @@ top of its notes on GitHub, and will not publish a version that has none.
 ## 0.2.1-beta.5 — 2026-10-15
 
 The figures below were measured on my Windows desktop, in headless Chromium, the browser engine of
-Obsidian's desktop app, and WebKit, the one of the iPhone and iPad, through Playwright rather than
-in Obsidian; where they compare with 0.2.0, it is 0.2.0 as released. None of them is from a phone.
+Obsidian's desktop app, and WebKit, the browser engine of the iPhone and iPad, through Playwright
+rather than in Obsidian; where they compare with 0.2.0, it is 0.2.0 as released. None of them is
+from a phone.
 
+- Updating from 0.2.0 compiles again only the diagrams that contain a character the engine has no
+  font for, such as Chinese, Greek or Cyrillic, so that their labels show it, and the diagrams under
+  a preamble file that ends with a comment and no newline (below). Every other diagram 0.2.0 cached
+  is shown from the cache. Updating from 0.1.x compiles every cached diagram once more, the next
+  time it is shown, as 0.2.0 did. From this release on the cache is tied to what the engine draws
+  rather than to the exact build of it, so a release that only makes the engine faster no longer
+  compiles every cached diagram again; one that changes what diagrams look like still does, and says
+  so here.
 - A diagram that is not cached goes to the engine as soon as it comes into view. 0.2.0 made each one
   wait first, 300 ms on a computer and half a second on a phone, also when you had just opened the
   note. Only a diagram in a note you are typing in still waits for you to pause, so that it compiles
@@ -17,11 +26,12 @@ in Obsidian; where they compare with 0.2.0, it is 0.2.0 as released. None of the
   every diagram shown is cached.
 - TeX takes about a third less time. Over the 37 test diagrams 0.2.0 was released with, the fastest
   of seven runs each, TeX's time went from 2,827 to 1,850 ms in Chromium and from 4,210 to 2,772 ms
-  in WebKit, and each diagram took between 25% and 63% less. The engine is compiled so that TeX
-  keeps the values it works on where the processor reaches them directly, rather than in its memory,
-  it is optimised with a newer binaryen, and its calls into the plugin, for every line and character
-  TeX reads or prints, no longer make new arrays each time. Apart from the labels in other scripts
-  below, every diagram draws as before, byte for byte.
+  in WebKit, and each diagram took 29% to 63% less in Chromium and 25% to 54% less in WebKit. The
+  engine is compiled so that TeX keeps the values it works on where the processor reaches them
+  directly, rather than in its memory; it is optimised with a newer binaryen; and its calls into the
+  plugin, for every line and character TeX reads or prints, no longer make new arrays each time.
+  Every test diagram 0.2.0 had draws as it did then, byte for byte; what draws differently is labels
+  in other scripts and the two fixes below.
 - The engine starts in a third of the time: 54 ms instead of 162 in Chromium and 57 instead of 152
   in WebKit, medians of seven starts. The plugin hands the engine its files when it starts it,
   instead of carrying them inside the engine's own code, and the engine unpacks them with the
@@ -31,12 +41,12 @@ in Obsidian; where they compare with 0.2.0, it is 0.2.0 as released. None of the
   done, and TeX compiles only its body. That is every diagram after the first with the same
   preamble, the blocks of a note that are only a `tikzpicture` among them, and a diagram you are
   typing in, each time it compiles again. Drawn a second time in a row, circuitikz took 64 ms of TeX
-  in Chromium where 0.2.0 took 310, siunitx 10 where it took 133 and plain TikZ 4 where it took 18,
-  and the 37 test diagrams 752 ms where they took 2,787. The first diagram of each preamble pays for
-  saving it, 11 to 13 ms in Chromium, and about a tenth of a second without the JIT. A diagram drawn
-  this way is the same, byte for byte, as one drawn from the start, and every release checks that
-  for every test diagram and for 33 cases written to break it. An engine keeps up to 32 MB of saved
-  preambles on a computer and 12 MB on a phone or tablet.
+  in Chromium, siunitx 10 and plain TikZ 4, where 0.2.0 took 314, 133 and 18, and the 37 test
+  diagrams 752 ms where 0.2.0 took 2,827. The first diagram of each preamble pays for saving it, 11
+  to 13 ms in Chromium, and about a tenth of a second without the JIT. A diagram drawn this way is
+  the same, byte for byte, as one drawn from the start, and every release checks that for every test
+  diagram and for 33 cases written to break it. An engine keeps up to 32 MB of saved preambles on a
+  computer, and 12 MB on a phone or tablet or on a computer that reports less than 8 GB of memory.
 - Saved preambles are also kept in this device's own storage, in Obsidian's IndexedDB beside the
   diagram cache, never in the vault, so they are not synced with it. After the engine has stopped,
   after Obsidian restarts, or on a phone after the app was in the background, a diagram whose
@@ -44,9 +54,11 @@ in Obsidian; where they compare with 0.2.0, it is 0.2.0 as released. None of the
   budgets, the first diagram after a fresh start of the browser, the engine's start included, took
   223 ms for circuitikz from its stored preamble where compiling the preamble took 426, and 153 for
   pgfplotstable where it took 358. Up to 64 MB are kept for each vault on a computer, and 16 MB on a
-  phone or tablet, the preamble used least recently going first. Clearing the diagram cache deletes
-  them too, which is the way to remove them from a device before uninstalling the plugin, since
-  Obsidian does not tell a plugin it is being removed. The README says what a stored preamble holds.
+  phone or tablet or on a computer that reports less than 8 GB of memory, the preamble used least
+  recently going first. Clearing the diagram cache deletes them too, which is the way to remove them
+  from a device before uninstalling the plugin, since Obsidian does not tell a plugin it is being
+  removed. [The README](https://github.com/JackVinati/tikzjax-next#stored-preambles) says what a
+  stored preamble holds.
 - Labels in Chinese, Japanese, Korean, Greek, Cyrillic, Arabic, Hebrew, Thai, Devanagari, IPA and
   emoji are drawn. The engine has no fonts for them, so TeX sets each character as a box one em wide
   and the plugin writes the character over it in your system's sans-serif font; nodes and arrows are
@@ -55,8 +67,9 @@ in Obsidian; where they compare with 0.2.0, it is 0.2.0 as released. None of the
   fail, are drawn the same way. In a `text width` node or a `\parbox` the text wraps: Chinese and
   Japanese between characters, though never before closing punctuation, and other scripts where a
   space is typed. Names in these scripts, of nodes, coordinates, styles, colours and `\label`s, work
-  as they did in 0.2.0, and the pre-flight check no longer warns about any of these characters. The
-  README lists what text drawn this way cannot do. Contributed by RepentStar in
+  as they did in 0.2.0, and the pre-flight check no longer warns about any of these characters.
+  [The README](https://github.com/JackVinati/tikzjax-next#known-limitations) lists what text drawn
+  this way cannot do. Contributed by RepentStar in
   [pull request #2](https://github.com/JackVinati/tikzjax-next/pull/2).
 - The diagnostics view times each diagram from coming into view to drawn in the note, with every
   wait on the way; says how many times the engine started, how long each start took and why it
@@ -74,20 +87,20 @@ in Obsidian; where they compare with 0.2.0, it is 0.2.0 as released. None of the
 - Two new settings: Second engine, on a computer, turns the second engine off; Saved preambles turns
   saved preambles off, on any device, and deletes the stored ones, should a diagram ever draw
   differently from one. Please report the diagram if one does.
-- Without the JIT compiler, as with Lockdown Mode on an iPhone or iPad, TeX runs about twenty times
-  slower. The diagnostics view says whether TeX seems to run with the JIT: "on (probably)", "off
-  (probably)" or "unclear". On an iPhone or iPad where two engine starts of a session have found it
-  off, a notice says once that Lockdown Mode, if it is on, is the likely cause and how to exclude
-  Obsidian from it. So that a phone that is only slow, in Low Power Mode or hot, is not taken for
-  one without the JIT, the engine weighs its test against the rest of its own start, and takes it
-  again a second later. Where Lockdown Mode turns WebAssembly off altogether, as it does on some
-  versions of iOS, the diagram's card says so, where it said to close other apps.
+- Without the JIT compiler, as with Lockdown Mode on an iPhone or iPad, TeX runs twenty to thirty
+  times slower. The diagnostics view says whether TeX seems to run with the JIT: "on (probably)",
+  "off (probably)" or "unclear". On an iPhone or iPad where two engine starts of a session have
+  found it off, a notice says once that Lockdown Mode, if it is on, is the likely cause and how to
+  exclude Obsidian from it. So that a phone that is only slow, in Low Power Mode or hot, is not
+  taken for one without the JIT, the engine weighs its test against the rest of its own start, and
+  takes it again a second later. Where Lockdown Mode turns WebAssembly off altogether, as it does on
+  some versions of iOS, the diagram's card says so, where it said to close other apps.
 - When the `main.js` a device runs is not the version its `manifest.json` says, the plugin says so
   once, with how to put it right, and the diagnostics view shows both versions. Obsidian Sync
   Standard can leave a plugin like this when it carries installed plugins: it copies the new
   `manifest.json` and not `main.js`, which is over its 5 MB limit. A `main.js` older than this
-  release cannot tell, so the first update this catches is the one after 0.2.1; the README says what
-  to do until then.
+  release cannot tell, so the first update this catches is the one after 0.2.1;
+  [the README](https://github.com/JackVinati/tikzjax-next#out-of-step) says what to do until then.
 - The engine keeps one block of memory and, before each diagram, puts back only what the diagram
   before it changed, where 0.2.0 took a new 156 MiB block for every diagram and left the old ones
   for the browser to free when it got round to it. Over a run of 85 diagrams, the most memory the
@@ -110,15 +123,8 @@ in Obsidian; where they compare with 0.2.0, it is 0.2.0 as released. None of the
   21,281. Something nested deeper fails with "TeX nested deeper than the engine's stack allows.", as
   it did past the old limit. The deepest real diagrams tried draw as before: a `forest` tree 80
   levels deep, 4,000 groups inside each other and a plot of 2,000 coordinates, which are now among
-  the diagrams every release is tested with. Neither a phone nor Android has been measured.
-- Updating from 0.2.0 compiles again only the diagrams that contain a character the engine has no
-  font for, such as Chinese, Greek or Cyrillic, so that their labels show it, and the diagrams under
-  a preamble file that ends with a comment and no newline (above). Every other diagram 0.2.0 cached
-  is shown from the cache. Updating from 0.1.x compiles every cached diagram once more, the next
-  time it is shown, as 0.2.0 did. From this release on the cache is tied to what the engine draws
-  rather than to the exact build of it, so a release that only makes the engine faster no longer
-  compiles every cached diagram again; one that changes what diagrams look like still does, and says
-  so here.
+  the diagrams every release is tested with. Neither an iPhone nor an Android device has been
+  measured.
 
 ## 0.2.0 — 2026-10-13
 
