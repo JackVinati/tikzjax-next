@@ -3,7 +3,7 @@
 What changed in each release, newest first. The release workflow puts a version's section at the
 top of its notes on GitHub, and will not publish a version that has none.
 
-## 0.2.1-beta.5 — 2026-10-15
+## 0.2.1-beta.6 — 2026-10-15
 
 The figures below were measured on my Windows desktop, in headless Chromium, the browser engine of
 Obsidian's desktop app, and WebKit, the browser engine of the iPhone and iPad, through Playwright
