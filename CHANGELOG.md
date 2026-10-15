@@ -149,19 +149,27 @@ top of its notes on GitHub, and will not publish a version that has none.
   WebKit. Without the JIT, as with Lockdown Mode on an iPhone or iPad, TeX is about twenty times
   slower; there the view says that Lockdown Mode, if it is on, is the likely cause and how to exclude
   Obsidian from it, with a link to the README, and a notice says so once, when two engine starts of a
-  session have found the JIT off. A device that is only slow is not taken for one without the JIT:
-  when the loop is slow, the engine weighs it against the rest of its own start, which a slow
+  session have found the JIT off. So that a device that is only slow is not taken for one without
+  the JIT, when the loop is slow the engine weighs it against the rest of its own start, which a slow
   processor slows as much and a missing JIT hardly at all, and says "unclear" when that does not
-  settle it, which shows no notice. On that desktop, in WebKit, Chromium and Node, idle, with every
-  core busy, held to one slow core, and with the engine's clock run up to eight times fast, as if the
-  processor were that much slower, 272 starts with the JIT all said on; in WebKit without it, 100 of
-  128 said off and 28 unclear, these with every core busy or without the system's own gzip, as on
-  iOS before 16.4. When it weighed the loop, the engine's line in the view says how many nanoseconds
-  a step of it took, and a byte of the rest of its start.
-- 0.2.1-beta.4 went by the loop's time alone. My iPhone 16 Pro, hot or in a low power state, with
-  Obsidian excluded from Lockdown Mode, then said "off (probably)" and showed the notice with its JIT
-  on: everything ran about three times slower, the start's own work too, and the loop past its limit.
-  On the Windows desktop held to one slow core, beta.4 said off in 19 of 32 starts with the JIT.
+  settle it, which shows no notice; and where it did not find the JIT on, it times the loop again a
+  second later, by when the system has had time to compile it, and that is what it says, "checking
+  again" until then. On that desktop, in WebKit, Chromium and Node, idle, with every core busy, held
+  to one slow core, and with the engine's clock run up to eight times fast, as if the processor were
+  that much slower, 272 starts with the JIT all said on; in WebKit without it, 100 of 128 said off
+  and 28 unclear, these with every core busy or without the system's own gzip, as on iOS before 16.4.
+  With the JIT on and the loop's compiling held back in WebKit, the first timing said off in 16
+  starts and the one a second later on in all 16; held back further, the second mostly said off or
+  unclear too. When it weighed the loop, the engine's line in the view says how many nanoseconds a
+  step of it took, and a byte of the rest of its start, for both timings. None of this has been tried
+  on a phone yet.
+- 0.2.1-beta.4 went by the loop's time alone. My iPhone 16 Pro, apparently throttled at the time,
+  with Obsidian excluded from Lockdown Mode, then said "off (probably)" and showed the notice with its
+  JIT on: everything ran about three times slower, the start's own work too, and the loop past its
+  limit. Whether its loop was compiled and slow or not compiled yet, one timing cannot tell, which
+  is why it is now timed twice. On the Windows desktop held to one slow core, beta.4 said off in 19
+  of 32 starts with the JIT. A device that was shown the notice by an earlier beta may be shown it
+  once more, and only where the second timing finds the JIT off.
 - Where Lockdown Mode turns WebAssembly off altogether, as it does on some versions of iOS, the
   engine cannot start, and the diagram's card now says that the device runs no WebAssembly, what
   Lockdown Mode has to do with it and how to exclude Obsidian, where it said to close other apps;
@@ -196,10 +204,11 @@ top of its notes on GitHub, and will not publish a version that has none.
   default, and 10% less in WebKit at a phone's budgets. In WebKit on that desktop the engine's start
   took 3 to 4 ms longer with the storage in use and nothing stored, and 2 to 14 ms longer while a
   stored preamble was read, the engine's own start inside its thread taking the same; where the rest
-  goes was not tracked down. The engine writes each preamble out between diagrams, which took 4 ms
-  at most on that desktop, and compresses it on a thread of its own while the next diagram compiles;
-  an engine about to stop, after its idle time or because Obsidian goes to the background, first
-  finishes doing so, for 2 s or 1 s at most. Up to
+  goes was not tracked down. The engine writes each preamble out as soon as its diagram is drawn,
+  which took 4 ms at most on that desktop, and compresses it on a thread of its own while the next
+  diagram compiles; an engine about to stop, after its idle time or because Obsidian goes to the
+  background, with preambles still to store first finishes storing them, for 2 s or 1 s at most, and
+  one with none stops at once. Up to
   64 MB are kept for each vault on a computer, and 16 MB on a phone or tablet and on a computer that
   reports less than 8 GB of memory, compressed from iOS 16.4 on, the preamble used least recently
   going first, one that took longer to load counting as used later; where storage runs out of room, the preambles already stored are still used. A stored
@@ -227,15 +236,22 @@ top of its notes on GitHub, and will not publish a version that has none.
   engine wrote a preamble out only once it had had nothing to do for a tenth of a second, which in a
   note is at its end, let some of those waiting go meanwhile, and was stopped with the rest when
   Obsidian went to the background: on my iPhone 16 Pro, diagrams with circuitikz, pgfplots and
-  pgfplotstable compiled their preamble every time. Measured on a Windows desktop in headless WebKit,
-  the browser engine of the iPhone and iPad, at a phone's budgets, against beta.4: after a first
-  visit of the plugin's 44 test diagrams, 19 preambles were stored instead of 10, and the second
-  visit, in a fresh browser, started 16 to 18 diagrams from storage instead of 11, every heavy one
-  among them, and took 5.7 s instead of 6.6; with Obsidian sent to the background as the last
-  diagram was drawn, where beta.4 stored nothing, 5.8 s instead of 7.6. A note of 74 diagrams took
-  4.4 s instead of 5.9 the second time, no preamble compiled again, and a circuitikz diagram, after a
-  session that went to the background 200 ms after drawing it, 217 ms instead of 438 in the next. A
-  first visit takes what it took.
+  pgfplotstable compiled their preamble every time. Now each preamble is written out as its diagram
+  is drawn and compressed while the next one compiles, and an engine sent to the background with
+  preambles still to store finishes first, for a second at most; one with nothing left stops at once,
+  as before. Measured on a Windows desktop in headless WebKit, the browser engine of the iPhone and
+  iPad, at a phone's budgets, against beta.4: after a first visit of the plugin's 44 test diagrams,
+  19 preambles were stored instead of 10, and the second visit, in a fresh browser, started 17 to 18
+  diagrams from storage instead of 11, every heavy one among them, and took 4.6 s instead of 5.2;
+  with Obsidian sent to the background as the last diagram was drawn, where beta.4 stored nothing,
+  4.6 s instead of 5.8. A note of 74 diagrams took 3.5 s instead of 4.6 the second time, no preamble
+  compiled again, and a circuitikz diagram, after a session that went to the background 200 ms after
+  drawing it, 223 ms instead of 426 in the next. Of six heavy diagrams drawn one after the other, two
+  were still being stored when the last was drawn, and the engine had handed both over and stopped
+  within 60 ms of the background. In Chromium at a phone's budgets, as on Android, with the background at once, 22 were stored
+  where beta.4 stored none, and the second visit took 3.0 s instead of 4.1. A first visit took 2.5%
+  less to 3.5% more than with beta.4; on a computer, where beta.4 stored them too, at the note's end,
+  a first visit of the 74 took 1.6% longer in Chromium.
 - A diagram that shared a compile already under way for the same diagram, in another pane or in a
   block the note redrew, says "joined a compile already running" in the diagnostics view, with that
   compile's TeX time as the compile's. It used to show that compile's steps as its own, beside a

@@ -17,12 +17,12 @@ import type { JitProbe, JitState } from './protocol';
  *
  * An attempt is PROBE_STEPS steps, in PROBE_CALLS calls. One that is done before the worker's clock
  * reaches PROBE_SLOW_MS settles it: only compiled code runs the loop that fast. A processor slowed
- * down, hot or in Low Power Mode, can run it slower than that with its JIT, as the maintainer's
- * iPhone did once, so a slow attempt is not taken for a missing JIT by itself, as it was until
- * 0.2.1-beta.5. The first attempt stops at PROBE_SLOW_MS; once it has been slow, the worker gives
- * its thread up for a moment, which lets the platform finish compiling the loop where no core was
- * free to, and tries again, up to PROBE_ATTEMPTS in all, each run on to PROBE_MEASURE_MS so that it
- * says how slow the loop is. What a step took at the fastest of them (`nsPerStep`) is then weighed
+ * down, warm or in Low Power Mode, can run it slower than that with its JIT, as the maintainer's
+ * iPhone, apparently throttled, may have done once, so a slow attempt is not taken for a missing JIT
+ * by itself, as it was until 0.2.1-beta.5. The first attempt stops at PROBE_SLOW_MS; once it has
+ * been slow, the worker gives its thread up for a moment, which lets the platform finish compiling
+ * the loop where no core was free to, and tries again, up to PROBE_ATTEMPTS in all, each run on to
+ * PROBE_MEASURE_MS so that it says how slow the loop is. What a step took at the fastest of them (`nsPerStep`) is then weighed
  * against what the same start spent a byte in the platform's own inflate of the core dump, native
  * code that a slow processor slows as much as it slows the loop and a missing JIT hardly slows: 29 to
  * 43 ms with the JIT and 33 to 42 without, in fresh workers in WebKit on the desktop (`verdict`).

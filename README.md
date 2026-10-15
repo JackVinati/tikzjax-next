@@ -601,11 +601,14 @@ altogether, and then the engine does not start at all, and the diagram's card sa
 runs no WebAssembly; on some of those, excluding Obsidian has been reported not to bring it back.
 Since 0.2.1 the diagnostics view says whether TeX seems to run with the JIT, "on (probably)" or "off
 (probably)", or that there is no WebAssembly, and an iPhone or iPad that seems to run without the
-JIT says so once, when two engine starts of a session have found it off. A phone that is only slow,
-hot or in Low Power Mode, is not taken for one without the JIT: since 0.2.1-beta.5 the engine weighs
-how long its test loop took against how long the rest of its start took, which a slow phone slows
-as much and Lockdown Mode does not, and says "unclear" when that does not settle it. 0.2.1-beta.4
-told my iPhone, hot, that it ran without the JIT, and showed the notice, when it had the JIT.
+JIT says so once, when two engine starts of a session have found it off. Since 0.2.1-beta.5 a phone
+that is only slow, in Low Power Mode for one, should not be taken for one without the JIT: the
+engine weighs how long its test loop took against how long the rest of its start took, which a slow
+phone slows as much and Lockdown Mode does not, and says "unclear" when that does not settle it;
+where it did not find the JIT on, it times the loop again a second later, and that is what it says,
+"checking again" until then. This has been tried on a Windows desktop and not yet on a phone.
+0.2.1-beta.4 told my iPhone, apparently throttled at the time, that it ran without the JIT, and
+showed the notice, when it had the JIT.
 
 <!-- IPHONE-FIGURES: the 7.3 s, 0.27 s, 1.3 s and 0.13 s above are one reading each on the maintainer's iPhone with 0.2.0 (diagnostics view, 14 October 2026), whose model and iOS version were not written down. Name them here once TODO.md §9's JIT probe check has been done, which records them. -->
 
