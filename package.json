@@ -1,6 +1,6 @@
 {
   "name": "tikzjax-next",
-  "version": "0.2.1-beta.3",
+  "version": "0.2.1-beta.4",
   "description": "Render TikZ and LaTeX diagrams in your notes",
   "license": "GPL-3.0-or-later",
   "type": "module",
