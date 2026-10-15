@@ -1196,6 +1196,11 @@ have said about the WebView is asked of it instead, by feature check:
 `DecompressionStream` and `Uint8Array.fromBase64`, which decide what 0.2.2's faster start can use,
 and the cores and memory it reports. The iOS version is written down by whoever measures.
 
+**Amended by D39.** A diagram also says which edit of its note made it wait for the debounce, or came
+after it was made and did not, and why a run stored for its preamble was not sent with it; each
+engine, what it handed over to be stored and what of that was dropped or failed; and the line on
+stored preambles, what the store kept and refused this session, and why.
+
 ---
 
 ## D22 — Only a block of a note being typed in waits for the debounce
@@ -1234,7 +1239,8 @@ in a note that was typed in within it, which is what every block paid before.
 edit reported after a block was made, in another run of code, did not make it, and at a desktop start
 one made the note's first diagrams wait. The keystroke Live Preview reports after remaking its widget,
 in the same update, is told by its run: the processor asks as the block is made, and the miss reads
-the answer.
+the answer, with the edit that made the block, or one after it that did not, which the diagnostics'
+waited step says.
 
 How each place a diagram is drawn comes out:
 
@@ -2230,7 +2236,9 @@ save's time, not TeX's, and the diagnostics say "preamble saved in N ms, not kep
 
 **Amended by D39.** Where the host asks for a run to store (D36), a run the worker could not keep is
 saved all the same, once a name in the worker's life, handed over and let go: until then a preamble
-that came after runs filling the worker was not saved at all, and so not stored from that worker.
+that came after runs filling the worker was not saved at all, and so not stored from that worker. A
+name is saved for the store again after its hand-over was dropped for room, or the store cleared, not
+after a hand-over that failed.
 
 The runs go with the engine: its idle stop, the app going to the background, Restart the TeX engine
 (S3, and `TODO.md` for keeping them across restarts). Settings → Rendering → Saved preambles,
@@ -2860,7 +2868,9 @@ its own, which replaces it.
 **Amended by D39.** A run its worker had no room to keep reaches storage too: where the host asks for
 the run, the worker saves it for that alone, once a name in its life, and hands it over like any
 other. Until then one it saved and did not keep was handed over, and one it had no room to save at
-all was not.
+all was not. And the diagnostics say each way a run fails to get from a diagram to the store and back:
+why a stored run was not sent with a diagram, what each engine handed over and what of that was
+dropped or failed, and what the store kept and refused, and why.
 
 **Only when it is cheaper.** A run is sent, and kept at all, only when putting it back is likely to
 cost less than its preamble and its save did in the engine that saved it, which the worker measures
@@ -3536,10 +3546,12 @@ among it), `test/settings.test.ts` (the notice's flag cleared once).
 
 ## D39 — What 0.2.1-beta.5 did on the maintainer's devices: a preamble the worker had no room to save, and the desktop's first diagrams waiting after a start
 
-**Amends D32 (which runs are saved), D36 (which reach storage) and D22 (when a block debounces), and
-DESIGN.md §3.3, §4.7 and §5.4. Found by the maintainer testing 0.2.1-beta.5 on the iPhone 16 Pro of
-D38, iOS 27.0.1, with the JIT on and the phone in its normal power state, and on the Windows desktop
-the engine is maintained on, Obsidian 1.14.4 with two engines. Date of record: 2026-10-15.**
+**Amends D32 (which runs are saved), D36 (which reach storage), D22 (when a block debounces) and D21
+(what the diagnostics say), and DESIGN.md §3.3, §4.7, §5.4 and §7.6. Found by the maintainer testing
+0.2.1-beta.5 on the iPhone 16 Pro of D38, iOS 27.0.1, with the JIT on and the phone in its normal
+power state, and on the Windows desktop the engine is maintained on, Obsidian 1.14.4 with two engines.
+Date of record: 2026-10-15; corrected the same day after the review of its first build (f4366b7),
+whose findings are given where they change what is said.**
 
 The maintainer's readings, from the diagnostics view's Copy, are the only device figures here; every
 other figure is from the desktop of D27 on 2026-10-15, with Playwright 1.63's WebKit 26.6, each named
@@ -3570,13 +3582,31 @@ pgfplots-axis, siunitx and feynhand twice each and then circuitikz twice, the ru
 stored the run only in a later session, whose worker, holding the runs it had put back from storage,
 happened to have room to save it.
 
-The phone's own reading says saved and not kept, and by the code such a run was handed over where the
-host asked for it: while storage could take a run and none was stored under its name. Why the store
-did not hold it afterwards the reading does not say. A run stored under its name and not sent with
-the diagram, as the host does not send one whose putting back looks dearer than its preamble was, or
-whose read it stopped waiting for (D36), leaves the diagram to save a run nobody asks for; and a
-hand-over is dropped when the runs waiting that the worker no longer keeps pass its budget, the oldest
-first (D38). Neither was reproduced on the desktop.
+**What the phone's reading leaves open.** It says saved and not kept, and by the code beta.5 handed
+such a run over where the host asked for it: while storage could take a run and none was stored under
+its name. So the change below is not for what the phone reported, and whether circuitikz's run reaches
+the phone's store is as open after it as before. The phone's own symptom is unexplained; this change
+is for another case, a run the worker did not save at all, which the harness found. Read in beta.5's
+code, each of these ends in the same line, and nothing in the diagnostics told them apart:
+
+- A run stored under the diagram's name and not sent with it, so that the host asked for none
+  (`persist` is false wherever one is stored and none was sent) and the diagram saved a run nobody
+  asked for: storage not answering, a read outlasting its 250 ms or an earlier one not settled
+  (`overdueReads`); a run that could not be put back earlier that session for want of memory
+  (`unsendable`); putting it back estimated dearer than its preamble (`worth`); its read failing; an
+  engine holding it when the diagram came, which then went to the other engine or let the run go; or
+  the run stored only after the diagram's read had found none, as when the diagram before it, of the
+  same preamble, had just handed it over.
+- A hand-over lost: the gzip helper taking the bytes and failing (`gzipElsewhere` null), the cap on
+  the runs waiting dropping it (D38), or the writing out or the post failing.
+- A run handed over and not kept: not worth putting back by the figures a session starts from,
+  larger than the store's budget, one that would itself go first (`keptUntil`), storage refusing it
+  for room, which stops the writes for the session, or the store cleared since its render was posted
+  (the epoch, D36).
+
+None was reproduced on the desktop. The phone's "Stored preambles: 5, 9.4 MB" may hold circuitikz's
+run, 2.83 MiB gzipped, and its diagram would then have been of the first kind. What the diagnostics
+now say of each is below.
 
 **What it does now** (`engine-src/worker.ts` render). A render the host asks to hand its run over
 (`persist`) saves it where `wants` says no as well, unless the worker has already saved one of that
@@ -3586,15 +3616,26 @@ and drained before the idle and background stops (D38), and let go once handed o
 budget, cost and order of eviction (D36, D38) decide whether it is kept. Once a name in a worker's
 life, because the host goes on asking while none is stored under the name, which none is where the
 store did not keep it, and each such save costs its diagram the save's time: 4 to 6 ms in WebKit here,
-3 ms on the maintainer's iPhone, a tenth of a second without the JIT (D32). A hand-over dropped for
-room, or that fails, takes the name out again, so that the next diagram of that preamble saves it once
-more. Where the host does not ask, nothing changes.
+3 ms on the maintainer's iPhone, a tenth of a second without the JIT (D32). A hand-over the cap on the
+runs waiting drops takes the name out again, so that the next diagram of that preamble saves it once
+more; so does a clear of the store, which moves its epoch without stopping an engine, and saved
+preambles turned off, after which the store holds none. A hand-over that fails does not, since the
+review: what fails one is memory, the run written out on a phone short of it, or a helper that took
+its bytes and died, and the first build saved the run again at every later diagram of its preamble,
+allocating it and its writing out each time under that pressure (the review's reproduction, in Node at
+a budget of 1 MiB with the worker full and its hand-overs refused: four siunitx diagrams each saved,
+where beta.5 saved none). Nor is a run saved for the store by a render whose stored run could not be
+put back for want of memory, which the store keeps and the host sends no more that session: the first
+build allocated it again right after that failure. Where the host does not ask, nothing changes.
 
 **Measured** with the persistence harness of D36 (`persist.mjs`: each build's own WorkerHost and
 RunStore driving the worker its `main.js` ships, on a persistent profile, two sessions a round, each a
 fresh browser, the second on what the first left), WebKit 26.6 at a phone's budgets, 12 MiB in the
 worker and 16 stored, one engine, the diagrams handed over one at a time as the queue does on a phone;
-this change's build against 0.2.1-beta.5 as published, three rounds, the builds interleaved. Every SVG
+this change's first build (aadfd24) against 0.2.1-beta.5 as published, three rounds, the builds
+interleaved. The review's changes to it act only where a hand-over fails, a stored run cannot be put
+back for want of memory or the store is cleared, none of which these notes do, nor did the round of
+the reviewed build below. Every SVG
 was as the golden corpus has it, but for the four fixtures of D38 this harness does not reproduce,
 which both builds drew alike. Medians (ranges), in ms; the peaks are the content process's working
 set and private commit over the session, in MiB:
@@ -3618,22 +3659,69 @@ In the first note circuitikz's run reaches storage in the first session, where b
 the second, and its first diagram of the second session starts from it in 129 to 137 ms against 333
 to 341 compiled; its second diagram in a session starts from it too, read and put back again, as a
 run the worker cannot keep is at every diagram of its preamble that finds it stored (D36). In the
-second note both builds store circuitikz's run saved and not kept, and take the same. Over the 44 the
-second session saved two or three runs more than beta.5's, of small preambles the full store had not
-kept, and their hand-overs made it let go of others: one diagram fewer started from storage, 17
-against 18, and the note took as long within this desktop's noise. The peaks are beta.5's within
-their ranges, but for the private commit of the first note's first session, 803 (779–832) MiB against
-749 (748–809): a run saved and handed over is memory until the collector frees it (D32).
+second note both builds store circuitikz's run saved and not kept, and take the same.
 
-**What it costs.** `main.js` grows by 220 bytes. The worker's ENGINE_ID moves, and
-`test/fixtures/golden/REVISION.json` and `src/source/native-unicode.ts` are recorded again under it;
-what TeX draws does not change (`verify:golden`, `verify:snapshot`, `verify:reset`, and the scan finds
-the same characters native). Tests: `test/worker-handover.test.ts` (a run larger than the budget,
-handed over, let go, and put back by another worker; one saved for the host where the worker is too
-full to save it for itself, handed over, and not saved again in that worker's life).
+Over the 44 the first sessions were alike, diagram by diagram, in both builds: in a first visit
+nothing is stored under any name, the host asks for every run, and no run was saved for the store
+alone. The second sessions started 17 diagrams from storage in each of this build's rounds against 18
+in each of beta.5's, and resumed 31, 31 and 31 diagrams in all, from storage or from memory, against
+34, 34 and 32. The first version of this record put that down to the extra hand-overs making the
+store let go of others; read diagram by diagram, the review found otherwise. missing-package's run,
+which beta.5's first two rounds found stored, was missing from the store when each of this build's
+second sessions, and beta.5's third, reached it: its diagram compiled 1,087 to 1,150 ms into the
+session, before the session's first hand-over, at 1,395 ms or later. That is the first session's end
+state: which runs a full store keeps depends on the preamble times each round measured
+(`keptUntil`). In every round that found it gone, the worker later had no room for ts1-currency's run:
+beta.5's third saved none there, this build saved it for the store and did not keep it, and
+ts1-small-caps and ts1-symbols, which beta.5's first two rounds started from that run in memory,
+compiled their preamble in all four. The extra saves were documentclass's or expl3's, and
+ts1-currency's, small runs the full store had not kept. In the third rounds, the one pair whose
+second sessions both found missing-package's run gone, this build's started unicode-wrap's diagram
+compiled where beta.5's started it from storage, which the extra hand-overs may account for; three
+rounds cannot say. The note took as long within this desktop's noise.
 
-**Not measured on a phone.** Whether circuitikz's run is now in the maintainer's store after a visit
-of the note, and starts its first diagram after a force-quit.
+One more round of this build alone, after the review, with the diagnostics below: the second session
+started 16 diagrams from storage; documentclass, expl3 and ts1-currency each saved their run for the
+store, in 5 to 8 ms, and handed it over, and the store, full, kept 4 of the 8 runs handed to it in
+that session and refused 4, each as one that would have gone first. A run saved for a full store, of
+a preamble cheaper than every run it holds, is refused, and its diagram has paid the save for
+nothing. Not changed: the host cannot know before the render what the run will have cost, and a store
+that is not full keeps it.
+
+The peaks are beta.5's within their ranges, but for the private commit of the first note's first
+session, 803 (779–832) MiB against 749 (748–809): a run saved and handed over is memory until the
+collector frees it (D32).
+
+**What the diagnostics now say**, at the review's request, so that the next reading on the phone tells
+these paths apart (`src/engine/worker-host.ts`, `src/cache/runs.ts`, `engine-src/worker.ts`, D21):
+
+- Per diagram, where a run is stored under its name and the engine it went to did not hold it,
+  "stored preamble not sent:" and why: "storage was slow to answer", "it could not be put back earlier
+  for want of memory", "putting it back looked dearer than its preamble", "reading it failed", "an
+  engine held it when the diagram came", "it was stored after the diagram came". And a run saved to be
+  handed over says so: "preamble saved in 3 ms, not kept: no room, sent to be stored".
+- Per engine, "4 handed over to be stored", and how many of its runs were dropped for room and how
+  many failed on the way, as each reply and each `flushed` says (`HandOverCounts`).
+- The store, what it kept this session and what it refused, and why: "this session 4 kept, 4 refused:
+  4 would have gone first", or not worth putting back, larger than the budget, storage full, cleared
+  meanwhile, not written, storage unavailable.
+
+**What it costs.** `main.js` grows by 220 bytes for the change, 96 for the review's changes to it and
+2,245 for the diagnostics. The worker's ENGINE_ID moves, and `test/fixtures/golden/REVISION.json` and
+`src/source/native-unicode.ts` are recorded again under it; what TeX draws does not change
+(`verify:golden`, `verify:snapshot`, `verify:reset`, and the scan finds the same characters native).
+Tests: `test/worker-handover.test.ts` (a run larger than the budget, handed over, let go, and put back
+by another worker; one saved for the host where the worker is too full to save it for itself, handed
+over, and not saved again in that worker's life, but for once its hand-over was dropped for room, or
+the store cleared, or saved preambles turned off and on; not again after a hand-over that failed, nor
+where the stored run sent could not be put back for want of memory; the counts and the flag),
+`test/worker-host.test.ts` (each reason a stored run is not sent, none for a diagram that started from
+the run its engine held, the counts in the report), `test/runs.test.ts` (each refusal, a read that
+failed), `test/report.test.ts` (the lines).
+
+**Not measured on a phone.** Which of the paths above the phone's line came from, which the next
+reading with this build will say; whether circuitikz's run is then in the maintainer's store after a
+visit of the note, and starts its first diagram after a force-quit.
 
 ### The desktop's first diagrams waiting after a start
 
@@ -3680,7 +3768,10 @@ Obsidian hands it the block, before anything yields, also on the path that resol
 first, and the block's miss reads the answer. An edit reported after a block was made, in another
 run, does not count for it, nor does an `editor-change` that names no note then. `editWindowMs` keeps
 its second, which now runs from the keystroke to the block's making: 10 ms, and up to 200 ms while a
-Reading view is still parsing (D22).
+Reading view is still parsing (D22). An edit in the run of a block's making counts only where it is a
+later edit of its note, or one that names none: in the first build, a note's entry dropped once it had
+left the window, as another note's edit drops it, read as a change of the block's note, and a block
+waited for another note's edit in that run (the review's).
 
 What it keeps, each held by a test that reproduces Obsidian's order of things with the plugin's own
 `RecentEdits` (`test/processor.test.ts`): typing in Live Preview waits, the block made in the
@@ -3696,8 +3787,25 @@ and the notes kept apart.
 blocks still makes them wait: something that writes the note just before Obsidian shows it. And an
 `editor-change` that names no note, in the same run as a block's making, counts for it, as it did.
 
-**What it costs.** `main.js` grows by 345 bytes for it. No Obsidian was started for this: whether the
-desktop's first diagrams now say "waited 0 ms" after a start is for the maintainer's next one.
+**What the diagnostics now say.** The rule rests on what the bundle shows and on what the startup edit
+was assumed to be, which nobody knows: an edit after the note's view made its blocks. One within the
+second before still makes them wait, as above; and Sync bringing a real change to a block's code, as
+when the same note was edited on the phone, has Live Preview remake that block in the update that
+reports the edit, and the block waits by design. Each said "waited 300 ms", as a start that did not
+wait would have said "waited 0 ms" whether or not any edit came. So, at the review's request, the miss
+is told which edit made the block, an `editor-change` naming its note, one naming none, or the note's
+`modify`, and how long before the block was made, or that it came in the run that made it; and of a
+block no edit made, the last edit of its note reported after it was made, which did not count
+(`MadeBy`, `CompileTimings.edit`). The waited step says it: "waited 300 ms: the note's file changed
+120 ms before the block was made", "waited 300 ms: the note was edited as the block was made", "waited
+0 ms; the note's file changed 85 ms after the block was made, which did not count". One start of the
+desktop then says what wrote the note and whether this rule held. Tests: `test/edits.test.ts` (the
+edit told, each kind, and another note's edit with a stale entry for the block's),
+`test/render-child.test.ts` (carried to the timings, and none after a Retry), `test/report.test.ts`.
+
+**What it costs.** `main.js` grows by 345 bytes for it, and 676 for the review's diagnostics. No
+Obsidian was started for this: whether the desktop's first diagrams now say "waited 0 ms" after a
+start, and what the waited step says of the edit then, is for the maintainer's next one.
 
 ---
 
