@@ -396,19 +396,24 @@ const readStored = async (stored: StoredRun): Promise<SavedRun | 'corrupt' | 'fa
  * Handing a run over costs time: writing it out, a few milliseconds of this thread's, and gzipping
  * it, 77 to 81 ms for circuitikz's 8.9 MiB in WebKit on the desktop and 225 to 230 in Chromium (D36),
  * which the platform does on the thread that asks it to. Spent right after the reply, it held the
- * next diagram up by as much. So the writing out waits for no render to be under way, and the gzip
- * is done on a thread of its own, by a worker this one starts (gzipHelper), while TeX goes on with
- * the next diagram; where there is none, a slice at a time on this thread, each in a task of its own
- * whenever no render is under way, so that a render posted meanwhile starts once the slice under way
- * is done.
+ * next diagram up by as much. So the gzip is done on a thread of its own, by a worker this one starts
+ * (gzipHelper), while TeX goes on with the next diagram, and only the writing out is done here, in
+ * the reply's own task, before the next render is taken from the queue; where there is no helper, the
+ * gzip is done a slice at a time on this thread, each in a task of its own whenever no render is
+ * under way, so that a render posted meanwhile starts once the slice under way is done.
  *
  * Until 0.2.1-beta.5 all of it was done here, once no render had been under way for 100 ms, which in
  * a note is only at its end: on a phone the runs saved before then waited, the ones the worker had
  * let go for room held to its budget between them and the oldest dropped, the heaviest among them,
  * and the engine stopped when Obsidian went to the background without handing over what was still
- * waiting. Now each run is written out between diagrams from the reply on, the ones the worker has
- * let go first, and the host asks the worker to finish handing over before it stops it
- * (FlushRequest).
+ * waiting. Now each run is written out as its reply is posted, the ones the worker has let go first,
+ * and the host asks the worker to finish handing over before it stops it (FlushRequest).
+ *
+ * The writing out waits for no render to be under way and nothing else: a first build of beta.5 also
+ * waited for a task of its own first (whenIdle), and in WebKit the worker's message to itself came
+ * only after the next render, which the host posts the moment the reply reaches it, so that most runs
+ * of a note of heavy diagrams were handed over a diagram or more late, many after the last one
+ * (internal/DECISIONS.md D38).
  */
 const HANDOVER_SLICE = 128 * 1024;
 
@@ -438,12 +443,17 @@ const nextTask: () => Promise<void> = (() => {
 		});
 })();
 
+/** Resolves once no render is under way: at once when none is, without giving the thread up. */
+const whenNoRender = async (): Promise<void> => {
+	while (rendering > 0) await new Promise<void>((resolve) => renderEnded.push(resolve));
+};
+
 /** Resolves in a task of its own once no render is under way. */
 const whenIdle = async (): Promise<void> => {
 	for (;;) {
 		await nextTask();
 		if (rendering === 0) return;
-		await new Promise<void>((resolve) => renderEnded.push(resolve));
+		await whenNoRender();
 	}
 };
 
@@ -531,14 +541,21 @@ interface GzipHelper {
 }
 
 /**
- * The gzip helper, started at the first run to hand over, where this worker can start a worker of
- * its own and the platform has a CompressionStream (iOS and Safari 16.4, Chrome 80). Null where it
- * cannot, or could not: runs are then gzipped on this thread. It goes with this worker, which the host
- * stops when it stops the engine.
+ * The gzip helper, started with the first render the host asks to hand its run over (`persist`),
+ * where this worker can start a worker of its own and the platform has a CompressionStream (iOS and
+ * Safari 16.4, Chrome 80), so that it is up by the time that render's run is written out: started
+ * at the first run to hand over, as a first build of beta.5 did, its message that it was up reached
+ * this worker in WebKit two diagrams later, the runs waiting meanwhile. Null where it cannot, or
+ * could not: runs are then gzipped on this thread. It goes with this worker, which the host stops
+ * when it stops the engine.
  */
 let gzipHelper: GzipHelper | null | undefined;
 
-/** How long the gzip helper has to say it is up before it is given up on. */
+/**
+ * How long the gzip helper has to say it is up before it is given up on, stopped, and runs gzipped on
+ * this thread. Its message may come after the timer, behind a TeX run that held this thread longer,
+ * as one does without the JIT: the timer waits for one more task before it gives up.
+ */
 const GZIP_HELPER_UP_MS = 2000;
 
 const startGzipHelper = (): GzipHelper | null => {
@@ -550,6 +567,7 @@ const startGzipHelper = (): GzipHelper | null => {
 		const worker = new Worker(url);
 		const waiting = new Map<number, (reply: GzipReply | null) => void>();
 		let cameUp!: (up: boolean) => void;
+		let answered = false;
 		const helper: GzipHelper = {
 			worker,
 			up: new Promise<boolean>((resolve) => (cameUp = resolve)),
@@ -557,10 +575,28 @@ const startGzipHelper = (): GzipHelper | null => {
 			next: 1,
 			waiting,
 		};
-		self.setTimeout(() => cameUp(false), GZIP_HELPER_UP_MS);
+		// A helper that fails to start, or fails since, takes the runs it had with it: they are not
+		// handed over, and the ones after are gzipped on this thread. It is stopped, and its URL let go.
+		const giveUp = (): void => {
+			answered = true;
+			helper.broken = true;
+			cameUp(false);
+			for (const settle of waiting.values()) settle(null);
+			waiting.clear();
+			worker.terminate();
+			URL.revokeObjectURL(url);
+		};
+		self.setTimeout(() => {
+			if (answered) return;
+			void nextTask().then(() => {
+				if (!answered) giveUp();
+			});
+		}, GZIP_HELPER_UP_MS);
 		worker.onmessage = (event: MessageEvent<GzipReply>) => {
 			const reply = event.data;
 			if (reply.up === true) {
+				if (answered) return;
+				answered = true;
 				cameUp(true);
 				URL.revokeObjectURL(url);
 				return;
@@ -570,15 +606,7 @@ const startGzipHelper = (): GzipHelper | null => {
 			waiting.delete(reply.id);
 			settle?.(reply);
 		};
-		// A helper that fails to start, or fails since, takes the runs it had with it: they are not
-		// handed over, and the ones after are gzipped on this thread.
-		worker.onerror = () => {
-			helper.broken = true;
-			cameUp(false);
-			for (const settle of waiting.values()) settle(null);
-			waiting.clear();
-			worker.terminate();
-		};
+		worker.onerror = giveUp;
 		gzipHelper = helper;
 	} catch {
 		gzipHelper = null;
@@ -620,11 +648,11 @@ let handingOver = false;
 const handedOverAll: (() => void)[] = [];
 
 /**
- * Hand the host `saving`, a slice at a time whenever no render is under way (whenIdle). A run waiting
- * is memory once the worker no longer keeps it itself, and those are handed over first. They hold at
- * most `budget` bytes between them, what it may keep of saved runs, the oldest of them let go first,
- * and the newest always waits; until the review of 0.2.1-beta.4 the runs it still kept counted too,
- * and at a phone's 12 MiB plain TikZ's was let go before it could be handed over (D37).
+ * Hand the host `saving` once no render is under way. A run waiting is memory once the worker no
+ * longer keeps it itself, and those are handed over first. They hold at most `budget` bytes between
+ * them, what it may keep of saved runs, the oldest of them let go first, and the newest always waits;
+ * until the review of 0.2.1-beta.4 the runs it still kept counted too, and at a phone's 12 MiB plain
+ * TikZ's was let go before it could be handed over (D37).
  */
 const queueHandOver = (id: number, epoch: number, saving: Saving, budget: number): void => {
 	toHandOver.push({ id, epoch, saving });
@@ -648,11 +676,12 @@ const nextHandOver = (): { id: number; epoch: number; saving: Saving } | undefin
 	return toHandOver.splice(Math.max(0, at), 1)[0];
 };
 
+/** Hand every run waiting over, one at a time, each once no render is under way. */
 const handOverAll = async (): Promise<void> => {
 	handingOver = true;
 	try {
 		for (let next = nextHandOver(); next !== undefined; next = nextHandOver()) {
-			await whenIdle();
+			await whenNoRender();
 			await handOver(next.id, next.epoch, next.saving);
 		}
 	} finally {
@@ -1483,6 +1512,9 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 		return;
 	}
 	if (request.type === 'render') {
+		// The gzip helper, started with the first render whose run is to be handed over, so that it is
+		// up by the time that run is written out.
+		if (request.persist === true && hasNativeGzip()) startGzipHelper();
 		rendering++;
 		void render(
 			request.id,
@@ -1494,9 +1526,11 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 		).then(
 			({ reply, handOver: saving }) => {
 				post(reply);
+				// No render is under way from here: the run is written out in this task, before the
+				// next render is taken from the queue, and handed to the gzip helper (handOverAll).
+				renderDone();
 				if (saving !== undefined)
 					queueHandOver(request.id, request.epoch ?? 0, saving, request.snapshots ?? 0);
-				renderDone();
 			},
 			(error: unknown) => {
 				renderDone();

@@ -144,12 +144,15 @@ describe('a diagram that resumes from a stored run', () => {
 
 /**
  * A worker as the engine's worker starts one, run in this realm on the helper's own source, its
- * messages a task apart; `fail` makes it fail to start, as where a worker cannot start one of its own.
+ * messages a task apart; `fail` makes it fail to start, as where a worker cannot start one of its own,
+ * and `silent` start and never say it is up.
  */
 class HelperWorker {
 	static started = 0;
 	static runs = 0;
+	static terminated = 0;
 	static fail = false;
+	static silent = false;
 	onmessage: ((event: { data: unknown }) => void) | null = null;
 	onerror: ((event: unknown) => void) | null = null;
 	private readonly inner: {
@@ -167,6 +170,7 @@ class HelperWorker {
 			setTimeout(() => this.onerror?.({ message: 'refused' }));
 			return;
 		}
+		if (HelperWorker.silent) return;
 		new Function('self', GZIP_HELPER)(this.inner);
 	}
 
@@ -176,8 +180,52 @@ class HelperWorker {
 	}
 
 	terminate(): void {
+		HelperWorker.terminated++;
 		this.inner.onmessage = null;
 	}
+}
+
+/**
+ * A MessageChannel whose messages wait until `release`, as the engine's worker's messages to itself
+ * waited in WebKit: in a note of heavy diagrams they came only after the next render, which the host
+ * posts the moment a reply reaches it (internal/DECISIONS.md D38).
+ */
+class LateChannel {
+	static readonly held: (() => void)[] = [];
+	static release(): void {
+		for (const deliver of LateChannel.held.splice(0)) deliver();
+	}
+	readonly port1: { onmessage: ((event: { data: unknown }) => void) | null } = { onmessage: null };
+	readonly port2 = {
+		postMessage: (data: unknown) => {
+			LateChannel.held.push(() => this.port1.onmessage?.({ data }));
+		},
+	};
+}
+
+type Globals = { Worker?: unknown; MessageChannel?: unknown };
+
+/**
+ * Run `body` with these in place of the platform's. The worker looks `Worker` up when it starts its
+ * helper, and keeps the MessageChannel it found when it was started.
+ */
+async function withGlobals<T>(globals: Globals, body: () => Promise<T>): Promise<T> {
+	const real: Globals = {
+		Worker: (globalThis as Globals).Worker,
+		MessageChannel: (globalThis as Globals).MessageChannel,
+	};
+	Object.assign(globalThis, globals);
+	try {
+		return await body();
+	} finally {
+		Object.assign(globalThis, real);
+	}
+}
+
+/** Another worker of the shipped source, started now. */
+async function another(): Promise<(request: WorkerRequest) => void> {
+	const { source, assets } = await buildWorker('.');
+	return start(assets, source);
 }
 
 /** What a gzip inflates to. */
@@ -224,5 +272,55 @@ describe('the gzip of a run handed over', () => {
 			HelperWorker.fail = false;
 			(globalThis as { Worker?: unknown }).Worker = real;
 		}
+	}, 120_000);
+
+	/*
+	 * In WebKit a first build of 0.2.1-beta.5 handed most runs of a note of heavy diagrams over a
+	 * diagram or more late, many only after the last one: each waited for a message the worker sent
+	 * itself, which came after the next render, and for the helper to say it was up, which it had been
+	 * asked only at the first run. Node's messages do not come late, so they are held here.
+	 */
+	it('goes to the worker of its own in the task its reply is posted in, though the worker’s messages to itself come late', async () => {
+		await withGlobals({ Worker: HelperWorker }, async () => {
+			const late = await withGlobals({ MessageChannel: LateChannel }, another);
+			HelperWorker.started = 0;
+			HelperWorker.runs = 0;
+			try {
+				const a = await render(late, DIAGRAM(10), SIUNITX, { persist: true, epoch: 6 });
+				// Started with the render, the helper had its run before anything else could happen.
+				expect(HelperWorker.started).toBe(1);
+				expect(HelperWorker.runs).toBe(1);
+				const b = await render(late, DIAGRAM(11), PGFPLOTS, { persist: true, epoch: 6 });
+				// Both are handed over, the worker's messages to itself still held: nothing waits for one.
+				for (const reply of [a, b]) {
+					const message = await waitFor(() => handed(reply), 20_000);
+					expect(message.run.compressed).toBe(true);
+					expect(await gunzip(message.run.data)).toBe(message.run.rawBytes);
+				}
+				expect(HelperWorker.runs).toBe(2);
+				expect(LateChannel.held).toHaveLength(0);
+			} finally {
+				LateChannel.release();
+			}
+		});
+	}, 120_000);
+
+	it('is done on the engine’s own thread where the worker of its own never says it is up, which is stopped', async () => {
+		await withGlobals({ Worker: HelperWorker }, async () => {
+			const silent = await another();
+			HelperWorker.silent = true;
+			HelperWorker.started = 0;
+			HelperWorker.terminated = 0;
+			try {
+				const reply = await render(silent, DIAGRAM(12), SIUNITX, { persist: true, epoch: 7 });
+				const message = await waitFor(() => handed(reply), 10_000);
+				expect(HelperWorker.started).toBe(1);
+				expect(HelperWorker.terminated).toBe(1);
+				expect(message.run.compressed).toBe(true);
+				expect(await gunzip(message.run.data)).toBe(message.run.rawBytes);
+			} finally {
+				HelperWorker.silent = false;
+			}
+		});
 	}, 120_000);
 });
