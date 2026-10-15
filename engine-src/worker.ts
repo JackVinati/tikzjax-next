@@ -407,7 +407,8 @@ const readStored = async (stored: StoredRun): Promise<SavedRun | 'corrupt' | 'fa
  * let go for room held to its budget between them and the oldest dropped, the heaviest among them,
  * and the engine stopped when Obsidian went to the background without handing over what was still
  * waiting. Now each run is written out as its reply is posted, the ones the worker has let go first,
- * and the host asks the worker to finish handing over before it stops it (FlushRequest).
+ * and the host asks the worker to finish handing over before it stops it (FlushRequest), when it has
+ * anything left to (SnapshotState.pending).
  *
  * The writing out waits for no render to be under way and nothing else: a first build of beta.5 also
  * waited for a task of its own first (whenIdle), and in WebKit the worker's message to itself came
@@ -641,11 +642,15 @@ interface Saving {
 	saveMs: number;
 }
 
-/** Runs saved and not yet handed over, oldest first, and whether they are being. */
+/**
+ * Runs saved and not yet handed over, oldest first, and whether one is being: the one taken out of
+ * the list, from then until it has been handed over or failed to be.
+ */
 const toHandOver: { id: number; epoch: number; saving: Saving }[] = [];
 let handingOver = false;
-/** Who waits for every run saved to have been handed over (FlushRequest). */
-const handedOverAll: (() => void)[] = [];
+
+/** Runs saved and not yet handed over, the one being among them (SnapshotState.pending). */
+const pendingHandOvers = (): number => toHandOver.length + (handingOver ? 1 : 0);
 
 /**
  * Hand the host `saving` once no render is under way. A run waiting is memory once the worker no
@@ -676,7 +681,11 @@ const nextHandOver = (): { id: number; epoch: number; saving: Saving } | undefin
 	return toHandOver.splice(Math.max(0, at), 1)[0];
 };
 
-/** Hand every run waiting over, one at a time, each once no render is under way. */
+/**
+ * Hand every run waiting over, one at a time, each once no render is under way, and then say so
+ * (FlushedMessage), whether or not the host asked: it stops an engine at once, also one sent to the
+ * background, when it has nothing left to hand over (worker-host.ts drain).
+ */
 const handOverAll = async (): Promise<void> => {
 	handingOver = true;
 	try {
@@ -686,15 +695,9 @@ const handOverAll = async (): Promise<void> => {
 		}
 	} finally {
 		handingOver = false;
-		for (const resolve of handedOverAll.splice(0)) resolve();
+		post({ type: 'flushed' } satisfies FlushedMessage);
 	}
 };
-
-/** Resolves once every run saved has been handed over, or failed to be. */
-const whenHandedOver = (): Promise<void> =>
-	handingOver || toHandOver.length > 0
-		? new Promise<void>((resolve) => handedOverAll.push(resolve))
-		: Promise.resolve();
 
 /**
  * Hand the host a run this worker saved, as bytes (./stored-run), gzipped where the platform has its
@@ -1502,9 +1505,10 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 		return;
 	}
 	// The host is about to stop this engine: once every run it saved has been handed over, it says
-	// so, and the host stops it then, or when its limit runs out (worker-host.ts `drain`).
+	// so, and the host stops it then, or when its limit runs out (worker-host.ts `drain`). At once when
+	// none is waiting; else when the last has been (handOverAll).
 	if (request.type === 'flush') {
-		void whenHandedOver().then(() => post({ type: 'flushed' } satisfies FlushedMessage));
+		if (pendingHandOvers() === 0) post({ type: 'flushed' } satisfies FlushedMessage);
 		return;
 	}
 	if (request.type === 'ping') {
@@ -1525,6 +1529,10 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 			request.persist === true,
 		).then(
 			({ reply, handOver: saving }) => {
+				// How many runs are still to be handed over, this render's among them: an engine with none
+				// is stopped at once (worker-host.ts drain).
+				if (reply.snapshots !== undefined)
+					reply.snapshots.pending = pendingHandOvers() + (saving === undefined ? 0 : 1);
 				post(reply);
 				// No render is under way from here: the run is written out in this task, before the
 				// next render is taken from the queue, and handed to the gzip helper (handOverAll).

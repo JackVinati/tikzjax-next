@@ -97,10 +97,16 @@ const STORED_READ_WAIT_MS = 250;
  * How long an idle engine is given, once it is to stop, to hand over the saved runs it has not handed
  * over yet (engine-src/protocol.ts FlushRequest), before it is stopped all the same: at its idle stop,
  * and, less, when Obsidian goes to the background on a phone, where the engine's memory counts against
- * the app for as long as it is kept. A worker with nothing waiting says so at once. Until
- * 0.2.1-beta.5 it was stopped at once: in WebKit at a phone's budgets, Obsidian sent to the background
- * as the last of the 44 test diagrams was drawn left none of their 23 saved preambles stored, and
- * 200 ms after one circuitikz diagram, not its preamble either (internal/DECISIONS.md D38).
+ * the app for as long as it is kept. An engine whose last word was that it has none waiting is stopped
+ * at once, as every engine was until 0.2.1-beta.5: in WebKit at a phone's budgets, Obsidian sent to
+ * the background as the last of the 44 test diagrams was drawn then left none of their 23 saved
+ * preambles stored, and 200 ms after one circuitikz diagram, not its preamble either
+ * (internal/DECISIONS.md D38).
+ *
+ * Both limits are timers of this page, and a phone may suspend Obsidian's web content before either
+ * runs out, or before the worker says it is done: then the engine's memory stays the app's until it
+ * is resumed. Stopping at once where nothing waits keeps that to the few hundred milliseconds after a
+ * diagram in which its run is handed over.
  */
 const IDLE_FLUSH_MS = 2000;
 const BACKGROUND_FLUSH_MS = 1000;
@@ -249,10 +255,15 @@ interface Engine {
 	/** Its entry in the report. */
 	readonly life: EngineLife;
 	/**
-	 * It is to stop once it has handed over its saved runs (drain), and why, with the timer that stops
-	 * it if it has not by then. A job posted to it meanwhile keeps it.
+	 * Runs it saved may still be waiting to be handed over: its last reply said some were
+	 * (SnapshotState.pending), and it has not said since that it is done (FlushedMessage).
 	 */
-	stopping: { why: EngineStop; timer: number } | null;
+	handing: boolean;
+	/**
+	 * It is to stop once it has handed over its saved runs (drain), and why, with the timer that stops
+	 * it if it has not by then, at `until` by the host's clock. A job posted to it meanwhile keeps it.
+	 */
+	stopping: { why: EngineStop; timer: number; until: number } | null;
 }
 
 /**
@@ -381,6 +392,9 @@ export class WorkerHost implements TexHost {
 	 * Its idle teardown is armed at once, as for any engine with nothing to do: one started for a
 	 * diagram nobody scrolls to goes, and so does one whose start never finishes, which no job's
 	 * startup allowance would otherwise ever give up on.
+	 *
+	 * An engine that is up and about to stop, handing its runs over first (drain), is kept for the
+	 * diagram rather than let go and started again for its job, and its idle teardown armed again.
 	 */
 	async ready(): Promise<void> {
 		if (this.disposed) throw unloaded();
@@ -388,7 +402,15 @@ export class WorkerHost implements TexHost {
 		// waits for neither.
 		if (this.snapshotBudget() > 0 && this.runs?.readable === true)
 			this.runs.load().catch(() => undefined);
-		if (this.engines.some((engine) => engine.up)) return;
+		const up = this.engines.filter((engine) => engine.up);
+		const first = up[0];
+		if (first !== undefined) {
+			if (up.every((engine) => engine.stopping !== null)) {
+				this.keepEngine(first);
+				this.pump();
+			}
+			return;
+		}
 		const engine = this.engines[0] ?? this.spawn();
 		this.pump();
 		await engine.ready;
@@ -463,8 +485,9 @@ export class WorkerHost implements TexHost {
 		const victims: Job[] = [];
 		for (const engine of this.engines.slice()) {
 			if (engine.current !== null) victims.push(engine.current);
-			// An idle engine sent to the background hands its saved runs over first, for a second at
-			// most: on a phone the runs a note saved last are still waiting when Obsidian is left.
+			// An idle engine sent to the background hands over the saved runs it has still waiting first,
+			// for a second at most: on a phone the run a note saved last can still be waiting when
+			// Obsidian is left. One with none is stopped at once (drain).
 			if (why === 'background' && engine.current === null) {
 				this.drain(engine, why, BACKGROUND_FLUSH_MS, error);
 				continue;
@@ -650,6 +673,7 @@ export class WorkerHost implements TexHost {
 			resolveReady,
 			rejectReady,
 			life,
+			handing: false,
 			stopping: null,
 		};
 		worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
@@ -694,6 +718,7 @@ export class WorkerHost implements TexHost {
 
 		// Every run it saved has been handed over: an engine that was to stop stops now.
 		if (message.type === 'flushed') {
+			engine.handing = false;
 			if (engine.stopping !== null) this.stopDrained(engine);
 			return;
 		}
@@ -710,6 +735,7 @@ export class WorkerHost implements TexHost {
 
 		engine.current = null;
 		if (message.snapshots !== undefined) this.heldBy(engine, message.snapshots);
+		if (message.snapshots?.pending !== undefined) engine.handing = message.snapshots.pending > 0;
 		this.storedOutcome(job, message.stored, message.timings);
 		// Started from a run the engine held: a use of the one stored under that name, if there is one.
 		if (message.timings?.resumed === true && message.timings.restored !== true && job.route !== undefined)
@@ -864,23 +890,36 @@ export class WorkerHost implements TexHost {
 	/**
 	 * Stop an idle engine once it has handed over the saved runs it has not yet, which it is asked to
 	 * do at once (engine-src/protocol.ts FlushRequest), or after `limitMs` all the same. At once where
-	 * there is nothing it could have to hand over: it is still starting, saved runs are not kept
-	 * across the stops, or there is no timer to bound the wait with. A job posted to it meanwhile
-	 * keeps it (keepEngine).
+	 * it has nothing to hand over: it said so last (`handing`), it is still starting, saved runs are not
+	 * kept across the stops, or there is no timer to bound the wait with. A job posted to it meanwhile
+	 * keeps it (keepEngine). One already draining keeps its limit, or takes this one where it runs out
+	 * sooner, as when Obsidian goes to the background during the idle stop's.
 	 */
 	private drain(engine: Engine, why: EngineStop, limitMs: number, error: Error): void {
-		if (engine.stopping !== null) return;
+		const timers = this.timers;
+		const until = this.now() + limitMs;
+		if (engine.stopping !== null) {
+			if (timers === undefined || until >= engine.stopping.until) return;
+			timers.clearTimeout(engine.stopping.timer);
+			engine.stopping = {
+				why,
+				until,
+				timer: timers.setTimeout(() => this.stopDrained(engine), limitMs),
+			};
+			return;
+		}
 		if (
 			!engine.up ||
+			!engine.handing ||
 			engine.current !== null ||
-			this.timers === undefined ||
+			timers === undefined ||
 			this.runs === undefined ||
 			this.snapshotBudget() <= 0
 		) {
 			this.teardown(engine, error, why);
 			return;
 		}
-		engine.stopping = { why, timer: this.timers.setTimeout(() => this.stopDrained(engine), limitMs) };
+		engine.stopping = { why, until, timer: timers.setTimeout(() => this.stopDrained(engine), limitMs) };
 		engine.worker.postMessage({ type: 'flush' } satisfies WorkerRequest);
 	}
 

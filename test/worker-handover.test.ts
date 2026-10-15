@@ -99,20 +99,30 @@ describe('the runs a worker hands over', () => {
 	it('are handed over from the reply on, while the next diagram is under way, and all before it says flushed', async () => {
 		const a = await render(first, DIAGRAM(1), SIUNITX, { persist: true, epoch: 4 });
 		expect(a.timings?.saveMs).toBeDefined();
+		// The reply says the run is still to be handed over, for the host to wait for it before a stop.
+		expect(a.snapshots?.pending).toBe(1);
 		// The next diagram, of another preamble, posted at once, as the queue posts the next job.
 		const b = render(first, DIAGRAM(2), PGFPLOTS, { persist: true, epoch: 4 });
 		const bReply = await b;
 		expect(bReply.type).toBe('ok');
-		// Both are handed over, and then the worker says so when asked.
+		expect(bReply.snapshots?.pending).toBeGreaterThanOrEqual(1);
+		// Both are handed over, and then the worker says so, also when asked.
+		const asked = inbox.length;
 		first({ type: 'flush' });
-		await waitFor(() => (inbox.some((m) => m.type === 'flushed') ? true : undefined));
-		const flushedAt = inbox.findIndex((m) => m.type === 'flushed');
+		const flushed = await waitFor(() => inbox.slice(asked).find((m) => m.type === 'flushed'));
+		const flushedAt = inbox.indexOf(flushed);
 		for (const reply of [a, bReply]) {
 			const message = handed(reply);
 			expect(message, `the run of render ${reply.id}`).toBeDefined();
 			expect(inbox.indexOf(message!)).toBeLessThan(flushedAt);
 			expect(message?.epoch).toBe(4);
 		}
+		// Unasked, too, once the last had been handed over: the host then stops it at once.
+		const last = inbox.indexOf(handed(bReply)!);
+		expect(inbox.slice(last).some((m) => m.type === 'flushed')).toBe(true);
+		// And a diagram after them, whose run is not handed over, says none is waiting.
+		const c = await render(first, DIAGRAM(3), SIUNITX, { persist: false });
+		expect(c.snapshots?.pending).toBe(0);
 	}, 120_000);
 
 	it('says flushed at once when it has nothing to hand over', async () => {

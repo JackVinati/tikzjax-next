@@ -296,6 +296,12 @@ export interface SnapshotState {
 	bytes: number;
 	/** Saves that failed in this worker's life, and kept nothing. */
 	failures: number;
+	/**
+	 * Runs it saved that it has not handed over yet (SavedRunMessage), this render's among them, when
+	 * the host keeps them: the host stops an engine with none at once, and asks one with some to hand
+	 * them over first (FlushRequest). Absent from a worker before 0.2.1-beta.5.
+	 */
+	pending?: number | undefined;
 }
 
 export interface OkMessage {
@@ -366,7 +372,10 @@ export interface ErrorMessage {
  */
 export type StoredOutcome = 'used' | 'unneeded' | 'corrupt' | 'mismatch' | 'failed';
 
-/** Every run the worker saved has been handed over, or failed to be: the answer to a FlushRequest. */
+/**
+ * Every run the worker saved has been handed over, or failed to be: the answer to a FlushRequest, and
+ * said unasked each time the last run waiting has been handed over.
+ */
 export interface FlushedMessage {
 	type: 'flushed';
 }

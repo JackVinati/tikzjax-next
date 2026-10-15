@@ -562,7 +562,10 @@ export default class TikzjaxNextPlugin extends Plugin {
 	 * WebKit discards JIT code at 65% memory pressure and reloads the page at 100%, so being near
 	 * zero while backgrounded is the difference between surviving and being jetsam-killed. A worker
 	 * holding the full core dump is 156 MiB; giving it back the moment the app is hidden is the
-	 * cheapest insurance available (#111, #91).
+	 * cheapest insurance available (#111, #91). The one exception, since 0.2.1-beta.5: an engine that
+	 * still has saved preambles to hand over, as in the few hundred milliseconds after a diagram, is
+	 * given a second to finish, and stopped then, or as soon as it has (WorkerHost.kill, drain). If the
+	 * system suspends the app before then, the engine is kept for as long as it is suspended.
 	 *
 	 * A diagram compiling at that moment is interrupted, not failed: its block puts it back in the
 	 * queue. The queue is paused first so that nothing — that job above all — boots a new worker

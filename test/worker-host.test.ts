@@ -1655,6 +1655,10 @@ describe('saved preambles kept across the engines’ stops', () => {
 	describe('an engine that is to stop', () => {
 		const phone = (runs: FakeRuns, timers: FakeTimers) =>
 			new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs, timers, idleTeardownMs: 15_000 });
+		/** What a reply says of the runs its engine has still to hand over. */
+		const pending = (n: number): Partial<OkMessage> => ({
+			snapshots: { held: [], bytes: 0, failures: 0, pending: n },
+		});
 		const saved = (id: number): SavedRunMessage => ({
 			type: 'saved-run',
 			id,
@@ -1673,7 +1677,7 @@ describe('saved preambles kept across the engines’ stops', () => {
 			const a = send(host, 'a');
 			worker(0).boot();
 			await tick();
-			reply(worker(0), renders(worker(0))[0]!.id);
+			reply(worker(0), renders(worker(0))[0]!.id, pending(1));
 			await tick();
 			expect(a.status).toBe('fulfilled');
 
@@ -1695,7 +1699,7 @@ describe('saved preambles kept across the engines’ stops', () => {
 			send(host, 'a');
 			worker(0).boot();
 			await tick();
-			reply(worker(0), renders(worker(0))[0]!.id);
+			reply(worker(0), renders(worker(0))[0]!.id, pending(1));
 			await tick();
 			timers.advance(15_000);
 			timers.advance(1999);
@@ -1712,7 +1716,7 @@ describe('saved preambles kept across the engines’ stops', () => {
 			send(host, 'a');
 			worker(0).boot();
 			await tick();
-			reply(worker(0), renders(worker(0))[0]!.id);
+			reply(worker(0), renders(worker(0))[0]!.id, pending(1));
 			await tick();
 			timers.advance(15_000);
 			expect(worker(0).flushes).toBe(1);
@@ -1736,7 +1740,7 @@ describe('saved preambles kept across the engines’ stops', () => {
 			send(host, 'a');
 			worker(0).boot();
 			await tick();
-			reply(worker(0), renders(worker(0))[0]!.id);
+			reply(worker(0), renders(worker(0))[0]!.id, pending(1));
 			await tick();
 
 			host.kill('background');
@@ -1794,6 +1798,86 @@ describe('saved preambles kept across the engines’ stops', () => {
 			void host.ready().catch(() => undefined);
 			host.kill('background');
 			expect(worker(0).flushes).toBe(0);
+			expect(worker(0).terminated).toBe(true);
+		});
+
+		/*
+		 * The two limits are this page's timers, which a phone may suspend with the app: an engine kept
+		 * for them keeps its memory for as long as the app is suspended. So one that has said it has
+		 * nothing left to hand over is stopped at once, as every engine was until 0.2.1-beta.5.
+		 */
+		it('is stopped at once, in the background and at its idle stop, when it has said it has nothing to hand over', async () => {
+			const runs = new FakeRuns();
+			const timers = new FakeTimers();
+			const host = phone(runs, timers);
+			send(host, 'a');
+			worker(0).boot();
+			await tick();
+			reply(worker(0), renders(worker(0))[0]!.id, pending(0));
+			await tick();
+			host.kill('background');
+			expect(worker(0).flushes).toBe(0);
+			expect(worker(0).terminated).toBe(true);
+			expect(host.report().lastStop).toBe('background');
+
+			// One whose reply said it had a run to hand over, and which said since that it is done.
+			send(host, 'b');
+			worker(1).boot();
+			await tick();
+			reply(worker(1), renders(worker(1))[0]!.id, pending(1));
+			await tick();
+			worker(1).emit(saved(renders(worker(1))[0]!.id));
+			worker(1).emit({ type: 'flushed' });
+			timers.advance(15_000);
+			expect(worker(1).flushes).toBe(0);
+			expect(worker(1).terminated).toBe(true);
+			expect(host.report().lastStop).toBe('idle');
+			expect(runs.kept).toHaveLength(1);
+		});
+
+		it('sent to the background while it hands its runs over at its idle stop, is given the background’s limit', async () => {
+			const runs = new FakeRuns();
+			const timers = new FakeTimers();
+			const host = phone(runs, timers);
+			send(host, 'a');
+			worker(0).boot();
+			await tick();
+			reply(worker(0), renders(worker(0))[0]!.id, pending(1));
+			await tick();
+			timers.advance(15_000);
+			expect(worker(0).flushes).toBe(1);
+			timers.advance(500);
+			host.kill('background');
+			// Asked once: it is handing them over already.
+			expect(worker(0).flushes).toBe(1);
+			timers.advance(999);
+			expect(worker(0).terminated).toBe(false);
+			timers.advance(1);
+			expect(worker(0).terminated).toBe(true);
+			expect(host.report().lastStop).toBe('background');
+		});
+
+		it('is kept for a diagram that turns out not to be cached meanwhile, and stops at its next idle stop', async () => {
+			// The engine is started early for such a diagram (D23): one about to stop is the one it gets.
+			const runs = new FakeRuns();
+			const timers = new FakeTimers();
+			const host = phone(runs, timers);
+			send(host, 'a');
+			worker(0).boot();
+			await tick();
+			reply(worker(0), renders(worker(0))[0]!.id, pending(1));
+			await tick();
+			timers.advance(15_000);
+			expect(worker(0).flushes).toBe(1);
+
+			await host.ready();
+			timers.advance(2000);
+			worker(0).emit({ type: 'flushed' });
+			expect(worker(0).terminated).toBe(false);
+			expect(FakeWorker.spawned).toHaveLength(1);
+			// Its idle teardown armed again: it has nothing left to hand over, and goes at once then.
+			timers.advance(15_000);
+			expect(worker(0).flushes).toBe(1);
 			expect(worker(0).terminated).toBe(true);
 		});
 	});
