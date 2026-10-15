@@ -93,6 +93,18 @@ const ENGINE_LIVES = 20;
  */
 const STORED_READ_WAIT_MS = 250;
 
+/**
+ * How long an idle engine is given, once it is to stop, to hand over the saved runs it has not handed
+ * over yet (engine-src/protocol.ts FlushRequest), before it is stopped all the same: at its idle stop,
+ * and, less, when Obsidian goes to the background on a phone, where the engine's memory counts against
+ * the app for as long as it is kept. A worker with nothing waiting says so at once. Until
+ * 0.2.1-beta.5 it was stopped at once: in WebKit at a phone's budgets, Obsidian sent to the background
+ * as the last of the 44 test diagrams was drawn left none of their 23 saved preambles stored, and
+ * 200 ms after one circuitikz diagram, not its preamble either (internal/DECISIONS.md D38).
+ */
+const IDLE_FLUSH_MS = 2000;
+const BACKGROUND_FLUSH_MS = 1000;
+
 /** What an interrupted job is told, for each reason the engine can be stopped under it. */
 const INTERRUPTED: Record<'restart' | 'background' | 'unload', string> = {
 	restart: 'the engine was restarted',
@@ -177,6 +189,8 @@ export interface StoredRuns {
 	forget(route: string): Promise<void>;
 	/** What putting a run back took: reading it, and in the worker. */
 	measured(run: { bytes: number; rawBytes: number }, readMs: number, restoreMs: number): void;
+	/** A diagram started from the run an engine held in memory under `route`: a use of it, if it is stored. */
+	used(route: string): void;
 }
 
 /** One render, from `render()` until it settles. */
@@ -234,6 +248,11 @@ interface Engine {
 	readonly rejectReady: (error: Error) => void;
 	/** Its entry in the report. */
 	readonly life: EngineLife;
+	/**
+	 * It is to stop once it has handed over its saved runs (drain), and why, with the timer that stops
+	 * it if it has not by then. A job posted to it meanwhile keeps it.
+	 */
+	stopping: { why: EngineStop; timer: number } | null;
 }
 
 /**
@@ -444,6 +463,12 @@ export class WorkerHost implements TexHost {
 		const victims: Job[] = [];
 		for (const engine of this.engines.slice()) {
 			if (engine.current !== null) victims.push(engine.current);
+			// An idle engine sent to the background hands its saved runs over first, for a second at
+			// most: on a phone the runs a note saved last are still waiting when Obsidian is left.
+			if (why === 'background' && engine.current === null) {
+				this.drain(engine, why, BACKGROUND_FLUSH_MS, error);
+				continue;
+			}
 			engine.current = null;
 			this.teardown(engine, error, why);
 		}
@@ -533,6 +558,8 @@ export class WorkerHost implements TexHost {
 	}
 
 	private post(engine: Engine, job: Job): void {
+		// An engine about to stop that is given a job is wanted after all: it stays.
+		this.keepEngine(engine);
 		engine.current = job;
 		this.stopReadWait(job);
 		// The part of the engine's start this job was there for. Waiting behind another job once
@@ -623,6 +650,7 @@ export class WorkerHost implements TexHost {
 			resolveReady,
 			rejectReady,
 			life,
+			stopping: null,
 		};
 		worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
 			if (this.engines.includes(engine)) this.receive(engine, event.data);
@@ -664,6 +692,12 @@ export class WorkerHost implements TexHost {
 			return;
 		}
 
+		// Every run it saved has been handed over: an engine that was to stop stops now.
+		if (message.type === 'flushed') {
+			if (engine.stopping !== null) this.stopDrained(engine);
+			return;
+		}
+
 		// A reply for a job we abandoned; ids make that unambiguous rather than a guess.
 		const job = engine.current;
 		if (job === null || message.id !== job.id) return;
@@ -677,6 +711,9 @@ export class WorkerHost implements TexHost {
 		engine.current = null;
 		if (message.snapshots !== undefined) this.heldBy(engine, message.snapshots);
 		this.storedOutcome(job, message.stored, message.timings);
+		// Started from a run the engine held: a use of the one stored under that name, if there is one.
+		if (message.timings?.resumed === true && message.timings.restored !== true && job.route !== undefined)
+			this.runs?.used(job.route);
 		const line = blockLine(message.line, message.bodyLine);
 		if (message.type === 'ok') {
 			const result: TexResult = {
@@ -793,6 +830,7 @@ export class WorkerHost implements TexHost {
 		if (at < 0) return;
 		this.engines.splice(at, 1);
 		if (this.engines.length === 0) this.cancelIdleTeardown();
+		this.keepEngine(engine);
 		engine.life.stop = why;
 		this.lastStop = why;
 		engine.worker.terminate();
@@ -806,7 +844,7 @@ export class WorkerHost implements TexHost {
 
 	/**
 	 * Once nothing is running or waiting, stop every worker after the idle budget, together, also one
-	 * still starting.
+	 * still starting; each that is up once it has handed over its saved runs (drain).
 	 */
 	private armIdleTeardown(): void {
 		if (this.idleTeardownMs === undefined || this.timers === undefined) return;
@@ -814,16 +852,58 @@ export class WorkerHost implements TexHost {
 		this.idleTimer = this.timers.setTimeout(() => {
 			this.idleTimer = null;
 			if (this.waiting.length > 0 || this.engines.some((engine) => engine.current !== null)) return;
-			for (const engine of this.engines.slice()) {
-				this.teardown(
-					engine,
-					new TexError('engine-unavailable', [], undefined, undefined, 'stopped while idle'),
-					'idle',
-				);
+			const error = new TexError('engine-unavailable', [], undefined, undefined, 'stopped while idle');
+			for (const engine of this.engines.slice()) this.drain(engine, 'idle', IDLE_FLUSH_MS, error);
+			if (this.engines.length === 0) {
+				this.startFailed = false;
+				this.resized();
 			}
+		}, this.idleTeardownMs);
+	}
+
+	/**
+	 * Stop an idle engine once it has handed over the saved runs it has not yet, which it is asked to
+	 * do at once (engine-src/protocol.ts FlushRequest), or after `limitMs` all the same. At once where
+	 * there is nothing it could have to hand over: it is still starting, saved runs are not kept
+	 * across the stops, or there is no timer to bound the wait with. A job posted to it meanwhile
+	 * keeps it (keepEngine).
+	 */
+	private drain(engine: Engine, why: EngineStop, limitMs: number, error: Error): void {
+		if (engine.stopping !== null) return;
+		if (
+			!engine.up ||
+			engine.current !== null ||
+			this.timers === undefined ||
+			this.runs === undefined ||
+			this.snapshotBudget() <= 0
+		) {
+			this.teardown(engine, error, why);
+			return;
+		}
+		engine.stopping = { why, timer: this.timers.setTimeout(() => this.stopDrained(engine), limitMs) };
+		engine.worker.postMessage({ type: 'flush' } satisfies WorkerRequest);
+	}
+
+	/** Stop an engine that was to stop once it had handed its runs over, as it now has, or ran out of time to. */
+	private stopDrained(engine: Engine): void {
+		const stopping = engine.stopping;
+		if (stopping === null) return;
+		this.teardown(
+			engine,
+			new TexError('engine-unavailable', [], undefined, undefined, 'stopped while idle'),
+			stopping.why,
+		);
+		if (this.engines.length === 0) {
 			this.startFailed = false;
 			this.resized();
-		}, this.idleTeardownMs);
+		}
+	}
+
+	/** An engine that was to stop once it had handed its runs over stays after all, or is stopped now. */
+	private keepEngine(engine: Engine): void {
+		if (engine.stopping === null) return;
+		this.timers?.clearTimeout(engine.stopping.timer);
+		engine.stopping = null;
 	}
 
 	private cancelIdleTeardown(): void {

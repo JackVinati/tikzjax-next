@@ -293,6 +293,46 @@ describe('RunStore — the budget', () => {
 		expect(keys('runs')).toEqual(['engine-a/a']);
 	});
 
+	/*
+	 * Once a phone's engine handed over every run of a note as it went (D38), a note with more
+	 * preambles than the store's 16 MiB filled it in the order they came, and its next visit found the
+	 * runs of its first diagrams gone for its last, and stored its first ones again over the last: the
+	 * least recently used went first, whatever their preambles had cost.
+	 */
+	it('keeps a run whose preamble took longer for longer: a minute for each millisecond', async () => {
+		budget = 3000;
+		await store.keep(saved('heavy', 1000, { preambleMs: 300 }));
+		await store.keep(saved('light', 1000, { preambleMs: 20 }));
+		await store.keep(saved('mid', 1000, { preambleMs: 100 }));
+		// The newest, cheap as it is, makes room from the cheapest older one.
+		await store.keep(saved('next', 1000, { preambleMs: 60 }));
+		expect(keys('runs')).toEqual(['engine-a/heavy', 'engine-a/mid', 'engine-a/next']);
+		// One that would go before the runs it would make room from is not kept, and evicts nothing.
+		await store.keep(saved('cheap', 1000, { preambleMs: 5 }));
+		expect(keys('runs')).toEqual(['engine-a/heavy', 'engine-a/mid', 'engine-a/next']);
+		// Recency still decides over a day: a cheap run now is kept over one unused for a day that
+		// cost three times as much.
+		clock += 24 * 3600_000;
+		await store.keep(saved('today', 1000, { preambleMs: 20 }));
+		expect(keys('runs')).toEqual(['engine-a/heavy', 'engine-a/mid', 'engine-a/today']);
+	});
+
+	it('counts a diagram that started from the run in memory as a use of the run stored under its name', async () => {
+		budget = 2000;
+		await store.keep(saved('a', 1000));
+		await store.keep(saved('b', 1000));
+		store.used('a');
+		await store.keep(saved('c', 1000));
+		expect(keys('runs')).toEqual(['engine-a/a', 'engine-a/c']);
+		// Written down, for the next session too; at most once a minute a run.
+		await fake.idle();
+		const written = (fake.records(DB, 'index').get('engine-a/a') as StoredRunInfo).lastUsed;
+		store.used('a');
+		await fake.idle();
+		expect((fake.records(DB, 'index').get('engine-a/a') as StoredRunInfo).lastUsed).toBe(written);
+		store.used('nothing stored');
+	});
+
 	it('keeps a run the use of which survives the session', async () => {
 		budget = 2000;
 		await store.keep(saved('a', 1000));

@@ -23,7 +23,9 @@ import { isConnectionLost } from './idb';
  *   left it, which no other build can start from. The index is read once a session, and every entry
  *   of another ENGINE_ID is deleted then, unread. The worker checks the ENGINE_ID inside the bytes,
  *   and the text, again.
- * - **Within a budget** of stored bytes (platform/budgets.ts storedRunBytes), least recently used out.
+ * - **Within a budget** of stored bytes (platform/budgets.ts storedRunBytes), the least recently used
+ *   out, where a run whose preamble took longer counts as used later (`keptUntil`), and a run that
+ *   would go first itself is not kept.
  * - **Never in the way.** IndexedDB missing or refusing to open (a private window, site data
  *   blocked, a WebView that keeps none) turns this off for the session. A write the browser refuses
  *   for want of room makes room from the least recently used runs and is tried once more, as the
@@ -112,6 +114,25 @@ const FIXED_MS = 12;
 const READ_MS_PER_MIB = 1;
 const RESTORE_MS_PER_MIB = 2.5;
 
+/**
+ * What goes first when room is made: the run kept until the earliest, counted from its last use, a
+ * minute later for each millisecond its preamble and save took the engine that saved it. Until
+ * 0.2.1-beta.5 the least recently used went first, whatever it had cost; once a phone's engine handed
+ * over every run of a note as it went (internal/DECISIONS.md D38), a note with more preambles than its
+ * 16 MiB filled it in the order they came, and the next visit of the note, from its top, found the
+ * runs of its first diagrams gone to make room for its last, and stored its first ones again over
+ * the last: in WebKit at a phone's budgets, a second visit of the 44 test diagrams started 6 of them
+ * from storage, against 0.2.1-beta.4's 11. So a run that saves more is kept longer: circuitikz's,
+ * whose preamble and save took 220 to 330 ms in WebKit on the desktop, four to five hours longer
+ * than plain TikZ's, 15 to 30. Over a day or more, recency still decides.
+ */
+const RETAIN_MS_PER_MS = 60_000;
+const keptUntil = (info: Pick<StoredRunInfo, 'lastUsed' | 'preambleMs' | 'saveMs'>): number =>
+	info.lastUsed + (info.preambleMs + info.saveMs) * RETAIN_MS_PER_MS;
+
+/** How often a run's use by a diagram that resumed from it in memory is written down, at most (`used`). */
+const USED_WRITE_MS = 60_000;
+
 /** `estimate` moved a quarter of the way to `sample`, counted at most four times the larger of `estimate` and `base`. */
 const lean = (estimate: number, sample: number, base: number): number =>
 	0.75 * estimate + 0.25 * Math.min(sample, 4 * Math.max(estimate, base));
@@ -146,6 +167,8 @@ export class RunStore {
 	/** What putting a run back took here, lately, per MiB of its bytes: read, and in the worker. */
 	private readPerMiB = READ_MS_PER_MIB;
 	private restorePerMiB = RESTORE_MS_PER_MIB;
+	/** When each run's use was last written down (`used`). */
+	private readonly usedWritten = new Map<string, number>();
 
 	constructor(options: RunStoreOptions) {
 		// Per vault, as the diagram cache is: every vault on a desktop install shares one origin.
@@ -237,6 +260,22 @@ export class RunStore {
 			this.restorePerMiB = lean(this.restorePerMiB, Math.max(0, restoreMs) / raw, RESTORE_MS_PER_MIB);
 	}
 
+	/**
+	 * A diagram started from the run an engine held in memory under `route`: a use of the run stored
+	 * under it, if one is, for what goes first when room is made (`keptUntil`). The preamble a note
+	 * shares between many diagrams is put back from storage once, and then used from memory; until
+	 * 0.2.1-beta.5 only that read counted. Written down at most once a minute a run.
+	 */
+	used(route: string): void {
+		const info = this.index?.get(route);
+		if (info === undefined) return;
+		const now = this.options.now();
+		info.lastUsed = now;
+		if (now - (this.usedWritten.get(route) ?? -Infinity) < USED_WRITE_MS) return;
+		this.usedWritten.set(route, now);
+		void this.touch(info);
+	}
+
 	/** A run was not sent for what putting it back would cost: the estimates go a quarter of the way back. */
 	private relax(): void {
 		this.readPerMiB += (READ_MS_PER_MIB - this.readPerMiB) / 4;
@@ -278,8 +317,9 @@ export class RunStore {
 
 	/**
 	 * Keep a run a worker saved, if it is worth putting back by the figures a session starts from
-	 * (`worthKeeping`) and fits the budget, making room from the least recently used. A run larger
-	 * than the whole budget is not kept, and evicts nothing. One keep at a time (`writing`).
+	 * (`worthKeeping`) and fits the budget, making room from the runs kept until the earliest
+	 * (`keptUntil`). A run larger than the whole budget is not kept, and evicts nothing, nor does one
+	 * that would itself go before the runs it would make room from. One keep at a time (`writing`).
 	 */
 	keep(message: SavedRunMessage): Promise<void> {
 		// The store as it stood when the render that saved the run was posted: a worker hands its runs
@@ -311,14 +351,16 @@ export class RunStore {
 		const budget = this.options.budget();
 		if (info.bytes > budget || !this.worthKeeping(info)) return;
 
-		// The least recently used first, but never the one this replaces, which goes anyway.
+		// The run kept until the earliest first, but never the one this replaces, which goes anyway;
+		// and if that is this run, it is not kept, and nothing is evicted for it.
 		const others = [...this.index.values()]
 			.filter((other) => other.route !== info.route)
-			.sort((a, b) => a.lastUsed - b.lastUsed);
+			.sort((a, b) => keptUntil(a) - keptUntil(b));
 		let total = others.reduce((n, other) => n + other.bytes, 0) + info.bytes;
 		const evicted: StoredRunInfo[] = [];
 		for (const other of others) {
 			if (total <= budget) break;
+			if (keptUntil(other) > keptUntil(info)) return;
 			evicted.push(other);
 			total -= other.bytes;
 		}

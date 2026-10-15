@@ -64,7 +64,12 @@ class FakeWorker {
 
 	/** Render requests this worker has been handed, in order. */
 	get renders(): number[] {
-		return this.posted.flatMap((m) => (m.type === 'boot' ? [] : [m.id]));
+		return this.posted.flatMap((m) => (m.type === 'render' ? [m.id] : []));
+	}
+
+	/** How often it was asked to hand its saved runs over before a stop. */
+	get flushes(): number {
+		return this.posted.filter((m) => m.type === 'flush').length;
 	}
 
 	boot(timings?: BootTimings): void {
@@ -1239,6 +1244,10 @@ describe('saved preambles kept across the engines’ stops', () => {
 		measured(run: { bytes: number; rawBytes: number }, readMs: number, restoreMs: number): void {
 			this.measuredWith.push([run, readMs, restoreMs]);
 		}
+		readonly usedFor: string[] = [];
+		used(name: string): void {
+			this.usedFor.push(name);
+		}
 	}
 
 	const reply = (w: FakeWorker, id: number, extra: Partial<OkMessage> = {}) =>
@@ -1599,6 +1608,32 @@ describe('saved preambles kept across the engines’ stops', () => {
 		expect(runs.reads.filter((name) => name === route)).toEqual([route]);
 	});
 
+	it('tell the store of each diagram that started from a run an engine held, and not of one put back', async () => {
+		const runs = new FakeRuns();
+		runs.stored.set(route, storedRun());
+		const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+		send(host, 'a');
+		worker(0).boot();
+		await tick();
+		const timings = { resetMs: 1, texMs: 2, svgMs: 1, passes: 1, resumed: true };
+		// Put back from storage for this one: the read was its use.
+		reply(worker(0), renders(worker(0))[0]!.id, {
+			timings: { ...timings, restored: true },
+			snapshots: { held: [route], bytes: 10, failures: 0 },
+		});
+		await tick();
+		expect(runs.usedFor).toEqual([]);
+		// Then from the run the engine kept: a use of the one stored under its name.
+		send(host, 'b');
+		await tick();
+		reply(worker(0), renders(worker(0))[1]!.id, {
+			timings,
+			snapshots: { held: [route], bytes: 10, failures: 0 },
+		});
+		await tick();
+		expect(runs.usedFor).toEqual([route]);
+	});
+
 	it('ask for no run to be written out again when one is stored and none was sent', async () => {
 		const runs = new FakeRuns();
 		runs.stored.set(route, storedRun());
@@ -1609,6 +1644,158 @@ describe('saved preambles kept across the engines’ stops', () => {
 		await tick();
 		expect(renders(worker(0))[0]?.stored).toBeUndefined();
 		expect(renders(worker(0))[0]?.persist).toBe(false);
+	});
+
+	/*
+	 * An engine is stopped after 15 s idle on a phone, and when Obsidian goes to the background, and
+	 * its runs saved last were still waiting to be handed over then: the heaviest diagrams of a note,
+	 * whose runs are the largest, never reached storage on the maintainer's iPhone. So an idle engine
+	 * that is to stop hands them over first, and is stopped once it says it has, or after a limit.
+	 */
+	describe('an engine that is to stop', () => {
+		const phone = (runs: FakeRuns, timers: FakeTimers) =>
+			new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs, timers, idleTeardownMs: 15_000 });
+		const saved = (id: number): SavedRunMessage => ({
+			type: 'saved-run',
+			id,
+			epoch: 3,
+			run: storedRun(10),
+			preambleMs: 300,
+			saveMs: 5,
+			encodeMs: 80,
+			writeMs: 2,
+		});
+
+		it('at its idle stop, hands its saved runs over first, and stops once it has', async () => {
+			const runs = new FakeRuns();
+			const timers = new FakeTimers();
+			const host = phone(runs, timers);
+			const a = send(host, 'a');
+			worker(0).boot();
+			await tick();
+			reply(worker(0), renders(worker(0))[0]!.id);
+			await tick();
+			expect(a.status).toBe('fulfilled');
+
+			timers.advance(15_000);
+			expect(worker(0).flushes).toBe(1);
+			expect(worker(0).terminated).toBe(false);
+			// What it hands over meanwhile is kept, and then it says it is done.
+			worker(0).emit(saved(renders(worker(0))[0]!.id));
+			expect(runs.kept).toHaveLength(1);
+			worker(0).emit({ type: 'flushed' });
+			expect(worker(0).terminated).toBe(true);
+			expect(host.report().lives[0]?.stop).toBe('idle');
+		});
+
+		it('is stopped all the same once its limit has run out', async () => {
+			const runs = new FakeRuns();
+			const timers = new FakeTimers();
+			const host = phone(runs, timers);
+			send(host, 'a');
+			worker(0).boot();
+			await tick();
+			reply(worker(0), renders(worker(0))[0]!.id);
+			await tick();
+			timers.advance(15_000);
+			timers.advance(1999);
+			expect(worker(0).terminated).toBe(false);
+			timers.advance(1);
+			expect(worker(0).terminated).toBe(true);
+			expect(host.report().lastStop).toBe('idle');
+		});
+
+		it('stays when a job comes in meanwhile, and takes it', async () => {
+			const runs = new FakeRuns();
+			const timers = new FakeTimers();
+			const host = phone(runs, timers);
+			send(host, 'a');
+			worker(0).boot();
+			await tick();
+			reply(worker(0), renders(worker(0))[0]!.id);
+			await tick();
+			timers.advance(15_000);
+			expect(worker(0).flushes).toBe(1);
+
+			const b = send(host, 'b');
+			await tick();
+			expect(renders(worker(0))).toHaveLength(2);
+			timers.advance(5000);
+			worker(0).emit({ type: 'flushed' });
+			expect(worker(0).terminated).toBe(false);
+			reply(worker(0), renders(worker(0))[1]!.id);
+			await tick();
+			expect(b.status).toBe('fulfilled');
+			expect(FakeWorker.spawned).toHaveLength(1);
+		});
+
+		it('when the app goes to the background, hands them over for a second at most, and takes no job', async () => {
+			const runs = new FakeRuns();
+			const timers = new FakeTimers();
+			const host = phone(runs, timers);
+			send(host, 'a');
+			worker(0).boot();
+			await tick();
+			reply(worker(0), renders(worker(0))[0]!.id);
+			await tick();
+
+			host.kill('background');
+			expect(worker(0).flushes).toBe(1);
+			expect(worker(0).terminated).toBe(false);
+			timers.advance(999);
+			expect(worker(0).terminated).toBe(false);
+			timers.advance(1);
+			expect(worker(0).terminated).toBe(true);
+			expect(host.report().lastStop).toBe('background');
+		});
+
+		it('when the app goes to the background busy, is stopped at once, and its job asks again', async () => {
+			const runs = new FakeRuns();
+			const timers = new FakeTimers();
+			const host = phone(runs, timers);
+			const a = send(host, 'a');
+			worker(0).boot();
+			await tick();
+			host.kill('background');
+			await tick();
+			expect(worker(0).flushes).toBe(0);
+			expect(worker(0).terminated).toBe(true);
+			expect(a.error).toBeInstanceOf(InterruptedError);
+		});
+
+		it('is stopped at once on a restart, and where nothing is kept across the stops', async () => {
+			const runs = new FakeRuns();
+			const timers = new FakeTimers();
+			const host = phone(runs, timers);
+			send(host, 'a');
+			worker(0).boot();
+			await tick();
+			reply(worker(0), renders(worker(0))[0]!.id);
+			await tick();
+			host.kill('restart');
+			expect(worker(0).flushes).toBe(0);
+			expect(worker(0).terminated).toBe(true);
+
+			const off = new WorkerHost({ snapshotBudget: () => 0, runs, timers, idleTeardownMs: 15_000 });
+			send(off, 'b');
+			worker(1).boot();
+			await tick();
+			reply(worker(1), renders(worker(1))[0]!.id);
+			await tick();
+			off.kill('background');
+			expect(worker(1).flushes).toBe(0);
+			expect(worker(1).terminated).toBe(true);
+		});
+
+		it('is stopped at once if it had not finished starting', () => {
+			const runs = new FakeRuns();
+			const timers = new FakeTimers();
+			const host = phone(runs, timers);
+			void host.ready().catch(() => undefined);
+			host.kill('background');
+			expect(worker(0).flushes).toBe(0);
+			expect(worker(0).terminated).toBe(true);
+		});
 	});
 });
 

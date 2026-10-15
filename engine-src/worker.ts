@@ -44,6 +44,7 @@ import * as library from './library';
 import { describeConvertError } from './convert-error';
 import { buildInput, routeKey, routeOf } from './document';
 import { gunzipExactly } from './inflate';
+import { GZIP_HELPER } from './gzip-helper';
 import { decodeSavedRun, encodeSavedRun, sealing, type ContentSources } from './stored-run';
 import { compileProbeAsync, probeJit } from './jit';
 import { checkCoreDump, packedLength, startingMemory, unpackCoreDump, type CoreDump } from './core-dump';
@@ -70,6 +71,7 @@ import type {
 	BootTimings,
 	EngineAssets,
 	ErrorMessage,
+	FlushedMessage,
 	OkMessage,
 	RenderOptions,
 	RenderTimings,
@@ -391,32 +393,57 @@ const readStored = async (stored: StoredRun): Promise<SavedRun | 'corrupt' | 'fa
 };
 
 /**
- * Handing a run over costs the worker's own time: writing it out, a few milliseconds, and gzipping
- * it, which the platform does on this thread, over 200 ms for circuitikz's 8.9 MiB on the desktop
- * (D36). Spent right after the reply, it held up the next diagram by as much. So it waits until no
- * render has been under way for HANDOVER_QUIET_MS, as when the host has nothing more for this engine,
- * and gzips a slice at a time, each in a task of its own once the worker is idle again, or, with no
- * gzip, takes the checksum the same way (./stored-run sealing): a render posted meanwhile starts
- * first, and waits at most for the slice under way, or for the writing out, which is one step.
+ * Handing a run over costs time: writing it out, a few milliseconds of this thread's, and gzipping
+ * it, 77 to 81 ms for circuitikz's 8.9 MiB in WebKit on the desktop and 225 to 230 in Chromium (D36),
+ * which the platform does on the thread that asks it to. Spent right after the reply, it held the
+ * next diagram up by as much. So the writing out waits for no render to be under way, and the gzip
+ * is done on a thread of its own, by a worker this one starts (gzipHelper), while TeX goes on with
+ * the next diagram; where there is none, a slice at a time on this thread, each in a task of its own
+ * whenever no render is under way, so that a render posted meanwhile starts once the slice under way
+ * is done.
+ *
+ * Until 0.2.1-beta.5 all of it was done here, once no render had been under way for 100 ms, which in
+ * a note is only at its end: on a phone the runs saved before then waited, the ones the worker had
+ * let go for room held to its budget between them and the oldest dropped, the heaviest among them,
+ * and the engine stopped when Obsidian went to the background without handing over what was still
+ * waiting. Now each run is written out between diagrams from the reply on, the ones the worker has
+ * let go first, and the host asks the worker to finish handing over before it stops it
+ * (FlushRequest).
  */
-const HANDOVER_QUIET_MS = 100;
-const HANDOVER_SLICE = 256 * 1024;
+const HANDOVER_SLICE = 128 * 1024;
 
-/** Renders under way, and when the last one replied, for whenIdle. */
+/** Renders under way, and who waits for none to be (whenIdle). */
 let rendering = 0;
-let quietSince = 0;
+const renderEnded: (() => void)[] = [];
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => self.setTimeout(resolve, ms));
 
-/** Resolves in a task of its own once no render is under way and none has been for HANDOVER_QUIET_MS. */
+/**
+ * A task of its own: a message to itself. Timers nested as each slice's is in the last one's wait 4 ms
+ * at least from the fifth on, which over the 71 slices of circuitikz's run would come to 280 ms of
+ * waiting for nothing. A timer where there is no MessageChannel.
+ */
+const nextTask: () => Promise<void> = (() => {
+	if (typeof MessageChannel !== 'function') return () => sleep(0);
+	const channel = new MessageChannel();
+	const waiting: (() => void)[] = [];
+	channel.port1.onmessage = () => waiting.shift()?.();
+	// Node's ports would keep a script that runs the worker on its own thread from ending.
+	(channel.port1 as { unref?: () => void }).unref?.();
+	(channel.port2 as { unref?: () => void }).unref?.();
+	return () =>
+		new Promise<void>((resolve) => {
+			waiting.push(resolve);
+			channel.port2.postMessage(0);
+		});
+})();
+
+/** Resolves in a task of its own once no render is under way. */
 const whenIdle = async (): Promise<void> => {
 	for (;;) {
-		await sleep(
-			rendering > 0
-				? HANDOVER_QUIET_MS
-				: Math.max(0, quietSince + HANDOVER_QUIET_MS - performance.now()),
-		);
-		if (rendering === 0 && performance.now() - quietSince >= HANDOVER_QUIET_MS) return;
+		await nextTask();
+		if (rendering === 0) return;
+		await new Promise<void>((resolve) => renderEnded.push(resolve));
 	}
 };
 
@@ -483,6 +510,102 @@ const sealWhenIdle = async (bytes: Uint8Array, spent: { ms: number }): Promise<v
 	}
 };
 
+/** What the gzip helper sends: that it is up, or for a run, its gzip and the time it took, or its bytes back. */
+interface GzipReply {
+	id?: number;
+	up?: boolean;
+	gz?: ArrayBuffer;
+	ms?: number;
+	bytes?: ArrayBuffer;
+}
+
+interface GzipHelper {
+	worker: Worker;
+	/** Whether it came up: false once it failed to, within GZIP_HELPER_UP_MS. */
+	up: Promise<boolean>;
+	/** It failed since: runs are gzipped on this thread from now on. */
+	broken: boolean;
+	next: number;
+	/** The runs it has, by id, each with who waits for what it sends back. */
+	readonly waiting: Map<number, (reply: GzipReply | null) => void>;
+}
+
+/**
+ * The gzip helper, started at the first run to hand over, where this worker can start a worker of
+ * its own and the platform has a CompressionStream (iOS and Safari 16.4, Chrome 80). Null where it
+ * cannot, or could not: runs are then gzipped on this thread. It goes with this worker, which the host
+ * stops when it stops the engine.
+ */
+let gzipHelper: GzipHelper | null | undefined;
+
+/** How long the gzip helper has to say it is up before it is given up on. */
+const GZIP_HELPER_UP_MS = 2000;
+
+const startGzipHelper = (): GzipHelper | null => {
+	if (gzipHelper !== undefined) return gzipHelper;
+	gzipHelper = null;
+	if (typeof Worker !== 'function' || !hasNativeGzip() || typeof Blob !== 'function') return null;
+	try {
+		const url = URL.createObjectURL(new Blob([GZIP_HELPER], { type: 'application/javascript' }));
+		const worker = new Worker(url);
+		const waiting = new Map<number, (reply: GzipReply | null) => void>();
+		let cameUp!: (up: boolean) => void;
+		const helper: GzipHelper = {
+			worker,
+			up: new Promise<boolean>((resolve) => (cameUp = resolve)),
+			broken: false,
+			next: 1,
+			waiting,
+		};
+		self.setTimeout(() => cameUp(false), GZIP_HELPER_UP_MS);
+		worker.onmessage = (event: MessageEvent<GzipReply>) => {
+			const reply = event.data;
+			if (reply.up === true) {
+				cameUp(true);
+				URL.revokeObjectURL(url);
+				return;
+			}
+			if (reply.id === undefined) return;
+			const settle = waiting.get(reply.id);
+			waiting.delete(reply.id);
+			settle?.(reply);
+		};
+		// A helper that fails to start, or fails since, takes the runs it had with it: they are not
+		// handed over, and the ones after are gzipped on this thread.
+		worker.onerror = () => {
+			helper.broken = true;
+			cameUp(false);
+			for (const settle of waiting.values()) settle(null);
+			waiting.clear();
+			worker.terminate();
+		};
+		gzipHelper = helper;
+	} catch {
+		gzipHelper = null;
+	}
+	return gzipHelper;
+};
+
+/**
+ * `raw` gzipped by the helper on its thread, with the time it took there; or the bytes it gave back
+ * when the gzip failed there; or undefined, with `raw` still this worker's, where there is no helper
+ * up; or null where it took `raw` and failed without giving it back.
+ */
+const gzipElsewhere = async (
+	raw: Uint8Array,
+): Promise<{ data: Uint8Array; ms: number } | { back: Uint8Array } | undefined | null> => {
+	const helper = startGzipHelper();
+	if (helper === null || !(await helper.up) || helper.broken) return undefined;
+	const id = helper.next++;
+	const reply = await new Promise<GzipReply | null>((resolve) => {
+		helper.waiting.set(id, resolve);
+		helper.worker.postMessage({ id, bytes: raw.buffer }, [raw.buffer]);
+	});
+	if (reply?.gz !== undefined) return { data: new Uint8Array(reply.gz), ms: reply.ms ?? 0 };
+	if (reply?.bytes !== undefined) return { back: new Uint8Array(reply.bytes) };
+	return null;
+};
+
 /** A run saved by a render, with what TeX took to reach it and what saving it took (PassPlan). */
 interface Saving {
 	run: SavedRun;
@@ -493,15 +616,15 @@ interface Saving {
 /** Runs saved and not yet handed over, oldest first, and whether they are being. */
 const toHandOver: { id: number; epoch: number; saving: Saving }[] = [];
 let handingOver = false;
+/** Who waits for every run saved to have been handed over (FlushRequest). */
+const handedOverAll: (() => void)[] = [];
 
 /**
- * Hand the host `saving`, once the worker is idle (whenIdle). In a note of many preambles the worker
- * is idle only at its end, and a run waiting is memory: none more for a run the worker still keeps,
- * but a run it has let go would otherwise give its memory back. So the runs waiting that it no longer
- * keeps hold at most `budget` bytes between them, what it may keep of saved runs, the oldest of them
- * let go first, and the newest always waits. They used to hold that between them all, kept or not:
- * at a phone's 12 MiB, after the 37 test diagrams, only the last 9 runs were handed over, 8.45 MiB of
- * the 16 MiB the host may store, and plain TikZ's was let go before it could be (D37).
+ * Hand the host `saving`, a slice at a time whenever no render is under way (whenIdle). A run waiting
+ * is memory once the worker no longer keeps it itself, and those are handed over first. They hold at
+ * most `budget` bytes between them, what it may keep of saved runs, the oldest of them let go first,
+ * and the newest always waits; until the review of 0.2.1-beta.4 the runs it still kept counted too,
+ * and at a phone's 12 MiB plain TikZ's was let go before it could be handed over (D37).
  */
 const queueHandOver = (id: number, epoch: number, saving: Saving, budget: number): void => {
 	toHandOver.push({ id, epoch, saving });
@@ -519,17 +642,30 @@ const queueHandOver = (id: number, epoch: number, saving: Saving, budget: number
 	if (!handingOver) void handOverAll();
 };
 
+/** The next run to hand over: the oldest the worker has let go, else the oldest. */
+const nextHandOver = (): { id: number; epoch: number; saving: Saving } | undefined => {
+	const at = toHandOver.findIndex((next) => !saved.holds(next.saving.run));
+	return toHandOver.splice(Math.max(0, at), 1)[0];
+};
+
 const handOverAll = async (): Promise<void> => {
 	handingOver = true;
 	try {
-		for (let next = toHandOver.shift(); next !== undefined; next = toHandOver.shift()) {
+		for (let next = nextHandOver(); next !== undefined; next = nextHandOver()) {
 			await whenIdle();
 			await handOver(next.id, next.epoch, next.saving);
 		}
 	} finally {
 		handingOver = false;
+		for (const resolve of handedOverAll.splice(0)) resolve();
 	}
 };
+
+/** Resolves once every run saved has been handed over, or failed to be. */
+const whenHandedOver = (): Promise<void> =>
+	handingOver || toHandOver.length > 0
+		? new Promise<void>((resolve) => handedOverAll.push(resolve))
+		: Promise.resolve();
 
 /**
  * Hand the host a run this worker saved, as bytes (./stored-run), gzipped where the platform has its
@@ -541,17 +677,28 @@ const handOver = async (id: number, epoch: number, saving: Saving): Promise<void
 	try {
 		const t = performance.now();
 		// Without its checksum, which only a run kept uncompressed needs (./stored-run).
-		const raw = encodeSavedRun(saving.run, ENGINE_ID, storedContent, false);
+		let raw = encodeSavedRun(saving.run, ENGINE_ID, storedContent, false);
+		const rawBytes = raw.length;
 		const writeMs = performance.now() - t;
 		spent.ms += writeMs;
 		let data = raw;
 		let compressed = false;
 		if (hasNativeGzip()) {
-			try {
-				data = await gzipWhenIdle(raw, spent);
+			// On the helper's thread, where there is one, while TeX goes on with the next diagram.
+			const elsewhere = await gzipElsewhere(raw);
+			if (elsewhere === null) return;
+			if (elsewhere !== undefined && 'data' in elsewhere) {
+				data = elsewhere.data;
 				compressed = true;
-			} catch {
-				// Kept as it is: the host counts what it stores by the bytes it is given.
+				spent.ms += elsewhere.ms;
+			} else {
+				if (elsewhere !== undefined) raw = data = elsewhere.back;
+				try {
+					data = await gzipWhenIdle(raw, spent);
+					compressed = true;
+				} catch {
+					// Kept as it is: the host counts what it stores by the bytes it is given.
+				}
 			}
 		}
 		if (!compressed) await sealWhenIdle(raw, spent);
@@ -563,7 +710,7 @@ const handOver = async (id: number, epoch: number, saving: Saving): Promise<void
 				route: saving.run.route,
 				data: data.buffer as ArrayBuffer,
 				compressed,
-				rawBytes: raw.length,
+				rawBytes,
 			},
 			preambleMs: Math.round(saving.preambleMs),
 			saveMs: Math.round(saving.saveMs),
@@ -1294,6 +1441,12 @@ declare const self: {
 const post = (message: unknown, transfer?: Transferable[]) =>
 	transfer === undefined ? self.postMessage(message) : self.postMessage(message, transfer);
 
+/** A render has replied: hand-overs waiting for none to be under way go on. */
+const renderDone = (): void => {
+	rendering--;
+	if (rendering === 0) for (const resume of renderEnded.splice(0)) resume();
+};
+
 /** The start, once the payload has arrived. */
 let booted: Promise<unknown> | null = null;
 
@@ -1316,6 +1469,12 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 		);
 		return;
 	}
+	// The host is about to stop this engine: once every run it saved has been handed over, it says
+	// so, and the host stops it then, or when its limit runs out (worker-host.ts `drain`).
+	if (request.type === 'flush') {
+		void whenHandedOver().then(() => post({ type: 'flushed' } satisfies FlushedMessage));
+		return;
+	}
 	if (request.type === 'ping') {
 		post({ type: 'ok', id: request.id, svg: '', log: [], missing: [], durationMs: 0 });
 		return;
@@ -1331,15 +1490,13 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 			request.persist === true,
 		).then(
 			({ reply, handOver: saving }) => {
-				rendering--;
-				quietSince = performance.now();
 				post(reply);
 				if (saving !== undefined)
 					queueHandOver(request.id, request.epoch ?? 0, saving, request.snapshots ?? 0);
+				renderDone();
 			},
 			(error: unknown) => {
-				rendering--;
-				quietSince = performance.now();
+				renderDone();
 				post({
 					type: 'error',
 					id: request.id,

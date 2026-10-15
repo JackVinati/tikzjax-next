@@ -115,11 +115,14 @@ export interface SavedRunMessage {
 	preambleMs: number;
 	/** What saving it took in that render, which a diagram that starts from the run does not pay either. */
 	saveMs: number;
-	/** What writing it out as bytes and compressing them took, after the reply. */
+	/**
+	 * What writing it out as bytes and compressing them took, after the reply, on the worker's thread
+	 * or, for the gzip, on its helper's (worker.ts gzipHelper).
+	 */
 	encodeMs: number;
 	/**
-	 * What writing it out took of that, in one step before the slices of the rest: the longest a
-	 * render posted meanwhile waits for it (worker.ts handOver).
+	 * What writing it out took of that, in one step on the worker's thread before the rest: the
+	 * longest a render posted meanwhile waits for it (worker.ts handOver).
 	 */
 	writeMs?: number | undefined;
 }
@@ -150,7 +153,16 @@ export interface BootRequest {
 	assets: EngineAssets;
 }
 
-export type WorkerRequest = RenderRequest | PingRequest | BootRequest;
+/**
+ * The host is about to stop the engine, at its idle stop or when Obsidian goes to the background on
+ * a phone: the worker hands over every run it saved that it has not yet (SavedRunMessage), at once,
+ * and then says so (FlushedMessage). The host stops it then, or once its limit has run out.
+ */
+export interface FlushRequest {
+	type: 'flush';
+}
+
+export type WorkerRequest = RenderRequest | PingRequest | BootRequest | FlushRequest;
 
 /**
  * Where the engine's start went inside the worker, in whole milliseconds, and which of the
@@ -349,7 +361,13 @@ export interface ErrorMessage {
  */
 export type StoredOutcome = 'used' | 'unneeded' | 'corrupt' | 'mismatch' | 'failed';
 
-export type WorkerResponse = ReadyMessage | LogMessage | OkMessage | ErrorMessage | SavedRunMessage;
+/** Every run the worker saved has been handed over, or failed to be: the answer to a FlushRequest. */
+export interface FlushedMessage {
+	type: 'flushed';
+}
+
+export type WorkerResponse =
+	ReadyMessage | LogMessage | OkMessage | ErrorMessage | SavedRunMessage | FlushedMessage;
 
 export interface EngineInventory {
 	engineId: string;
