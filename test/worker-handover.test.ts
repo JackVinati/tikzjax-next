@@ -152,6 +152,63 @@ describe('a diagram that resumes from a stored run', () => {
 	}, 120_000);
 });
 
+/*
+ * A run that does not fit beside the ones the worker is using, as circuitikz's 8.9 MiB may not at a
+ * phone's 12, is let go at once (D32). Where the host asks for it, it is handed over all the same, for
+ * later sessions to start from; and where the worker is too full to save one at all, it is saved for
+ * that alone, once (internal/DECISIONS.md D39). Here at a budget of 1 MiB, which holds plain TikZ's
+ * run and nothing beside it.
+ */
+describe('a run the worker cannot keep', () => {
+	const SMALL = 1024 * 1024;
+
+	it('is handed over where the host asks for it, and let go', async () => {
+		const worker = await another();
+		const reply = await render(worker, DIAGRAM(30), SIUNITX, {
+			snapshots: SMALL,
+			persist: true,
+			epoch: 9,
+		});
+		expect(reply.timings).toMatchObject({ saveNotKept: true });
+		expect(reply.snapshots?.held).toHaveLength(0);
+		expect(reply.snapshots?.pending).toBe(1);
+		const message = await waitFor(() => handed(reply));
+		expect(message.epoch).toBe(9);
+		// What it handed over starts a diagram of that preamble in a worker that holds none.
+		const back = await render(await another(), DIAGRAM(31), SIUNITX, { stored: message.run });
+		expect(back.timings).toMatchObject({ resumed: true, restored: true });
+	}, 120_000);
+
+	it('is saved for the host where the worker is too full to save it for itself, once a name', async () => {
+		const worker = await another();
+		const plain = await render(worker, DIAGRAM(32), PLAIN, { snapshots: SMALL, persist: true });
+		expect(plain.snapshots?.held).toHaveLength(1);
+		// Resumed from, so that it may not go to make room: what is left is less than any run saved yet.
+		const resumed = await render(worker, DIAGRAM(33), PLAIN, { snapshots: SMALL });
+		expect(resumed.timings?.resumed).toBe(true);
+
+		// Not asked for: nothing is saved, as before.
+		const unasked = await render(worker, DIAGRAM(34), SIUNITX, { snapshots: SMALL });
+		expect(unasked.timings?.saveMs).toBeUndefined();
+
+		// Asked for, while none is stored under its name: saved, not kept, and handed over.
+		const asked = await render(worker, DIAGRAM(35), SIUNITX, { snapshots: SMALL, persist: true });
+		expect(asked.timings).toMatchObject({ saveNotKept: true });
+		expect(asked.snapshots?.held).toEqual(plain.snapshots?.held);
+		const message = await waitFor(() => handed(asked));
+		const back = await render(await another(), DIAGRAM(36), SIUNITX, { stored: message.run });
+		expect(back.timings).toMatchObject({ resumed: true, restored: true });
+
+		// Asked for again, as when the store did not keep it: not saved again in this worker's life.
+		const again = await render(worker, DIAGRAM(37), SIUNITX, { snapshots: SMALL, persist: true });
+		expect(again.timings?.saveMs).toBeUndefined();
+		expect(handed(again)).toBeUndefined();
+		// And the run it keeps is still resumed from.
+		const still = await render(worker, DIAGRAM(38), PLAIN, { snapshots: SMALL });
+		expect(still.timings?.resumed).toBe(true);
+	}, 120_000);
+});
+
 /**
  * A worker as the engine's worker starts one, run in this realm on the helper's own source, its
  * messages a task apart; `fail` makes it fail to start, as where a worker cannot start one of its own,

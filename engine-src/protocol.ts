@@ -74,7 +74,9 @@ export interface RenderRequest {
 	stored?: StoredRun | undefined;
 	/**
 	 * The host keeps the runs a worker saves: once the render has replied, the worker hands over the
-	 * run it saved, if it saved one the host can name (SavedRunMessage). Absent is false.
+	 * run it saved, if it saved one the host can name (SavedRunMessage). Absent is false. A run the
+	 * worker could not keep itself is saved for this alone, once a name in the worker's life
+	 * (internal/DECISIONS.md D39): the host asks only while none is stored under the diagram's name.
 	 */
 	persist?: boolean | undefined;
 	/**
@@ -287,7 +289,8 @@ export interface RenderTimings {
 	saveMs?: number | undefined;
 	/**
 	 * The first pass was saved, in saveMs, and not kept: within the budget there was no room for it,
-	 * however much of what the worker held could go (engine-src/snapshot.ts SnapshotCache).
+	 * however much of what the worker held could go (engine-src/snapshot.ts SnapshotCache). Handed to
+	 * the host all the same where it asked for the run (`persist`), and let go once it was (D39).
 	 */
 	saveNotKept?: boolean | undefined;
 	/** Saving the first pass failed, and nothing was kept; the diagram is drawn as without it. */
