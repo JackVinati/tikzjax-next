@@ -11,7 +11,8 @@ import type { BlockOutcome, TexJobSpec } from '../src/block/render-child';
 import { buildInput } from '../engine-src/document';
 import { budgetsFor } from '../src/platform/budgets';
 import { DEFAULT_SETTINGS, type TikzSettings } from '../src/settings/schema';
-import { TexError } from '../src/types';
+import { RenderQueue } from '../src/queue/queue';
+import { TexError, type TexResult } from '../src/types';
 import { BLOCKS, livePreviewWidget } from './support/obsidian-blocks';
 
 beforeAll(() => {
@@ -415,6 +416,79 @@ describe('whether a block waits for typing to pause', () => {
 			await vi.waitFor(() => expect(submitted).toHaveLength(2));
 		});
 	}
+});
+
+describe('a note opened on a cold engine', () => {
+	/*
+	 * The iPhone's note after a start, through the processor, the block and its machine and the real
+	 * queue (internal/DECISIONS.md D40): four blocks made in the order of the note, whose cache reads
+	 * answer in another order, the top one's last. The engine is still starting: the runner never says
+	 * the engine has a job until the test does.
+	 */
+	const nameOf = (source: string): string | undefined => /% (#\d)/.exec(source)?.[1];
+	const SVG_OUT = '<svg xmlns="http://www.w3.org/2000/svg"/>';
+
+	function note() {
+		const reads = new Map<string, (found: undefined) => void>();
+		const { cache } = tieredCache();
+		const held = {
+			...(cache as unknown as Record<string, unknown>),
+			lookup: (key: string) => new Promise<undefined>((resolve) => reads.set(key, resolve)),
+		} as unknown as typeof cache;
+		const ran: string[] = [];
+		const running = new Map<string, () => void>();
+		const finish = new Map<string, (result: TexResult) => void>();
+		const queue = new RenderQueue<TexJobSpec, TexResult>({
+			concurrency: 1,
+			depthCap: 16,
+			timers: { setTimeout: () => 0, clearTimeout: () => undefined },
+			startupMs: 30_000,
+			run: (job, _signal, onRunning) => {
+				const name = nameOf(job.source) ?? '?';
+				ran.push(name);
+				running.set(name, onRunning);
+				return new Promise((resolve) => finish.set(name, resolve));
+			},
+		});
+		const { deps, seen } = processorDeps({
+			cache: held,
+			queue,
+			observe: (_el, onChange) => onChange(true),
+		});
+		const processor = createProcessor(deps);
+		const make = (name: string) => {
+			const parent = new Component();
+			parent.load();
+			const ctx = {
+				sourcePath: 'note.md',
+				addChild: (child: Component) => parent.addChild(child),
+				getSectionInfo: () => null,
+			} as unknown as MarkdownPostProcessorContext;
+			void processor(`\\draw (0,0) -- (1,1); % ${name}`, document.body.createDiv(), ctx);
+		};
+		/** The block's cache read answers: not cached. */
+		const miss = async (name: string) => {
+			const key = seen.find((spec) => nameOf(spec.source) === name)?.key;
+			const read = key === undefined ? undefined : reads.get(key);
+			if (read === undefined) throw new Error(`no read for ${name}`);
+			read(undefined);
+			await flush();
+		};
+		return { make, miss, ran, running, finish };
+	}
+
+	it('leaves the engine the diagram it has, and starts the one at the top next', async () => {
+		const n = note();
+		for (const name of ['#1', '#2', '#3', '#4']) n.make(name);
+		await flush();
+		for (const name of ['#2', '#3', '#4']) await n.miss(name);
+		n.running.get('#2')?.();
+		await n.miss('#1');
+		expect(n.ran).toEqual(['#2']);
+		n.finish.get('#2')?.({ svg: SVG_OUT, log: [], durationMs: 1 });
+		await flush();
+		expect(n.ran).toEqual(['#2', '#1']);
+	});
 });
 
 describe('the engine', () => {

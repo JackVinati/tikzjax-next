@@ -132,6 +132,12 @@ export interface BlockDeps {
 	 * queue hands it the first job.
 	 */
 	startEngine?: ((doc: Document) => void) | undefined;
+	/**
+	 * Where the block is in its note, as the order the processor made blocks in: inside a band, the
+	 * queue starts the higher first (queue/queue.ts SubmitOptions.place). Omitted: in the order
+	 * submitted.
+	 */
+	place?: number | undefined;
 	now: () => number;
 	report?: ((outcome: BlockOutcome) => void) | undefined;
 }
@@ -476,6 +482,7 @@ export class TikzBlock extends MarkdownRenderChild {
 					started ??= this.deps.now();
 					this.dispatch({ type: 'slot' });
 				},
+				...(this.deps.place === undefined ? {} : { place: this.deps.place }),
 				...(this.spec.isExport ? { ignorePoison: true } : {}),
 				...(this.spec.uncapped ? { uncapped: true } : {}),
 				...(resumed ? { resumed: true } : {}),

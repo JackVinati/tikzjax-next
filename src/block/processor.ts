@@ -128,6 +128,13 @@ export function createProcessor(deps: ProcessorDeps) {
 	 * hours, and no export at all.
 	 */
 	const exportDeadlines = new WeakMap<Element, number>();
+	/**
+	 * The blocks made so far: each block's place in the queue's order inside its band. Obsidian makes
+	 * the blocks of a view from the top down, Live Preview's widgets and Reading view's sections alike,
+	 * so the block made first is the highest; and a block is submitted once its cache has been read,
+	 * which takes each block its own time (internal/DECISIONS.md D40).
+	 */
+	let made = 0;
 
 	return (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext): Promise<void> => {
 		// printToPdf builds its `.print` container and puts the note in it before it runs any
@@ -151,6 +158,7 @@ export function createProcessor(deps: ProcessorDeps) {
 		// what comes while its cache is read (block/edits.ts): so asked here, before anything yields.
 		// Its text is on screen in the note from this run, once it is loaded (D40).
 		const editing = deps.editing?.(ctx.sourcePath);
+		const order = ++made;
 		const prepared = prepare(readingViewSource(source, el, ctx), deps, ctx.sourcePath, place);
 
 		// The common case — no preamble configured anywhere — stays SYNCHRONOUS, and that is not an
@@ -159,9 +167,9 @@ export function createProcessor(deps: ProcessorDeps) {
 		// nothing to resolve would put every cache hit a microtask late and bring the placeholder
 		// back. A vault that does configure a preamble opts into the async path.
 		if (prepared instanceof Promise) {
-			return prepared.then((spec) => attach(spec, el, ctx, deps, deadline, editing));
+			return prepared.then((spec) => attach(spec, el, ctx, deps, deadline, editing, order));
 		}
-		return attach(prepared, el, ctx, deps, deadline, editing);
+		return attach(prepared, el, ctx, deps, deadline, editing, order);
 	};
 }
 
@@ -217,6 +225,7 @@ function attach(
 	deps: ProcessorDeps,
 	deadline: number | undefined,
 	editing: Making | undefined,
+	order: number,
 ): Promise<void> {
 	const report = deps.onBlock?.(spec, el);
 	{
@@ -232,6 +241,7 @@ function attach(
 			editing: editing === undefined ? undefined : () => editing.by(spec.key),
 			shown: editing === undefined ? undefined : () => editing.shown(spec.key),
 			startEngine: deps.startEngine,
+			place: order,
 			now: deps.now,
 			report,
 		});

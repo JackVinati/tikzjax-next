@@ -1148,6 +1148,70 @@ describe('depth cap', () => {
 	});
 });
 
+describe('a block’s place in its note', () => {
+	/**
+	 * Inside a band, the block made first in its note goes first, and only then the one submitted
+	 * first (SubmitOptions.place). On the iPhone after a start, the small diagram at the top of a note
+	 * was submitted 39 ms after the three heavier ones below it, its cache read the slowest of the
+	 * four, and was drawn last (internal/DECISIONS.md D40).
+	 */
+	const placed = (h: ReturnType<typeof harness>, key: string, priority: Priority, place?: number) =>
+		track(h.queue.submit(key, { id: key }, priority, 1000, place === undefined ? {} : { place }));
+
+	it('orders a band by place, then by submission, and the bands before any place', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		h.submit('blocker', 0);
+		await tick();
+		placed(h, 'c', 1, 3);
+		placed(h, 'x', 1);
+		placed(h, 'a', 1, 1);
+		placed(h, 'far', 2, 0);
+		placed(h, 'b', 1, 2);
+		placed(h, 'export', 0, 9);
+		for (const id of ['blocker', 'export', 'a', 'b', 'c', 'x']) {
+			h.runs.finish(id);
+			await tick();
+		}
+		expect(h.runs.started).toEqual(['blocker', 'export', 'a', 'b', 'c', 'x', 'far']);
+	});
+
+	it('takes the place of the highest block that wants a job', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		h.submit('blocker', 0);
+		await tick();
+		placed(h, 'b', 1, 2);
+		track(h.queue.submit('k', { id: 'k' }, 1, 1000, { place: 5, owner: 'pane one' }));
+		track(h.queue.submit('k', { id: 'k' }, 1, 1000, { place: 1, owner: 'pane two' }));
+		h.runs.finish('blocker');
+		await tick();
+		expect(h.runs.started).toEqual(['blocker', 'k']);
+	});
+
+	it('keeps a job the engine was stopped under ahead of every place in its band', async () => {
+		const h = harness({ concurrency: 1, depthCap: 64 });
+		h.submit('blocker', 0);
+		await tick();
+		placed(h, 'top', 1, 1);
+		track(h.queue.submit('again', { id: 'again' }, 1, 1000, { resumed: true, place: 7 }));
+		h.runs.finish('blocker');
+		await tick();
+		expect(h.runs.started).toEqual(['blocker', 'again']);
+	});
+
+	it('turns away the lowest on the page past the depth cap, in the least urgent band', async () => {
+		const h = harness({ concurrency: 1, depthCap: 2 });
+		h.submit('blocker', 0);
+		await tick();
+		const low = placed(h, 'low', 1, 3);
+		const top = placed(h, 'top', 1, 1);
+		const mid = placed(h, 'mid', 1, 2);
+		await tick();
+		expect(isQueueError(low.error, 'depth-cap')).toBe(true);
+		expect(top.status).toBe('pending');
+		expect(mid.status).toBe('pending');
+	});
+});
+
 describe('QueueError', () => {
 	it('is an Error with a matchable kind', () => {
 		const error = new QueueError('timeout', 'k');

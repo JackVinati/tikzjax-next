@@ -134,6 +134,18 @@ export interface SubmitOptions {
 	resumed?: boolean | undefined;
 
 	/**
+	 * Where the caller's block is in its note, as the order the processor made blocks in: inside a
+	 * band the lower goes first, and only then the order of submission. Omitted: after every block
+	 * that gave one, in the order submitted.
+	 *
+	 * A block is submitted once its cache has been read and the viewport gate has let it through, and
+	 * how long that takes says nothing of where the reader is: on the iPhone after a start, the small
+	 * diagram at the top of a note was submitted 39 ms after the three heavier ones below it, and was
+	 * drawn after all three (internal/DECISIONS.md D40).
+	 */
+	place?: number | undefined;
+
+	/**
 	 * Called once when the job this caller is waiting for starts — at once, if it already has, with
 	 * `joined` true: the caller then shares a compile that was under way before it asked, whose times
 	 * are that compile's and not its own (the diagnostics view says so).
@@ -169,6 +181,11 @@ interface Entry<J, T> {
 	job: J;
 	priority: Priority;
 	timeoutMs: number;
+	/**
+	 * Where the highest block that wants it is in its note (SubmitOptions.place): inside a band, before
+	 * `seq`. A resumed job's is ahead of every block's, so that it goes ahead of its band.
+	 */
+	place: number;
 	/** Monotonic submission order: the FIFO tiebreak inside a priority band. Never a timestamp. */
 	seq: number;
 	/**
@@ -198,6 +215,19 @@ interface Entry<J, T> {
 	promise: Promise<T>;
 	resolve: (value: T) => void;
 	reject: (error: unknown) => void;
+}
+
+/** Whether `a` goes before `b`: a more urgent band, then higher in its note, then submitted earlier. */
+function before<J, T>(a: Entry<J, T>, b: Entry<J, T>): boolean {
+	if (a.priority !== b.priority) return a.priority < b.priority;
+	if (a.place !== b.place) return a.place < b.place;
+	return a.seq < b.seq;
+}
+
+/** A caller's place in its note (SubmitOptions.place): a resumed job's is ahead of every block's. */
+function placeOf(opts: SubmitOptions | undefined): number {
+	if (opts?.resumed === true) return Number.NEGATIVE_INFINITY;
+	return opts?.place ?? Number.POSITIVE_INFINITY;
 }
 
 /** Folded rather than thrown, so the losing side of the race can never be an unhandled rejection. */
@@ -342,6 +372,8 @@ export class RenderQueue<J, T> {
 			// job submitted before this one. Priority stops mattering once the job has started; the
 			// timeout does not, and `start` re-arms its timer to honour a raise.
 			if (priority < existing.priority) existing.priority = priority;
+			// A job is as high in its note as the highest block that wants it.
+			existing.place = Math.min(existing.place, placeOf(opts));
 			if (timeoutMs > existing.timeoutMs) existing.timeoutMs = timeoutMs;
 			if (opts?.uncapped === true || opts?.resumed === true) existing.uncapped = true;
 			return existing.promise;
@@ -360,6 +392,7 @@ export class RenderQueue<J, T> {
 			job,
 			priority,
 			timeoutMs,
+			place: placeOf(opts),
 			seq: resumed ? this.resumedSeq++ : this.seq++,
 			owners: new Map([[owner, opts?.onStart]]),
 			uncapped: opts?.uncapped === true || resumed,
@@ -570,9 +603,10 @@ export class RenderQueue<J, T> {
 	}
 
 	/**
-	 * Overflow rejects the LEAST urgent waiting job — lowest priority band, and within it the most
-	 * recently added. A 200-diagram note therefore keeps the work nearest the viewport and hands
-	 * the rest back as `depth-cap` for a "Render diagram" button, instead of committing to hours.
+	 * Overflow rejects the LEAST urgent waiting job — lowest priority band, and within it the lowest in
+	 * its note, then the most recently added. A 200-diagram note therefore keeps the work nearest the
+	 * viewport and hands the rest back as `depth-cap` for a "Render diagram" button, instead of
+	 * committing to hours.
 	 */
 	private enforceDepthCap(): void {
 		// Uncapped jobs are bounded some other way — an export by its budget, a resumed job by the
@@ -592,11 +626,7 @@ export class RenderQueue<J, T> {
 
 	private nextToStart(): Entry<J, T> | undefined {
 		let best: Entry<J, T> | undefined;
-		for (const entry of this.pending) {
-			if (best === undefined) best = entry;
-			else if (entry.priority < best.priority) best = entry;
-			else if (entry.priority === best.priority && entry.seq < best.seq) best = entry;
-		}
+		for (const entry of this.pending) if (best === undefined || before(entry, best)) best = entry;
 		return best;
 	}
 
@@ -605,9 +635,7 @@ export class RenderQueue<J, T> {
 		let worst: Entry<J, T> | undefined;
 		for (const entry of this.pending) {
 			if (entry.uncapped) continue;
-			if (worst === undefined) worst = entry;
-			else if (entry.priority > worst.priority) worst = entry;
-			else if (entry.priority === worst.priority && entry.seq > worst.seq) worst = entry;
+			if (worst === undefined || before(worst, entry)) worst = entry;
 		}
 		return worst;
 	}
