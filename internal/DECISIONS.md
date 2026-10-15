@@ -1457,7 +1457,8 @@ Switching notes quickly on a cold engine, on the phone, is in `TODO.md` §9.
 
 **Amended by D40.** In the same window, started and not yet in the engine, a job also gives its slot
 to a more urgent one and goes back in line, aborted with `cancelled` after the more urgent job has
-reached the host, so that a start is kept here too.
+reached the host, so that a start is kept here too. What was read of its stored run is kept for the
+next job that would read it, the job itself as it starts again.
 
 Tests: `test/queue.test.ts` (dropped before the engine has it; kept once it has it, or while another
 caller wants it; a caller asking again at once gets a job of its own; the randomised interleavings
@@ -2888,6 +2889,11 @@ all was not. And the diagnostics say each way a run fails to get from a diagram 
 why a stored run was not sent with a diagram, what each engine handed over and what of that was
 dropped or failed, and what the store kept and refused, and why.
 
+**Amended by D40.** A run read from storage for a job the queue took back before an engine had it, as
+one that gave its slot to a diagram higher in the note, is kept by the host for the next job that would
+read it, rather than read again with the engine idle; at most what one engine may hold of saved runs,
+and only while the engines run.
+
 **Only when it is cheaper.** A run is sent, and kept at all, only when putting it back is likely to
 cost less than its preamble and its save did in the engine that saved it, which the worker measures
 and hands over with it. Putting back is estimated as a time to read anything from IndexedDB, 12 ms,
@@ -3830,10 +3836,11 @@ start, and what the waited step says of the edit then, is for the maintainer's n
 ## D40 — What 0.2.1-beta.6 did on the maintainer's devices: Obsidian's own edit at a start, and a phone that drew the diagram at the top last
 
 **Amends D22 and D39 (when a block debounces), D25 (the window in which a job is dropped now also
-gives up its slot), D24's one slot on a phone (which job holds it) and D21 (what the diagnostics say),
-and DESIGN.md §3.3, §5.1 and §7.6. Found by the maintainer testing 0.2.1-beta.6 on the Windows
-desktop of D39, Obsidian 1.14.4 with two engines, and on the iPhone 16 Pro of D38, iOS 27.0.1,
-Obsidian 1.14.5, the JIT on. Date of record: 2026-10-15.**
+gives up its slot), D24's one slot on a phone (which job holds it), D36 (a run read for a job taken
+back is kept) and D21 (what the diagnostics say), and DESIGN.md §3.3, §5.1 and §7.6. Found by the
+maintainer testing 0.2.1-beta.6 on the Windows desktop of D39, Obsidian 1.14.4 with two engines, and
+on the iPhone 16 Pro of D38, iOS 27.0.1, Obsidian 1.14.5, the JIT on; its first build reviewed twice,
+and what the reviews found is said where it changed the rule. Date of record: 2026-10-15.**
 
 The maintainer's readings, from the diagnostics view's Copy, are the only device figures here. What
 Obsidian does is read in its 1.14.4 desktop bundle (`app.js`, bounded searches of the minified code),
@@ -4104,7 +4111,10 @@ time to the last start, also for a block that joined the job before it gave its 
 place handed to the queue).
 
 **What it costs.** `main.js` grows by 1,814 bytes for the first half, and 233 for the order in the
-note and 727 for the slot: 2,774 in all, from 0.2.1-beta.6's 12,230,424. The worker does not change,
+note and 727 for the slot: 2,774 before review. Its changes add 1,295 more: 269 for the diagrams the
+cache does not hold, 147 for the times on screen kept apart, 23 for the `nocache` block's wait and
+874 for the kept reads, less 18 for the joined compile. 4,069 in all, from 0.2.1-beta.6's 12,230,424
+to 12,234,493. The worker does not change,
 nor does anything `test/fixtures/golden/REVISION.json` records: diagrams draw as before, and stay
 cached.
 
