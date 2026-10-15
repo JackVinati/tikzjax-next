@@ -2,7 +2,7 @@ import { openDB } from 'idb';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { installFakeIndexedDB } from './support/fake-indexeddb';
 import { RunStore, type StoredRunInfo } from '../src/cache/runs';
-import type { SavedRunMessage } from '../engine-src/protocol';
+import type { SavedRunMessage, StoredRun } from '../engine-src/protocol';
 
 /*
  * Saved preambles kept across the engine's stops (src/cache/runs.ts, internal/DECISIONS.md D36),
@@ -42,6 +42,12 @@ function saved(route: string, bytes: number, extra: Partial<SavedRunMessage> = {
 
 const keys = (name: string): string[] => [...fake.records(DB, name).keys()].map(String).sort();
 
+/** The run `read` gave, or undefined where it gave none, or said why it would not. */
+async function readRun(name: string): Promise<StoredRun | undefined> {
+	const run = await store.read(name);
+	return typeof run === 'object' ? run : undefined;
+}
+
 beforeEach(() => {
 	fake.reset();
 	clock = 1000;
@@ -58,13 +64,21 @@ describe('RunStore — keeping and reading', () => {
 		await store.keep(saved('r1', 1000));
 		expect(keys('runs')).toEqual(['engine-a/r1']);
 		expect(keys('index')).toEqual(['engine-a/r1']);
-		const one = await store.read('r1');
-		const two = await store.read('r1');
+		const one = await readRun('r1');
+		const two = await readRun('r1');
 		expect(one?.data.byteLength).toBe(1000);
 		expect(one?.compressed).toBe(true);
 		expect(one?.rawBytes).toBe(3000);
 		expect(one?.data).not.toBe(two?.data);
-		expect(store.stats()).toEqual({ available: true, read: true, runs: 1, bytes: 1000, errors: 0 });
+		expect(store.stats()).toEqual({
+			available: true,
+			read: true,
+			runs: 1,
+			bytes: 1000,
+			errors: 0,
+			kept: 1,
+			refused: {},
+		});
 	});
 
 	it('reads nothing for a name it does not hold', async () => {
@@ -77,7 +91,7 @@ describe('RunStore — keeping and reading', () => {
 		store = make();
 		await store.load();
 		expect(store.info('r1')?.bytes).toBe(1000);
-		expect((await store.read('r1'))?.data.byteLength).toBe(1000);
+		expect((await readRun('r1'))?.data.byteLength).toBe(1000);
 	});
 });
 
@@ -216,7 +230,7 @@ describe('RunStore — storage that refuses', () => {
 		await store.keep(saved('r2', 1000));
 		expect(keys('runs')).toEqual(['engine-a/a']);
 		// What is stored is still read and sent.
-		expect((await store.read('a'))?.data.byteLength).toBe(1000);
+		expect((await readRun('a'))?.data.byteLength).toBe(1000);
 		// Clearing gives it another chance.
 		await store.clear();
 		expect(store.writable).toBe(true);
@@ -390,9 +404,10 @@ describe('RunStore — whether a run is worth putting back', () => {
 		await store.keep(saved('big', 2 * MIB, { preambleMs: 100, saveMs: 0 }));
 		const run = { bytes: 2 * MIB, rawBytes: 6 * MIB };
 		for (let i = 0; i < 20; i++) store.measured(run, 400, 1000);
-		expect(await store.read('big')).toBeUndefined();
+		// Not sent, and says why.
+		expect(await store.read('big')).toBe('not-worth');
 		let tries = 1;
-		while ((await store.read('big')) === undefined && tries < 50) tries++;
+		while ((await store.read('big')) === 'not-worth' && tries < 50) tries++;
 		expect(tries).toBeGreaterThan(1);
 		expect(tries).toBeLessThan(50);
 	});
@@ -402,6 +417,62 @@ describe('RunStore — whether a run is worth putting back', () => {
 		for (let i = 0; i < 20; i++) store.measured(run, 1000, 3000);
 		await store.keep(saved('r1', MIB, { preambleMs: 200, saveMs: 10 }));
 		expect(keys('runs')).toEqual(['engine-a/r1']);
+	});
+});
+
+/*
+ * The maintainer's iPhone said of circuitikz's diagram "preamble saved in 3 ms, not kept: no room",
+ * and nothing said whether its run reached the store, nor what the store made of it: the store now
+ * counts what it kept this session and what it refused, by why (internal/DECISIONS.md D39).
+ */
+describe('RunStore — what it says it kept and refused', () => {
+	const refused = () => store.stats().refused;
+
+	it('counts each run kept, and each refused with why', async () => {
+		budget = 3000;
+		await store.keep(saved('heavy', 1000, { preambleMs: 300 }));
+		await store.keep(saved('mid', 1000, { preambleMs: 100 }));
+		await store.keep(saved('next', 1000, { preambleMs: 60 }));
+		// Larger than the whole budget.
+		await store.keep(saved('big', 4000));
+		// Not worth putting back.
+		await store.keep(saved('cheap', 1000, { preambleMs: 1, saveMs: 1 }));
+		// Would itself go before the runs it would make room from.
+		await store.keep(saved('light', 1000, { preambleMs: 15 }));
+		expect(store.stats().kept).toBe(3);
+		expect(refused()).toEqual({ 'too-large': 1, 'not-worth': 1, 'goes-first': 1 });
+	});
+
+	it('counts a run saved before a clear and handed over after it', async () => {
+		await store.load();
+		await store.clear();
+		await store.keep(saved('before', 1000, { epoch: 0 }));
+		expect(refused()).toEqual({ cleared: 1 });
+	});
+
+	it('counts the runs storage had no room for, and those it refused otherwise', async () => {
+		await store.keep(saved('a', 1000));
+		fake.failNextWrite(DB, 'index', new DOMException('refused', 'DataError'));
+		await store.keep(saved('b', 1000));
+		fake.failNextWrite(DB, 'runs', new DOMException('full', 'QuotaExceededError'));
+		await store.keep(saved('big', 2000));
+		// Out of room for the session: every run after it too.
+		await store.keep(saved('c', 1000));
+		expect(store.stats().kept).toBe(1);
+		expect(refused()).toEqual({ failed: 1, full: 2 });
+	});
+
+	it('counts the runs handed over while storage will not open', async () => {
+		fake.failOpens(DB);
+		await store.keep(saved('r1', 1000));
+		expect(refused()).toEqual({ unavailable: 1 });
+	});
+
+	it('says a read that failed is why a stored run was not sent', async () => {
+		await store.keep(saved('r1', 1000));
+		(store as unknown as { run: () => Promise<never> }).run = () => Promise.reject(new Error('gone'));
+		expect(await store.read('r1')).toBe('read-failed');
+		expect(store.stats().errors).toBe(1);
 	});
 });
 

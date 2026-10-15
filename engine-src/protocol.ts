@@ -74,7 +74,11 @@ export interface RenderRequest {
 	stored?: StoredRun | undefined;
 	/**
 	 * The host keeps the runs a worker saves: once the render has replied, the worker hands over the
-	 * run it saved, if it saved one the host can name (SavedRunMessage). Absent is false.
+	 * run it saved, if it saved one the host can name (SavedRunMessage). Absent is false. A run the
+	 * worker could not keep itself is saved for this alone, once a name in the worker's life, again
+	 * only after its hand-over was dropped for room or the store was cleared, and not where a stored
+	 * run sent with the render could not be put back for want of memory (internal/DECISIONS.md D39):
+	 * the host asks only while none is stored under the diagram's name.
 	 */
 	persist?: boolean | undefined;
 	/**
@@ -287,11 +291,29 @@ export interface RenderTimings {
 	saveMs?: number | undefined;
 	/**
 	 * The first pass was saved, in saveMs, and not kept: within the budget there was no room for it,
-	 * however much of what the worker held could go (engine-src/snapshot.ts SnapshotCache).
+	 * however much of what the worker held could go (engine-src/snapshot.ts SnapshotCache). Handed to
+	 * the host all the same where it asked for the run (`persist`), and let go once it was (D39).
 	 */
 	saveNotKept?: boolean | undefined;
 	/** Saving the first pass failed, and nothing was kept; the diagram is drawn as without it. */
 	saveFailed?: boolean | undefined;
+	/**
+	 * The run saved, in saveMs, is to be handed to the host to store (RenderRequest.persist), kept here
+	 * or not: what became of it, the engine's hand-overs say (SnapshotState.handedOver), and the
+	 * store's line (internal/DECISIONS.md D39).
+	 */
+	forStore?: boolean | undefined;
+}
+
+/**
+ * The runs a worker handed to the host to store in its life (SavedRunMessage), and the ones that did
+ * not reach it: dropped while waiting, as the runs waiting that it no longer keeps passed its budget,
+ * or failed on the way, in the writing out, the gzip or the post (worker.ts handOver).
+ */
+export interface HandOverCounts {
+	sent: number;
+	dropped: number;
+	failed: number;
 }
 
 /** What a worker holds of saved runs once it has replied, for the host to route by and to report. */
@@ -308,6 +330,8 @@ export interface SnapshotState {
 	 * them over first (FlushRequest). Absent from a worker before 0.2.1-beta.5.
 	 */
 	pending?: number | undefined;
+	/** Its hand-overs so far, before this render's own. Absent from a worker before 0.2.1. */
+	handedOver?: HandOverCounts | undefined;
 }
 
 export interface OkMessage {
@@ -384,6 +408,8 @@ export type StoredOutcome = 'used' | 'unneeded' | 'corrupt' | 'mismatch' | 'fail
  */
 export interface FlushedMessage {
 	type: 'flushed';
+	/** Its hand-overs so far, the last one's included. Absent from a worker before 0.2.1. */
+	handedOver?: HandOverCounts | undefined;
 }
 
 /**

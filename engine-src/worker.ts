@@ -72,6 +72,7 @@ import type {
 	EngineAssets,
 	ErrorMessage,
 	FlushedMessage,
+	HandOverCounts,
 	JitMessage,
 	OkMessage,
 	RenderOptions,
@@ -312,6 +313,44 @@ const saved = new SnapshotCache(0);
 
 /** Saves that failed in this worker's life and kept nothing (the save's try, in runPass). */
 let saveFailures = 0;
+
+/**
+ * The names of the runs this worker saved and could not keep, handed over or waiting to be: a run
+ * that does not fit beside the ones the worker is using is saved all the same where the host asks
+ * for it (`persist`), for the host to store, and let go here once handed over (render,
+ * internal/DECISIONS.md D39). A later diagram of the same preamble is not saved again for that in this
+ * worker's life, whatever the store made of the run: a save costs that diagram the save's time, a
+ * tenth of a second without the JIT. A hand-over dropped for room takes its name out again, so that
+ * the next diagram of that preamble saves it once more; and so does a clear of the store, or saved
+ * preambles turned off and on, after which the store holds none of them (`forgetSavedForStore`).
+ *
+ * A hand-over that fails does not: what fails it is memory, a run of 8.9 MiB written out on a phone
+ * short of it, or a gzip helper that took the bytes and died, and saving the run again at every
+ * diagram of its preamble would allocate it and its writing out once more each time, under the
+ * memory pressure that failed it. Until the review of this change it did.
+ */
+const savedForStore = new Set<string>();
+
+/** The store's epoch the last render that asked for its run carried (RenderRequest.epoch). */
+let storeEpoch: number | undefined;
+
+/**
+ * Forget the runs saved for the store, so that a preamble the worker cannot keep is saved for it
+ * again: the store was cleared since the last render that asked, which moved its epoch, or saved
+ * preambles are off, after which it holds none (D36).
+ */
+const forgetSavedForStore = (budget: number, persist: boolean, epoch: number): void => {
+	if (budget <= 0) savedForStore.clear();
+	if (!persist) return;
+	if (storeEpoch !== undefined && storeEpoch !== epoch) savedForStore.clear();
+	storeEpoch = epoch;
+};
+
+/** Keep `route` in savedForStore, which holds 256 names at most, the oldest let go first. */
+const markSavedForStore = (route: string): void => {
+	savedForStore.add(route);
+	if (savedForStore.size > 256) savedForStore.delete(savedForStore.values().next().value!);
+};
 
 /** What a first pass does about saved runs: start from one, or save itself where TeX stands. */
 type PassPlan =
@@ -677,6 +716,9 @@ interface Saving {
 const toHandOver: { id: number; epoch: number; saving: Saving }[] = [];
 let handingOver = false;
 
+/** The runs handed over in this worker's life, and those dropped or failed (SnapshotState.handedOver). */
+const handOvers: HandOverCounts = { sent: 0, dropped: 0, failed: 0 };
+
 /** Runs saved and not yet handed over, the one being among them (SnapshotState.pending). */
 const pendingHandOvers = (): number => toHandOver.length + (handingOver ? 1 : 0);
 
@@ -689,6 +731,8 @@ const pendingHandOvers = (): number => toHandOver.length + (handingOver ? 1 : 0)
  */
 const queueHandOver = (id: number, epoch: number, saving: Saving, budget: number): void => {
 	toHandOver.push({ id, epoch, saving });
+	// One it could not keep is not saved again for the store while this one is on its way (savedForStore).
+	if (!saved.holds(saving.run)) markSavedForStore(saving.run.route);
 	let extra = 0;
 	for (const next of toHandOver) if (!saved.holds(next.saving.run)) extra += next.saving.run.bytes;
 	for (let at = 0; extra > budget && at < toHandOver.length - 1;) {
@@ -699,6 +743,8 @@ const queueHandOver = (id: number, epoch: number, saving: Saving, budget: number
 		}
 		toHandOver.splice(at, 1);
 		extra -= next.saving.run.bytes;
+		savedForStore.delete(next.saving.run.route);
+		handOvers.dropped++;
 	}
 	if (!handingOver) void handOverAll();
 };
@@ -719,20 +765,21 @@ const handOverAll = async (): Promise<void> => {
 	try {
 		for (let next = nextHandOver(); next !== undefined; next = nextHandOver()) {
 			await whenNoRender();
-			await handOver(next.id, next.epoch, next.saving);
+			if (await handOver(next.id, next.epoch, next.saving)) handOvers.sent++;
+			else handOvers.failed++;
 		}
 	} finally {
 		handingOver = false;
-		post({ type: 'flushed' } satisfies FlushedMessage);
+		post({ type: 'flushed', handedOver: { ...handOvers } } satisfies FlushedMessage);
 	}
 };
 
 /**
  * Hand the host a run this worker saved, as bytes (./stored-run), gzipped where the platform has its
  * own gzip, to keep across the engine's stops. Nothing is sent when it fails: the run is then kept
- * only while this engine runs, as before D36.
+ * only while this engine runs, as before D36. Says whether it was sent.
  */
-const handOver = async (id: number, epoch: number, saving: Saving): Promise<void> => {
+const handOver = async (id: number, epoch: number, saving: Saving): Promise<boolean> => {
 	const spent = { ms: 0 };
 	try {
 		const t = performance.now();
@@ -746,7 +793,7 @@ const handOver = async (id: number, epoch: number, saving: Saving): Promise<void
 		if (hasNativeGzip()) {
 			// On the helper's thread, where there is one, while TeX goes on with the next diagram.
 			const elsewhere = await gzipElsewhere(raw);
-			if (elsewhere === null) return;
+			if (elsewhere === null) return false;
 			if (elsewhere !== undefined && 'data' in elsewhere) {
 				data = elsewhere.data;
 				compressed = true;
@@ -778,8 +825,10 @@ const handOver = async (id: number, epoch: number, saving: Saving): Promise<void
 			writeMs: Math.round(writeMs),
 		};
 		post(message, [message.run.data]);
+		return true;
 	} catch {
 		// Nothing handed over: the run stays this engine's alone.
+		return false;
 	}
 };
 
@@ -1209,6 +1258,7 @@ const snapshotState = (): SnapshotState => ({
 	held: saved.routes(),
 	bytes: saved.bytes,
 	failures: saveFailures,
+	handedOver: { ...handOvers },
 });
 
 /** A file the run wrote, or undefined if it never wrote one. */
@@ -1236,6 +1286,7 @@ async function render(
 	budget: number,
 	stored: StoredRun | undefined,
 	persist: boolean,
+	epoch: number,
 ): Promise<Rendered> {
 	const started = performance.now();
 	const log: string[] = [];
@@ -1272,6 +1323,7 @@ async function render(
 	// the .aux the first wrote.
 	saved.setBudget(budget);
 	saved.tick();
+	forgetSavedForStore(budget, persist, epoch);
 	let firstPlan: PassPlan | undefined;
 	let resumable = budget > 0 ? saved.find(text, logging) : undefined;
 
@@ -1308,9 +1360,20 @@ async function render(
 		// Saved at a preamble's first diagram, not its second: waiting for a second sighting spared the
 		// first its save and cost a third of the resumes in a run of every fixture twice (D32). Whether
 		// or not the host can tell where its \begin{document} is (./document predictedPoint): the run is
-		// saved where TeX stands, under what TeX had read. Not when it could not be kept (wants).
+		// saved where TeX stands, under what TeX had read. Not when it could not be kept (wants), unless
+		// the host asks for it to store (`persist`), which it does while none is stored under its name,
+		// and this worker has not saved one of that name for it already (savedForStore): a run that does
+		// not fit beside the ones the worker is using, as circuitikz's 8.9 MiB may not at a phone's 12,
+		// is then handed over like any other and let go here (D39). Until then it was not saved at all
+		// where `wants` said no, and a note that filled the worker before it compiled it again in every
+		// session. Not where the stored run sent with this render could not be put back for want of
+		// memory: the store has that run, and keeps it, and allocating it again here is what just failed.
 		const route = routeOf(text, logging);
-		if (saved.wants(route)) firstPlan = { kind: 'save', input, text, logging, route, log, missing };
+		if (
+			saved.wants(route) ||
+			(persist && route !== undefined && storedOutcome !== 'failed' && !savedForStore.has(route))
+		)
+			firstPlan = { kind: 'save', input, text, logging, route, log, missing };
 	}
 
 	/** Where the first pass's transcript ends, so its diagnosis can never be read out of pass two. */
@@ -1369,11 +1432,11 @@ async function render(
 	}
 
 	const durationMs = Math.round(performance.now() - started);
-	const timings = rounded(spent);
 	// The run this render saved, for the host to keep across the engine's stops (D36): only one the
 	// host named, which it can find again for a later diagram, and only when it keeps them.
 	const saving =
 		persist && firstPlan?.kind === 'save' && firstPlan.route !== undefined ? firstPlan.saved : undefined;
+	const timings: RenderTimings = { ...rounded(spent), ...(saving === undefined ? {} : { forStore: true }) };
 	const done = (reply: OkMessage | ErrorMessage): Rendered => ({ reply, handOver: saving });
 	const gotSvg = reported.svg.includes('<svg');
 	let transcript = readTranscript(log.slice(0, firstEnd));
@@ -1539,7 +1602,8 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 	// so, and the host stops it then, or when its limit runs out (worker-host.ts `drain`). At once when
 	// none is waiting; else when the last has been (handOverAll).
 	if (request.type === 'flush') {
-		if (pendingHandOvers() === 0) post({ type: 'flushed' } satisfies FlushedMessage);
+		if (pendingHandOvers() === 0)
+			post({ type: 'flushed', handedOver: { ...handOvers } } satisfies FlushedMessage);
 		return;
 	}
 	if (request.type === 'ping') {
@@ -1558,6 +1622,7 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 			request.snapshots ?? 0,
 			request.stored,
 			request.persist === true,
+			request.epoch ?? 0,
 		).then(
 			({ reply, handOver: saving }) => {
 				// How many runs are still to be handed over, this render's among them: an engine with none

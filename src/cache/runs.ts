@@ -59,6 +59,21 @@ export interface StoredRunInfo {
 	lastUsed: number;
 }
 
+/**
+ * Why the store did not keep a run a worker handed it (`keep`): not worth putting back by the figures
+ * a session starts from, larger than the whole budget, one that would itself go before the runs it
+ * would make room from, storage out of room, the store cleared since its render was posted, a write
+ * that failed otherwise, or storage that will not open.
+ */
+export type StoreRefusal =
+	'not-worth' | 'too-large' | 'goes-first' | 'full' | 'cleared' | 'failed' | 'unavailable';
+
+/**
+ * Why a stored run was not read for sending (`read`): putting it back looked dearer than its
+ * preamble (`worth`), or reading it failed.
+ */
+export type StoredMiss = 'not-worth' | 'read-failed';
+
 /** What the diagnostics view says of stored runs. */
 export interface StoredRunStats {
 	/** False once IndexedDB could not be opened this session. */
@@ -72,6 +87,12 @@ export interface StoredRunStats {
 	bytes: number;
 	/** Opens, reads and writes the browser refused this session, and runs that did not read back. */
 	errors: number;
+	/**
+	 * The runs handed to the store this session that it kept, and the ones it did not, by why
+	 * (internal/DECISIONS.md D39). Absent where nothing says.
+	 */
+	kept?: number | undefined;
+	refused?: Partial<Record<StoreRefusal, number>> | undefined;
 	/**
 	 * Saved preambles are turned off (Settings → Saved preambles), so that nothing is read, kept or
 	 * sent: said by the plugin, which has the switch.
@@ -159,6 +180,9 @@ export class RunStore {
 	 */
 	private writing: Promise<void> = Promise.resolve();
 	private errors = 0;
+	/** The runs kept this session, and the ones refused, by why (StoredRunStats). */
+	private kept = 0;
+	private readonly refused: Partial<Record<StoreRefusal, number>> = {};
 	/**
 	 * Moved by every `clear`, so that a run being kept, or an index being read, when the switch was
 	 * turned off or the cache cleared does not come back after it.
@@ -202,7 +226,20 @@ export class RunStore {
 			runs++;
 			bytes += info.bytes;
 		}
-		return { available: !this.disabled, read: this.index !== null, runs, bytes, errors: this.errors };
+		return {
+			available: !this.disabled,
+			read: this.index !== null,
+			runs,
+			bytes,
+			errors: this.errors,
+			kept: this.kept,
+			refused: { ...this.refused },
+		};
+	}
+
+	/** A run handed over was not kept, for `why`. */
+	private refuse(why: StoreRefusal): void {
+		this.refused[why] = (this.refused[why] ?? 0) + 1;
 	}
 
 	/**
@@ -283,16 +320,17 @@ export class RunStore {
 	}
 
 	/**
-	 * The run stored under `route`, worth sending (`worth`), with its bytes read; undefined if none is,
-	 * or it could not be read. Each call reads its own copy, which is transferred to a worker.
+	 * The run stored under `route`, worth sending (`worth`), with its bytes read; or why it is not
+	 * sent, for the diagnostics (StoredMiss); undefined if none is stored, or no longer. Each call
+	 * reads its own copy, which is transferred to a worker.
 	 */
-	async read(route: string): Promise<StoredRun | undefined> {
+	async read(route: string): Promise<StoredRun | StoredMiss | undefined> {
 		await this.load();
 		const info = this.index?.get(route);
 		if (info === undefined) return undefined;
 		if (!this.worth(info)) {
 			this.relax();
-			return undefined;
+			return 'not-worth';
 		}
 		let record: RunRecord | undefined;
 		try {
@@ -303,7 +341,7 @@ export class RunStore {
 			});
 		} catch {
 			this.errors++;
-			return undefined;
+			return 'read-failed';
 		}
 		// Not there, as when the browser evicted it, or not as long as it was stored: deleted, not sent.
 		if (!(record?.data instanceof ArrayBuffer) || record.data.byteLength !== info.bytes) {
@@ -320,6 +358,7 @@ export class RunStore {
 	 * (`worthKeeping`) and fits the budget, making room from the runs kept until the earliest
 	 * (`keptUntil`). A run larger than the whole budget is not kept, and evicts nothing, nor does one
 	 * that would itself go before the runs it would make room from. One keep at a time (`writing`).
+	 * Each run kept, and each refused with why, is counted for the diagnostics (StoredRunStats).
 	 */
 	keep(message: SavedRunMessage): Promise<void> {
 		// The store as it stood when the render that saved the run was posted: a worker hands its runs
@@ -333,7 +372,8 @@ export class RunStore {
 
 	private async write(message: SavedRunMessage, generation: number): Promise<void> {
 		await this.load();
-		if (!this.writable || this.index === null || this.generation !== generation) return;
+		if (this.generation !== generation) return this.refuse('cleared');
+		if (!this.writable || this.index === null) return this.refuse(this.full ? 'full' : 'unavailable');
 		const { run } = message;
 		const now = this.options.now();
 		const info: StoredRunInfo = {
@@ -349,7 +389,8 @@ export class RunStore {
 			lastUsed: now,
 		};
 		const budget = this.options.budget();
-		if (info.bytes > budget || !this.worthKeeping(info)) return;
+		if (info.bytes > budget) return this.refuse('too-large');
+		if (!this.worthKeeping(info)) return this.refuse('not-worth');
 
 		// The run kept until the earliest first, but never the one this replaces, which goes anyway;
 		// and if that is this run, it is not kept, and nothing is evicted for it.
@@ -360,15 +401,16 @@ export class RunStore {
 		const evicted: StoredRunInfo[] = [];
 		for (const other of others) {
 			if (total <= budget) break;
-			if (keptUntil(other) > keptUntil(info)) return;
+			if (keptUntil(other) > keptUntil(info)) return this.refuse('goes-first');
 			evicted.push(other);
 			total -= other.bytes;
 		}
 		try {
-			await this.put(info, run.data, evicted, generation);
+			this.wrote(await this.put(info, run.data, evicted, generation), generation);
 		} catch (error) {
 			if (!isQuotaError(error)) {
 				this.errors++;
+				this.refuse('failed');
 				return;
 			}
 			// Refused for room, which the browser counts for the whole origin, the diagram cache's
@@ -386,21 +428,31 @@ export class RunStore {
 			try {
 				if (freed < info.bytes) throw error;
 				await this.remove([...evicted, ...more], generation);
-				await this.put(info, run.data, [], generation);
+				this.wrote(await this.put(info, run.data, [], generation), generation);
 			} catch (again) {
 				this.errors++;
 				if (isQuotaError(again)) this.full = true;
+				this.refuse(isQuotaError(again) ? 'full' : 'failed');
 			}
 		}
 	}
 
-	/** Store `info`'s run and delete `evicted`, in one transaction, and say so in the index. */
+	/** A put came back: kept, or not, for a clear since `generation`, or storage that would not open. */
+	private wrote(kept: boolean, generation: number): void {
+		if (kept) this.kept++;
+		else this.refuse(this.generation === generation ? 'unavailable' : 'cleared');
+	}
+
+	/**
+	 * Store `info`'s run and delete `evicted`, in one transaction, and say so in the index. Says whether
+	 * it is stored: not where the store was cleared since `generation`.
+	 */
 	private async put(
 		info: StoredRunInfo,
 		data: ArrayBuffer,
 		evicted: readonly StoredRunInfo[],
 		generation: number,
-	): Promise<void> {
+	): Promise<boolean> {
 		const written = await this.run(async (db) => {
 			// Cleared since: transactions run in the order they are made, so one made from here on
 			// would land after the clear's.
@@ -418,9 +470,10 @@ export class RunStore {
 			});
 			return true;
 		});
-		if (written !== true || this.generation !== generation || this.index === null) return;
+		if (written !== true || this.generation !== generation || this.index === null) return false;
 		for (const other of evicted) this.index.delete(other.route);
 		this.index.set(info.route, info);
+		return true;
 	}
 
 	/** Delete `evicted`, in a transaction of their own, and say so in the index. */

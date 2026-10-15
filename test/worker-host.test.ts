@@ -1244,8 +1244,10 @@ describe('saved preambles kept across the engines’ stops', () => {
 		hold: Promise<void> | null = null;
 		/** Reads of these names held until released, or for good. */
 		readonly holdFor = new Map<string, Promise<void>>();
-		/** Stored, but not worth sending: the read gives nothing. */
+		/** Stored, but not worth sending: the read says so. */
 		worthless = false;
+		/** Stored, and the read fails. */
+		failRead = false;
 		load(): Promise<void> {
 			this.loads++;
 			return Promise.resolve();
@@ -1253,13 +1255,16 @@ describe('saved preambles kept across the engines’ stops', () => {
 		has(name: string): boolean {
 			return this.stored.has(name);
 		}
-		async read(name: string): Promise<StoredRun | undefined> {
+		async read(name: string): Promise<StoredRun | 'not-worth' | 'read-failed' | undefined> {
 			this.reads.push(name);
 			if (this.hold !== null) await this.hold;
 			const held = this.holdFor.get(name);
 			if (held !== undefined) await held;
-			const run = this.worthless ? undefined : this.stored.get(name);
-			return run === undefined ? undefined : { ...run, data: run.data.slice(0) };
+			const run = this.stored.get(name);
+			if (run === undefined) return undefined;
+			if (this.worthless) return 'not-worth';
+			if (this.failRead) return 'read-failed';
+			return { ...run, data: run.data.slice(0) };
 		}
 		keep(message: SavedRunMessage): Promise<void> {
 			this.kept.push(message);
@@ -1660,6 +1665,136 @@ describe('saved preambles kept across the engines’ stops', () => {
 		});
 		await tick();
 		expect(runs.usedFor).toEqual([route]);
+	});
+
+	/*
+	 * The maintainer's iPhone said of circuitikz's diagram "preamble saved in 3 ms, not kept: no room",
+	 * and nothing said whether a run was stored for it and not sent, nor why: each way a stored run is
+	 * not sent now says so with the diagram (internal/DECISIONS.md D39).
+	 */
+	describe('a stored run not sent', () => {
+		const timings = { resetMs: 1, texMs: 200, svgMs: 1, passes: 1, saveMs: 3, saveNotKept: true };
+		const answer = async (w: FakeWorker, at: number, extra: Partial<OkMessage> = {}) => {
+			reply(w, renders(w)[at]!.id, { timings, ...extra });
+			await tick();
+		};
+
+		it('says it was not worth sending, or its read failed', async () => {
+			const runs = new FakeRuns();
+			runs.stored.set(route, storedRun());
+			runs.worthless = true;
+			const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+			const a = send(host, 'a');
+			worker(0).boot();
+			await tick();
+			await answer(worker(0), 0);
+			expect(a.value?.timings?.storedNotSent).toBe('not-worth');
+			runs.worthless = false;
+			runs.failRead = true;
+			const b = send(host, 'b');
+			await tick();
+			await answer(worker(0), 1);
+			expect(b.value?.timings?.storedNotSent).toBe('read-failed');
+		});
+
+		it('says storage was slow, for a read that outlasted its wait and for the jobs after it', async () => {
+			const timers = new FakeTimers();
+			const runs = new FakeRuns();
+			runs.stored.set(route, storedRun());
+			runs.holdFor.set(route, never);
+			const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs, timers });
+			const a = send(host, 'a');
+			worker(0).boot();
+			await tick();
+			timers.advance(250);
+			await tick();
+			await answer(worker(0), 0);
+			expect(a.value?.timings?.storedNotSent).toBe('slow');
+			const b = send(host, 'b');
+			await tick();
+			await answer(worker(0), 1);
+			expect(b.value?.timings?.storedNotSent).toBe('slow');
+		});
+
+		it('says it could not be put back earlier for want of memory', async () => {
+			const runs = new FakeRuns();
+			runs.stored.set(route, storedRun());
+			const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+			const a = send(host, 'a');
+			worker(0).boot();
+			await tick();
+			await answer(worker(0), 0, { stored: 'failed' });
+			expect(a.value?.timings?.storedNotSent).toBeUndefined();
+			const b = send(host, 'b');
+			await tick();
+			await answer(worker(0), 1);
+			expect(b.value?.timings?.storedNotSent).toBe('unsendable');
+		});
+
+		it('says an engine held it when the diagram came, and let it go before it ran', async () => {
+			const runs = new FakeRuns();
+			runs.stored.set(route, storedRun());
+			const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+			send(host, 'a');
+			worker(0).boot();
+			await tick();
+			await answer(worker(0), 0, { snapshots: { held: [route], bytes: 1, failures: 0 } });
+			// Busy with another preamble's diagram, which lets the run go; the only engine there can be.
+			sendOther(host, 'b');
+			await tick();
+			const c = send(host, 'c');
+			await tick();
+			await answer(worker(0), 1, { snapshots: { held: [other], bytes: 1, failures: 0 } });
+			expect(renders(worker(0))[2]?.stored).toBeUndefined();
+			await answer(worker(0), 2);
+			expect(c.value?.timings?.storedNotSent).toBe('held');
+		});
+
+		it('says nothing of a run the engine it went to held, from which it resumed', async () => {
+			const runs = new FakeRuns();
+			runs.stored.set(route, storedRun());
+			const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+			send(host, 'a');
+			worker(0).boot();
+			await tick();
+			await answer(worker(0), 0, { snapshots: { held: [route], bytes: 1, failures: 0 } });
+			const b = send(host, 'b');
+			await tick();
+			await answer(worker(0), 1, {
+				timings: { resetMs: 1, texMs: 9, svgMs: 1, passes: 1, resumed: true },
+			});
+			expect(b.value?.timings?.storedNotSent).toBeUndefined();
+		});
+
+		it('says it was stored only after the diagram came', async () => {
+			const runs = new FakeRuns();
+			const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+			const a = send(host, 'a');
+			await tick();
+			// The read found none; an earlier diagram's run is stored before this one is posted.
+			runs.stored.set(route, storedRun());
+			worker(0).boot();
+			await tick();
+			expect(renders(worker(0))[0]?.persist).toBe(false);
+			await answer(worker(0), 0);
+			expect(a.value?.timings?.storedNotSent).toBe('late');
+		});
+	});
+
+	it('say in the report what each engine handed over to be stored, and dropped or failed', async () => {
+		const runs = new FakeRuns();
+		const host = new WorkerHost({ snapshotBudget: () => 12 * 1048576, runs });
+		send(host, 'a');
+		worker(0).boot();
+		await tick();
+		reply(worker(0), renders(worker(0))[0]!.id, {
+			snapshots: { held: [], bytes: 0, failures: 0, handedOver: { sent: 2, dropped: 1, failed: 0 } },
+		});
+		await tick();
+		expect(host.report().lives[0]?.handOvers).toEqual({ sent: 2, dropped: 1, failed: 0 });
+		// The last word, once it has handed over what was waiting.
+		worker(0).emit({ type: 'flushed', handedOver: { sent: 3, dropped: 1, failed: 1 } });
+		expect(host.report().lives[0]?.handOvers).toEqual({ sent: 3, dropped: 1, failed: 1 });
 	});
 
 	it('ask for no run to be written out again when one is stored and none was sent', async () => {

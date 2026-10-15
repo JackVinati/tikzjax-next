@@ -1003,7 +1003,7 @@ describe('the debounce', () => {
 		const child = new TikzBlock(
 			container(),
 			spec(),
-			deps({ queue, debounceMs: LONG, editing: () => false }),
+			deps({ queue, debounceMs: LONG, editing: () => ({ editing: false }) }),
 		);
 		child.onload();
 		await vi.waitFor(() => expect(bands).toEqual([1]));
@@ -1014,7 +1014,7 @@ describe('the debounce', () => {
 		const child = new TikzBlock(
 			container(),
 			spec(),
-			deps({ queue, debounceMs: LONG, editing: () => true }),
+			deps({ queue, debounceMs: LONG, editing: () => ({ editing: true }) }),
 		);
 		child.onload();
 		for (let i = 0; i < 20; i++) await Promise.resolve();
@@ -1027,13 +1027,17 @@ describe('the debounce', () => {
 
 	it('runs out for a block being typed in that the typing left alone, which is then queued as one in view', async () => {
 		const { queue, bands } = recordingBands();
-		const child = new TikzBlock(container(), spec(), deps({ queue, debounceMs: 1, editing: () => true }));
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ queue, debounceMs: 1, editing: () => ({ editing: true }) }),
+		);
 		child.onload();
 		await vi.waitFor(() => expect(bands).toEqual([1]));
 	});
 
 	it('asks whether the note is being typed in when the cache misses, not before', async () => {
-		const asked = vi.fn(() => false);
+		const asked = vi.fn(() => ({ editing: false }));
 		const child = new TikzBlock(
 			container(),
 			spec(),
@@ -1465,5 +1469,60 @@ describe('what a block reports when it comes to rest', () => {
 		// At rest, and once drawn.
 		await vi.waitFor(() => expect(reports).toHaveLength(3));
 		expect(reports.map((r) => r.state)).toEqual(['error', 'ok', 'ok']);
+	});
+
+	/*
+	 * The desktop's first diagrams after a start said "waited 300 ms", and nothing said which edit had
+	 * made them wait (internal/DECISIONS.md D39): the timings carry what the miss was told.
+	 */
+	it('with the edit of its note that made it wait, and none after a Retry, which is seen at the press', async () => {
+		const { reports, report } = reporting();
+		const { queue, runs } = realQueue();
+		const el = container();
+		const edit = { source: 'modify', at: 'before', ms: 120 } as const;
+		const child = new TikzBlock(
+			el,
+			spec(),
+			deps({ queue, report, debounceMs: 1, editing: () => ({ editing: true, edit }) }),
+		);
+		child.onload();
+		await vi.waitFor(() => expect(runs).toHaveLength(1));
+		runs[0]?.reject(new TexError('tex-error', [], 'Undefined control sequence.'));
+		await child.settled;
+		press(el, 'Retry');
+		await vi.waitFor(() => expect(runs).toHaveLength(2));
+		runs[1]?.resolve(RESULT);
+		await vi.waitFor(() => expect(reports).toHaveLength(3));
+		expect(reports[1]?.timings?.edit).toBeUndefined();
+
+		const { reports: first, report: firstReport } = reporting();
+		const typed = new TikzBlock(
+			container(),
+			spec(),
+			deps({
+				queue: answering(RESULT),
+				report: firstReport,
+				debounceMs: 1,
+				editing: () => ({ editing: true, edit }),
+			}),
+		);
+		typed.onload();
+		await typed.settled;
+		await vi.waitFor(() => expect(first).toHaveLength(2));
+		expect(first[0]?.timings?.edit).toEqual(edit);
+	});
+
+	it('with an edit after the block was made, which did not make it wait', async () => {
+		const { reports, report } = reporting();
+		const edit = { source: 'editor', at: 'after', ms: 40 } as const;
+		const child = new TikzBlock(
+			container(),
+			spec(),
+			deps({ queue: answering(RESULT), report, editing: () => ({ editing: false, edit }) }),
+		);
+		child.onload();
+		await child.settled;
+		await vi.waitFor(() => expect(reports).toHaveLength(2));
+		expect(reports[0]?.timings).toMatchObject({ waitedMs: 0, edit });
 	});
 });

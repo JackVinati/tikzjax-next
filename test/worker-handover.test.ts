@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import type {
 	ErrorMessage,
+	FlushedMessage,
 	OkMessage,
 	RenderRequest,
 	SavedRunMessage,
@@ -25,6 +26,8 @@ import { buildWorker } from '../scripts/engine-assets.mjs';
 
 const inbox: WorkerResponse[] = [];
 let handler: ((event: { data: WorkerRequest }) => void) | null = null;
+/** Set to refuse every run handed over, as a post that cannot clone or allocate it does. */
+let refuseRuns = false;
 let first: (request: WorkerRequest) => void;
 let second: (request: WorkerRequest) => void;
 
@@ -82,7 +85,11 @@ const handed = (reply: { id: number }) =>
 beforeAll(async () => {
 	const { source, assets } = await buildWorker('.');
 	(globalThis as { self?: unknown }).self = {
-		postMessage: (message: WorkerResponse) => inbox.push(message),
+		postMessage: (message: WorkerResponse) => {
+			if (refuseRuns && message.type === 'saved-run')
+				throw new DOMException('refused', 'DataCloneError');
+			inbox.push(message);
+		},
 		setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
 		set onmessage(fn: typeof handler) {
 			handler = fn;
@@ -99,6 +106,8 @@ describe('the runs a worker hands over', () => {
 	it('are handed over from the reply on, while the next diagram is under way, and all before it says flushed', async () => {
 		const a = await render(first, DIAGRAM(1), SIUNITX, { persist: true, epoch: 4 });
 		expect(a.timings?.saveMs).toBeDefined();
+		// Said with the diagram: its run is sent to be stored (internal/DECISIONS.md D39).
+		expect(a.timings?.forStore).toBe(true);
 		// The reply says the run is still to be handed over, for the host to wait for it before a stop.
 		expect(a.snapshots?.pending).toBe(1);
 		// The next diagram, of another preamble, posted at once, as the queue posts the next job.
@@ -120,9 +129,13 @@ describe('the runs a worker hands over', () => {
 		// Unasked, too, once the last had been handed over: the host then stops it at once.
 		const last = inbox.indexOf(handed(bReply)!);
 		expect(inbox.slice(last).some((m) => m.type === 'flushed')).toBe(true);
-		// And a diagram after them, whose run is not handed over, says none is waiting.
+		// Counted, for the engine's line in the diagnostics.
+		expect((flushed as FlushedMessage).handedOver).toEqual({ sent: 2, dropped: 0, failed: 0 });
+		// And a diagram after them, whose run is not handed over, says none is waiting, and that none is.
 		const c = await render(first, DIAGRAM(3), SIUNITX, { persist: false });
 		expect(c.snapshots?.pending).toBe(0);
+		expect(c.snapshots?.handedOver).toEqual({ sent: 2, dropped: 0, failed: 0 });
+		expect(c.timings?.forStore).toBeUndefined();
 	}, 120_000);
 
 	it('says flushed at once when it has nothing to hand over', async () => {
@@ -149,6 +162,170 @@ describe('a diagram that resumes from a stored run', () => {
 		const own = await render(first, DIAGRAM(6), PLAIN);
 		expect(own.timings?.resumed).toBe(true);
 		expect(own.timings?.fromStore).toBeUndefined();
+	}, 120_000);
+});
+
+/*
+ * A run that does not fit beside the ones the worker is using, as circuitikz's 8.9 MiB may not at a
+ * phone's 12, is let go at once (D32). Where the host asks for it, it is handed over all the same, for
+ * later sessions to start from; and where the worker is too full to save one at all, it is saved for
+ * that alone, once (internal/DECISIONS.md D39). Here at a budget of 1 MiB, which holds plain TikZ's
+ * run and nothing beside it.
+ */
+describe('a run the worker cannot keep', () => {
+	const SMALL = 1024 * 1024;
+
+	it('is handed over where the host asks for it, and let go', async () => {
+		const worker = await another();
+		const reply = await render(worker, DIAGRAM(30), SIUNITX, {
+			snapshots: SMALL,
+			persist: true,
+			epoch: 9,
+		});
+		expect(reply.timings).toMatchObject({ saveNotKept: true });
+		expect(reply.snapshots?.held).toHaveLength(0);
+		expect(reply.snapshots?.pending).toBe(1);
+		const message = await waitFor(() => handed(reply));
+		expect(message.epoch).toBe(9);
+		// What it handed over starts a diagram of that preamble in a worker that holds none.
+		const back = await render(await another(), DIAGRAM(31), SIUNITX, { stored: message.run });
+		expect(back.timings).toMatchObject({ resumed: true, restored: true });
+	}, 120_000);
+
+	it('is saved for the host where the worker is too full to save it for itself, once a name', async () => {
+		const worker = await another();
+		const plain = await render(worker, DIAGRAM(32), PLAIN, { snapshots: SMALL, persist: true });
+		expect(plain.snapshots?.held).toHaveLength(1);
+		// Resumed from, so that it may not go to make room: what is left is less than any run saved yet.
+		const resumed = await render(worker, DIAGRAM(33), PLAIN, { snapshots: SMALL });
+		expect(resumed.timings?.resumed).toBe(true);
+
+		// Not asked for: nothing is saved, as before.
+		const unasked = await render(worker, DIAGRAM(34), SIUNITX, { snapshots: SMALL });
+		expect(unasked.timings?.saveMs).toBeUndefined();
+
+		// Asked for, while none is stored under its name: saved, not kept, and handed over.
+		const asked = await render(worker, DIAGRAM(35), SIUNITX, { snapshots: SMALL, persist: true });
+		expect(asked.timings).toMatchObject({ saveNotKept: true });
+		expect(asked.snapshots?.held).toEqual(plain.snapshots?.held);
+		const message = await waitFor(() => handed(asked));
+		const back = await render(await another(), DIAGRAM(36), SIUNITX, { stored: message.run });
+		expect(back.timings).toMatchObject({ resumed: true, restored: true });
+
+		// Asked for again, as when the store did not keep it: not saved again in this worker's life.
+		const again = await render(worker, DIAGRAM(37), SIUNITX, { snapshots: SMALL, persist: true });
+		expect(again.timings?.saveMs).toBeUndefined();
+		expect(handed(again)).toBeUndefined();
+		// And the run it keeps is still resumed from.
+		const still = await render(worker, DIAGRAM(38), PLAIN, { snapshots: SMALL });
+		expect(still.timings?.resumed).toBe(true);
+	}, 120_000);
+
+	/** A worker at 1 MiB that holds plain TikZ's run and has resumed from it: too full to save another. */
+	async function full(): Promise<(request: WorkerRequest) => void> {
+		const worker = await another();
+		const plain = await render(worker, DIAGRAM(40), PLAIN, { snapshots: SMALL, persist: true });
+		await waitFor(() => handed(plain));
+		const resumed = await render(worker, DIAGRAM(41), PLAIN, { snapshots: SMALL });
+		expect(resumed.timings?.resumed).toBe(true);
+		return worker;
+	}
+
+	/** Every message after the `at`-th, once a `flushed` has come among them. */
+	const flushedAfter = (at: number) =>
+		waitFor(() => (inbox.slice(at).some((m) => m.type === 'flushed') ? true : undefined));
+
+	it('is not saved again for the host after its hand-over failed', async () => {
+		// What fails a hand-over is memory: saving the run again at every diagram of its preamble would
+		// allocate it once more each time, under the pressure that failed it.
+		const worker = await full();
+		refuseRuns = true;
+		try {
+			const at = inbox.length;
+			const asked = await render(worker, DIAGRAM(42), SIUNITX, { snapshots: SMALL, persist: true });
+			expect(asked.timings).toMatchObject({ saveNotKept: true });
+			await flushedAfter(at);
+			expect(handed(asked)).toBeUndefined();
+			// Counted, for the engine's line in the diagnostics.
+			const flushed = inbox.slice(at).find((m): m is FlushedMessage => m.type === 'flushed');
+			expect(flushed?.handedOver?.failed).toBe(1);
+		} finally {
+			refuseRuns = false;
+		}
+		const again = await render(worker, DIAGRAM(43), SIUNITX, { snapshots: SMALL, persist: true });
+		expect(again.timings?.saveMs).toBeUndefined();
+	}, 120_000);
+
+	it('is saved again once the store was cleared, or saved preambles were off', async () => {
+		const worker = await full();
+		const first = await render(worker, DIAGRAM(44), SIUNITX, {
+			snapshots: SMALL,
+			persist: true,
+			epoch: 1,
+		});
+		expect(first.timings).toMatchObject({ saveNotKept: true });
+		await waitFor(() => handed(first));
+		const same = await render(worker, DIAGRAM(45), SIUNITX, {
+			snapshots: SMALL,
+			persist: true,
+			epoch: 1,
+		});
+		expect(same.timings?.saveMs).toBeUndefined();
+		// Cleared: the store's epoch moved, and it holds none.
+		const cleared = await render(worker, DIAGRAM(46), SIUNITX, {
+			snapshots: SMALL,
+			persist: true,
+			epoch: 2,
+		});
+		expect(cleared.timings).toMatchObject({ saveNotKept: true });
+		await waitFor(() => handed(cleared));
+		// Off, and on again, which deletes what was stored.
+		await render(worker, DIAGRAM(47), PLAIN, { snapshots: 0 });
+		const on = await render(worker, DIAGRAM(48), SIUNITX, { snapshots: SMALL, persist: true, epoch: 2 });
+		expect(on.timings?.saveMs).toBeDefined();
+	}, 120_000);
+
+	it('is not saved for the host where the stored run sent could not be put back for want of memory', async () => {
+		const worker = await full();
+		// More than any array can hold: the inflate cannot allocate it, a RangeError, as on a phone short
+		// of memory, and the run stays stored.
+		const stored = { route: 'unused', data: new ArrayBuffer(16), compressed: true, rawBytes: 2 ** 40 };
+		const failed = await render(worker, DIAGRAM(49), SIUNITX, {
+			snapshots: SMALL,
+			persist: true,
+			stored,
+		});
+		expect(failed.stored).toBe('failed');
+		expect(failed.timings?.saveMs).toBeUndefined();
+		// Without one, it is saved for the host as before.
+		const asked = await render(worker, DIAGRAM(50), SIUNITX, { snapshots: SMALL, persist: true });
+		expect(asked.timings).toMatchObject({ saveNotKept: true });
+	}, 120_000);
+
+	it('is saved again for the host once its hand-over was dropped for room', async () => {
+		// Its messages to itself held, the worker's first hand-over never finishes, and the runs it
+		// cannot keep wait behind it: two of them pass its budget, and the older is dropped.
+		const held: (() => void)[] = [];
+		class HeldChannel {
+			readonly port1: { onmessage: ((event: { data: unknown }) => void) | null } = { onmessage: null };
+			readonly port2 = {
+				postMessage: (data: unknown) => void held.push(() => this.port1.onmessage?.({ data })),
+			};
+		}
+		const worker = await withGlobals({ MessageChannel: HeldChannel }, another);
+		await render(worker, DIAGRAM(51), PLAIN, { snapshots: SMALL, persist: true });
+		await render(worker, DIAGRAM(52), PLAIN, { snapshots: SMALL });
+		const siunitx = await render(worker, DIAGRAM(53), SIUNITX, { snapshots: SMALL, persist: true });
+		expect(siunitx.timings).toMatchObject({ saveNotKept: true });
+		const pgfplots = await render(worker, DIAGRAM(54), PGFPLOTS, { snapshots: SMALL, persist: true });
+		expect(pgfplots.timings).toMatchObject({ saveNotKept: true });
+		// pgfplots' waits: not saved again; siunitx's was dropped, and counted: saved again.
+		const waiting = await render(worker, DIAGRAM(55), PGFPLOTS, { snapshots: SMALL, persist: true });
+		expect(waiting.timings?.saveMs).toBeUndefined();
+		expect(waiting.snapshots?.handedOver).toEqual({ sent: 0, dropped: 1, failed: 0 });
+		const again = await render(worker, DIAGRAM(56), SIUNITX, { snapshots: SMALL, persist: true });
+		expect(again.timings).toMatchObject({ saveNotKept: true });
+		expect(held.length).toBeGreaterThan(0);
 	}, 120_000);
 });
 

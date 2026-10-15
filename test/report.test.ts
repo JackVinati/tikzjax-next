@@ -206,6 +206,59 @@ describe('the text the diagnostics view copies', () => {
 		);
 	});
 
+	/*
+	 * The maintainer's iPhone said of circuitikz's diagram "preamble saved in 3 ms, not kept: no room",
+	 * and nothing said whether its run was handed over, reached the store, or was kept there: the
+	 * diagram, the engine and the store now each say their part (internal/DECISIONS.md D39).
+	 */
+	it('says what each engine handed over to be stored, and what of that was dropped or failed', () => {
+		const life = (handOvers: { sent: number; dropped: number; failed: number }) =>
+			engineLife({
+				startMs: 50,
+				boot: null,
+				snapshots: { runs: 3, bytes: 7.6 * 1048576, failures: 0 },
+				handOvers,
+				stop: 'idle',
+			});
+		expect(life({ sent: 4, dropped: 1, failed: 1 })).toBe(
+			'started in 50 ms; 3 saved preambles, 7.6 MB; 4 handed over to be stored, 1 dropped for room, ' +
+				'1 failed, stopped after it had nothing to do',
+		);
+		expect(life({ sent: 2, dropped: 0, failed: 0 })).toBe(
+			'started in 50 ms; 3 saved preambles, 7.6 MB; 2 handed over to be stored, stopped after it had nothing to do',
+		);
+		expect(life({ sent: 0, dropped: 0, failed: 0 })).toBe(
+			'started in 50 ms; 3 saved preambles, 7.6 MB, stopped after it had nothing to do',
+		);
+	});
+
+	it('says of a render whose run was sent to be stored that it was, and why a stored one was not sent', () => {
+		const steps = (timings: Partial<CompileTimings>) =>
+			timingSteps({ queueMs: 1, postMs: 2, texMs: 212, passes: 1, ...timings });
+		expect(steps({ saveMs: 3, saveNotKept: true, forStore: true })).toContain(
+			'preamble saved in 3 ms, not kept: no room, sent to be stored',
+		);
+		expect(steps({ saveMs: 3, forStore: true })).toContain('preamble saved in 3 ms, sent to be stored');
+		expect(steps({ storedNotSent: 'held', saveMs: 3, saveNotKept: true })).toEqual([
+			'queue 1 ms',
+			'TeX 212 ms',
+			'stored preamble not sent: an engine held it when the diagram came',
+			'preamble saved in 3 ms, not kept: no room',
+			'SVG pipeline 2 ms',
+		]);
+		const why = (storedNotSent: CompileTimings['storedNotSent']) =>
+			steps({ storedNotSent }).find((step) => step.startsWith('stored preamble not sent'));
+		expect(why('slow')).toBe('stored preamble not sent: storage was slow to answer');
+		expect(why('unsendable')).toBe(
+			'stored preamble not sent: it could not be put back earlier for want of memory',
+		);
+		expect(why('not-worth')).toBe(
+			'stored preamble not sent: putting it back looked dearer than its preamble',
+		);
+		expect(why('read-failed')).toBe('stored preamble not sent: reading it failed');
+		expect(why('late')).toBe('stored preamble not sent: it was stored after the diagram came');
+	});
+
 	it('says which version manifest.json gives and which main.js was built as, and when they differ', () => {
 		const about = snapshot().about;
 		const plugin = (over: Partial<typeof about>) =>
@@ -351,6 +404,28 @@ describe('the text the diagnostics view copies', () => {
 		expect(steps({ resumed: true })).toContain('resumed from a saved preamble');
 	});
 
+	/*
+	 * On the desktop the first diagrams after a start said "waited 300 ms", and nothing said what had
+	 * made them wait, nor whether an edit had come at all (internal/DECISIONS.md D39).
+	 */
+	it('says which edit of the note made a render wait for the debounce, or came after it was made', () => {
+		const first = (timings: Partial<CompileTimings>) =>
+			timingSteps({ waitedMs: 300, queueMs: 0, postMs: 1, ...timings })[0];
+		expect(first({ edit: { source: 'modify', at: 'before', ms: 120 } })).toBe(
+			"waited 300 ms: the note's file changed 120 ms before the block was made",
+		);
+		expect(first({ edit: { source: 'editor', at: 'with', ms: 0 } })).toBe(
+			'waited 300 ms: the note was edited as the block was made',
+		);
+		expect(first({ edit: { source: 'unnamed', at: 'before', ms: 30 } })).toBe(
+			'waited 300 ms: an editor that named no note was edited 30 ms before the block was made',
+		);
+		expect(first({ waitedMs: 0, edit: { source: 'modify', at: 'after', ms: 85 } })).toBe(
+			"waited 0 ms; the note's file changed 85 ms after the block was made, which did not count",
+		);
+		expect(first({})).toBe('waited 300 ms');
+	});
+
 	it('says what is stored of saved preambles, and what storage refused', () => {
 		const line = (preambles: DiagnosticsSnapshot['preambles']) =>
 			diagnosticsText(snapshot({ preambles }))
@@ -365,6 +440,42 @@ describe('the text the diagnostics view copies', () => {
 		expect(line({ available: true, read: true, runs: 1, bytes: 1048576, errors: 1 })).toEqual([
 			'Stored preambles: 1, 1.0 MB, 1 storage error',
 		]);
+		// What it kept and refused of the runs handed to it this session, and why.
+		expect(
+			line({
+				available: true,
+				read: true,
+				runs: 5,
+				bytes: 9.4 * 1048576,
+				errors: 0,
+				kept: 4,
+				refused: { 'goes-first': 1, 'not-worth': 2 },
+			}),
+		).toEqual([
+			'Stored preambles: 5, 9.4 MB; this session 4 kept, 3 refused: 2 not worth putting back, ' +
+				'1 would have gone first',
+		]);
+		expect(
+			line({ available: true, read: true, runs: 1, bytes: 1048576, errors: 0, kept: 1, refused: {} }),
+		).toEqual(['Stored preambles: 1, 1.0 MB; this session 1 kept']);
+		expect(
+			line({
+				available: true,
+				read: true,
+				runs: 0,
+				bytes: 0,
+				errors: 1,
+				kept: 0,
+				refused: { 'too-large': 1, full: 1, cleared: 1, failed: 1, unavailable: 1 },
+			}),
+		).toEqual([
+			'Stored preambles: 0, 0.0 MB, 1 storage error; this session 0 kept, 5 refused: ' +
+				'1 larger than the budget, 1 storage full, 1 cleared meanwhile, 1 not written, ' +
+				'1 storage unavailable',
+		]);
+		expect(
+			line({ available: true, read: true, runs: 0, bytes: 0, errors: 0, kept: 0, refused: {} }),
+		).toEqual(['Stored preambles: 0, 0.0 MB']);
 		expect(line({ available: false, read: true, runs: 0, bytes: 0, errors: 2 })).toEqual([
 			'Stored preambles: unavailable, 2 storage errors',
 		]);

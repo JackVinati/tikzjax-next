@@ -151,6 +151,34 @@ export interface TexResult {
 	line?: number | undefined;
 }
 
+/**
+ * What reported a note's text changing (block/edits.ts): Obsidian's `editor-change` naming the note,
+ * one naming none, which counts for every note, or the note's file changing (`vault.on('modify')`).
+ */
+export type EditSource = 'editor' | 'unnamed' | 'modify';
+
+/**
+ * An edit of a block's note, as the diagnostics say it (block/edits.ts, internal/DECISIONS.md D39):
+ * what reported it, and when, `ms` from the block's making: `before` it, within the window, or `with`
+ * it, in the run of code that made the block, which is how Live Preview reports a keystroke, and the
+ * block waited for the debounce either way; or `after` it, in another run, which did not count.
+ */
+export interface BlockEdit {
+	source: EditSource;
+	at: 'before' | 'with' | 'after';
+	ms: number;
+}
+
+/**
+ * Why a run stored for a diagram's preamble was not sent with it to an engine that did not hold it,
+ * so that the diagram compiled its preamble (engine/worker-host.ts, internal/DECISIONS.md D39):
+ * storage was slow to answer, a read of this one outlasting its wait or an earlier one not settled;
+ * the run could not be put back earlier this session for want of memory; putting it back looked
+ * dearer than its preamble; reading it failed; an engine held it when the diagram came, and another
+ * took the diagram or it let the run go; or it was stored only after the diagram came.
+ */
+export type StoredNotSent = 'slow' | 'unsendable' | 'not-worth' | 'read-failed' | 'held' | 'late';
+
 /** The worker's own steps (engine-src/protocol.ts), and what the host saw of the engine's start. */
 export interface TexTimings extends RenderTimings {
 	/**
@@ -163,6 +191,8 @@ export interface TexTimings extends RenderTimings {
 	 * with it to an engine that did not hold it (internal/DECISIONS.md D36).
 	 */
 	fetchMs?: number | undefined;
+	/** A run is stored for its preamble, and was not sent with it, for this. */
+	storedNotSent?: StoredNotSent | undefined;
 }
 
 /**
@@ -177,6 +207,11 @@ export interface CompileTimings extends Partial<TexTimings> {
 	 * Retry or a "Render diagram" press, the press.
 	 */
 	waitedMs?: number | undefined;
+	/**
+	 * The edit of the block's note that made it wait for the debounce; or, for a block that did not,
+	 * the last one reported after it was made, which did not count. Absent when there was neither.
+	 */
+	edit?: BlockEdit | undefined;
 	/** From the block asking for a compile to the queue starting it. */
 	queueMs: number;
 	/**
