@@ -138,6 +138,22 @@ describe('migrateSettings', () => {
 		expect('concurrency' in DEFAULT_SETTINGS).toBe(false);
 	});
 
+	/**
+	 * 0.2.1-beta.3 and beta.4 could show the notice that TeX seems to run without the JIT on a phone
+	 * that had it, its probe fooled by a slow processor (internal/DECISIONS.md D38), and the notice is
+	 * shown once only. A data.json from before the probe that settles a second later shows it again,
+	 * once, where that probe finds the JIT off; one written since keeps what it says.
+	 */
+	it('lets the JIT notice be shown once more to a vault that may have been shown it wrongly', () => {
+		expect(migrateSettings({ settingsVersion: 1, jitNoticeShown: true }).jitNoticeShown).toBe(false);
+		expect(migrateSettings({ jitNoticeShown: true }).jitNoticeShown).toBe(false);
+		expect(migrateSettings({ settingsVersion: 2, jitNoticeShown: true }).jitNoticeShown).toBe(true);
+		expect(migrateSettings({ settingsVersion: 7, jitNoticeShown: true }).jitNoticeShown).toBe(true);
+		const once = migrateSettings({ settingsVersion: 1, jitNoticeShown: true });
+		once.jitNoticeShown = true;
+		expect(migrateSettings(JSON.parse(JSON.stringify(once))).jitNoticeShown).toBe(true);
+	});
+
 	it('never moves settingsVersion backwards, or below this build', () => {
 		expect(migrateSettings({}).settingsVersion).toBe(SETTINGS_VERSION);
 		expect(migrateSettings({ settingsVersion: 0 }).settingsVersion).toBe(SETTINGS_VERSION);

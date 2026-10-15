@@ -1,7 +1,7 @@
 import type { ColorMode, LazyMode, SvgoMode } from '../types';
 
 /** Bumped when a migration is added. Older data.json is read forward, never discarded. */
-export const SETTINGS_VERSION = 1;
+export const SETTINGS_VERSION = 2;
 
 export interface TikzSettings {
 	settingsVersion: number;
@@ -130,6 +130,12 @@ export function migrateSettings(raw: unknown): TikzSettings {
 	if (typeof data['invertColorsInDarkMode'] === 'boolean' && data['colors'] === undefined) {
 		merged.colors = data['invertColorsInDarkMode'] ? 'adapt' : 'preserve';
 	}
+
+	// v1 -> v2: the notice that TeX seems to run without the JIT, shown again once. 0.2.1-beta.3 and
+	// beta.4 could show it on a phone that had the JIT, its probe fooled by a slow processor, and it is
+	// shown once only (internal/DECISIONS.md D38); the probe that settles a second later shows it again
+	// where it is right.
+	if ((Number(data['settingsVersion']) || 0) < 2) merged.jitNoticeShown = false;
 
 	// Retired, and ours to drop — unlike a key from a newer device, which is kept. Never in the
 	// settings tab, yet in every data.json from the defaults, and unread since one worker runs one
