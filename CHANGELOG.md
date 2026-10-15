@@ -55,7 +55,8 @@ from a phone.
   223 ms for circuitikz from its stored preamble where compiling the preamble took 426, and 153 for
   pgfplotstable where it took 358. Up to 64 MB are kept for each vault on a computer, and 16 MB on a
   phone or tablet or on a computer that reports less than 8 GB of memory, the preamble used least
-  recently going first. Clearing the diagram cache deletes them too, which is the way to remove them
+  recently going first. A preamble the engine has no room left to keep is still saved once to be
+  stored. Clearing the diagram cache deletes them too, which is the way to remove them
   from a device before uninstalling the plugin, since Obsidian does not tell a plugin it is being
   removed. [The README](https://github.com/JackVinati/tikzjax-next#stored-preambles) says what a
   stored preamble holds.
@@ -72,9 +73,10 @@ from a phone.
   this way cannot do. Contributed by RepentStar in
   [pull request #2](https://github.com/JackVinati/tikzjax-next/pull/2).
 - The diagnostics view times each diagram from coming into view to drawn in the note, with every
-  wait on the way; says how many times the engine started, how long each start took and why it
-  stopped; says of each diagram whether it started from a saved or stored preamble; and says whether
-  TeX seems to run with the JIT compiler. Its Copy button copies all of it as text for a bug report:
+  wait on the way, and of a diagram that waited for you to pause typing, which change to its note
+  made it wait; says how many times the engine started, how long each start took and why it
+  stopped; says of each diagram whether it started from a saved or stored preamble, and where a
+  preamble meant for storage went; and says whether TeX seems to run with the JIT compiler. Its Copy button copies all of it as text for a bug report:
   the plugin and Obsidian versions, the kind of device, what its WebView supports, the engine and
   every step's time, without your diagrams' code, their error messages or the names of your notes.
   Where the device does not let the plugin copy, the text is shown, to copy by hand.
