@@ -4001,14 +4001,15 @@ queue has started their jobs.
 **What it does now** (`src/queue/queue.ts`, `src/block/processor.ts`, `src/block/render-child.ts`,
 `src/block/machine.ts`):
 
-- **Inside a band, by place in the note.** The processor numbers the blocks it makes, before anything
-  yields, and the block gives its number to the queue (`SubmitOptions.place`). Obsidian makes a view's
-  blocks from the top down, Live Preview's widgets and Reading view's sections alike, so the block
-  made first is the highest. Inside a band the queue starts the lowest number first, then the one
-  submitted first; a job two blocks want takes the lower of their numbers; a job the engine was
-  stopped under still goes ahead of its band; a caller that gives none comes after those that do. The
-  depth cap turns away, in the least urgent band, the lowest in the note, then the newest, where it
-  turned away the newest.
+- **Inside a band, by the order the blocks were made.** The processor numbers the blocks it makes,
+  before anything yields, and the block gives its number to the queue (`SubmitOptions.place`).
+  Obsidian makes a view's blocks from the top down, Live Preview's widgets and Reading view's sections
+  alike, so as a note opens the block made first is the highest; a block made later, by an edit or by
+  scrolling up, has a later number wherever it is. Inside a band the queue starts the lowest number
+  first, then the one submitted first; a job two blocks want takes the lower of their numbers; a job
+  the engine was stopped under still goes ahead of its band; a caller that gives none comes after
+  those that do. The depth cap turns away, in the least urgent band, the block made last, normally the
+  lowest in the note, then the newest, where it turned away the newest.
 - **A started job the engine does not have yet gives its slot to a more urgent one.** This is D25's
   window: started, the runner not having said that the engine has the job, nothing paid for. When a
   more urgent job waits and no slot is free, the least urgent job in that window goes back in line
@@ -4075,12 +4076,18 @@ what a read takes, as it may have shared the processor with an engine's start. A
   is made with the engine idle, but for a run kept from a job taken back; reading ahead for the next
   job is left for later.
 - **A block made by scrolling up, or by typing,** is made later and goes later, as it did.
+- **Two engines take their jobs in the order the jobs reached the host.** After the queue has taken
+  jobs back, the diagram at the top can reach the host after one below it, and go to the engine that
+  comes up later: in the simulation, ten diagrams asking from the bottom up, 12 ms apart, while two
+  engines start in 150 ms, the second went to the first engine at 150 ms and the first to the second
+  at 162 (found in review). A phone has one engine, and is not touched. Handing the host the queue's
+  order with each job would mend it; left, for 12 ms on a computer.
 
 **Not measured on a phone.** Whether #1's cache read was slow for the old plugin's store: a step in
 the diagnostics timing the cache read would say.
 
 Tests: `test/queue.test.ts` (a band by place, then by submission; a job's highest place; a resumed job
-ahead of every place; the depth cap turning away the lowest in the note; the slot going to a more
+ahead of every place; the depth cap turning away the block made last; the slot going to a more
 urgent job, the one that had it starting after it, in a band or across bands, from the least urgent of
 two; never from a job the engine has, nor to one no more urgent; the depth cap counting the job put
 back, also once the queue resumes; a waiting job promoted by a second caller; a late `running`

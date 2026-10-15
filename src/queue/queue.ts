@@ -134,8 +134,9 @@ export interface SubmitOptions {
 	resumed?: boolean | undefined;
 
 	/**
-	 * Where the caller's block is in its note, as the order the processor made blocks in: inside a
-	 * band the lower goes first, and only then the order of submission. Omitted: after every block
+	 * The order the processor made the caller's block in, which is where it is in its note as the note
+	 * opens: inside a band the lower goes first, and only then the order of submission. A block made
+	 * later, by an edit or by scrolling up, comes after, wherever it is. Omitted: after every block
 	 * that gave one, in the order submitted.
 	 *
 	 * A block is submitted once its cache has been read and the viewport gate has let it through, and
@@ -183,8 +184,8 @@ interface Entry<J, T> {
 	priority: Priority;
 	timeoutMs: number;
 	/**
-	 * Where the highest block that wants it is in its note (SubmitOptions.place): inside a band, before
-	 * `seq`. A resumed job's is ahead of every block's, so that it goes ahead of its band.
+	 * The place of the block made first of those that want it (SubmitOptions.place): inside a band,
+	 * before `seq`. A resumed job's is ahead of every block's, so that it goes ahead of its band.
 	 */
 	place: number;
 	/** Monotonic submission order: the FIFO tiebreak inside a priority band. Never a timestamp. */
@@ -223,7 +224,7 @@ interface Entry<J, T> {
 	reject: (error: unknown) => void;
 }
 
-/** Whether `a` goes before `b`: a more urgent band, then higher in its note, then submitted earlier. */
+/** Whether `a` goes before `b`: a more urgent band, then made earlier, then submitted earlier. */
 function before<J, T>(a: Entry<J, T>, b: Entry<J, T>): boolean {
 	if (a.priority !== b.priority) return a.priority < b.priority;
 	if (a.place !== b.place) return a.place < b.place;
@@ -378,7 +379,7 @@ export class RenderQueue<J, T> {
 			// job submitted before this one. Priority stops mattering once the job has started; the
 			// timeout does not, and `start` re-arms its timer to honour a raise.
 			if (priority < existing.priority) existing.priority = priority;
-			// A job is as high in its note as the highest block that wants it.
+			// A job takes the place of the block made first of those that want it.
 			existing.place = Math.min(existing.place, placeOf(opts));
 			if (timeoutMs > existing.timeoutMs) existing.timeoutMs = timeoutMs;
 			if (opts?.uncapped === true || opts?.resumed === true) existing.uncapped = true;
@@ -665,10 +666,10 @@ export class RenderQueue<J, T> {
 	}
 
 	/**
-	 * Overflow rejects the LEAST urgent waiting job — lowest priority band, and within it the lowest in
-	 * its note, then the most recently added. A 200-diagram note therefore keeps the work nearest the
-	 * viewport and hands the rest back as `depth-cap` for a "Render diagram" button, instead of
-	 * committing to hours.
+	 * Overflow rejects the LEAST urgent waiting job — lowest priority band, and within it the block made
+	 * last, normally the lowest in its note, then the most recently added. A 200-diagram note therefore
+	 * keeps the work nearest the viewport and hands the rest back as `depth-cap` for a "Render diagram"
+	 * button, instead of committing to hours.
 	 */
 	private enforceDepthCap(): void {
 		// Uncapped jobs are bounded some other way — an export by its budget, a resumed job by the

@@ -132,8 +132,9 @@ export function createProcessor(deps: ProcessorDeps) {
 	/**
 	 * The blocks made so far: each block's place in the queue's order inside its band. Obsidian makes
 	 * the blocks of a view from the top down, Live Preview's widgets and Reading view's sections alike,
-	 * so the block made first is the highest; and a block is submitted once its cache has been read,
-	 * which takes each block its own time (internal/DECISIONS.md D40).
+	 * so as a note opens the block made first is the highest; and a block is submitted once its cache
+	 * has been read, which takes each block its own time (internal/DECISIONS.md D40). A block made
+	 * later, by an edit or by scrolling up, is numbered later, wherever it is.
 	 */
 	let made = 0;
 

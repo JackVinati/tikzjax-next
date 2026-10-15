@@ -138,9 +138,9 @@ export interface BlockDeps {
 	 */
 	startEngine?: ((doc: Document) => void) | undefined;
 	/**
-	 * Where the block is in its note, as the order the processor made blocks in: inside a band, the
-	 * queue starts the higher first (queue/queue.ts SubmitOptions.place). Omitted: in the order
-	 * submitted.
+	 * The order the processor made the block in, which is where it is in its note as the note opens:
+	 * inside a band, the queue starts the block made earlier first (queue/queue.ts
+	 * SubmitOptions.place). Omitted: in the order submitted.
 	 */
 	place?: number | undefined;
 	now: () => number;
