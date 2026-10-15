@@ -46,7 +46,7 @@ import { buildInput, routeKey, routeOf } from './document';
 import { gunzipExactly } from './inflate';
 import { GZIP_HELPER } from './gzip-helper';
 import { decodeSavedRun, encodeSavedRun, sealing, type ContentSources } from './stored-run';
-import { compileProbeAsync, probeJit } from './jit';
+import { compileProbeAsync, JIT_RECHECK_MS, probeJit, type Spin } from './jit';
 import { checkCoreDump, packedLength, startingMemory, unpackCoreDump, type CoreDump } from './core-dump';
 import { restoreSpans, writtenSpans, type RunMarks, type Span } from './reset';
 import {
@@ -72,6 +72,7 @@ import type {
 	EngineAssets,
 	ErrorMessage,
 	FlushedMessage,
+	JitMessage,
 	OkMessage,
 	RenderOptions,
 	RenderTimings,
@@ -198,6 +199,8 @@ async function boot(assets: EngineAssets): Promise<BootTimings> {
 	const done = performance.now();
 	const spin = await probe;
 	const jit = spin === undefined ? undefined : await probeJit(undefined, spin, inflateNsPerByte, sleep);
+	// Taken again a second after `ready` where it did not find the JIT on (recheckJit).
+	if (spin !== undefined && jit !== undefined && jit.state !== 'on') jitAgain = { spin, inflateNsPerByte };
 
 	return {
 		decodeMs: Math.round(decoded - started),
@@ -209,6 +212,31 @@ async function boot(assets: EngineAssets): Promise<BootTimings> {
 		jit,
 	};
 }
+
+/**
+ * The probe's function and the inflate it was weighed against, where the probe at the start did not
+ * find the JIT on, for taking it again (recheckJit); null otherwise, and once it has been.
+ */
+let jitAgain: { spin: Spin; inflateNsPerByte: number | undefined } | null = null;
+
+/**
+ * Take the JIT probe again JIT_RECHECK_MS after `ready`, once no render is under way, where the one at
+ * the start did not find the JIT on, and say what it found (JitMessage): one probe cannot tell a loop
+ * not compiled yet from one without the JIT (./jit). With the same function, which JavaScriptCore has
+ * had all that time to compile. A render posted meanwhile starts between its attempts.
+ */
+const recheckJit = (): void => {
+	const again = jitAgain;
+	jitAgain = null;
+	if (again === null) return;
+	self.setTimeout(() => {
+		void (async () => {
+			await whenNoRender();
+			const jit = await probeJit(undefined, again.spin, again.inflateNsPerByte, sleep);
+			if (jit !== undefined) post({ type: 'jit', jit } satisfies JitMessage);
+		})();
+	}, JIT_RECHECK_MS);
+};
 
 // --- the memory a run starts from -----------------------------------------------------------------
 
@@ -1490,7 +1518,10 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 	if (request.type === 'boot') {
 		if (booted !== null) return;
 		booted = boot(request.assets).then(
-			(timings) => post({ type: 'ready', engineId: ENGINE_ID, inventory: INVENTORY, boot: timings }),
+			(timings) => {
+				post({ type: 'ready', engineId: ENGINE_ID, inventory: INVENTORY, boot: timings });
+				recheckJit();
+			},
 			(error: unknown) => {
 				// Thrown again outside the promise, so that it reaches the host as the worker's error
 				// event, which is how a start that failed has always been reported (worker-host.ts

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { JitState } from '../engine-src/protocol';
+import type { JitProbe, JitState } from '../engine-src/protocol';
+import type { EngineStop } from '../src/engine/worker-host';
 import type { CompileTimings } from '../src/types';
 import {
 	diagnosticsText,
@@ -216,7 +217,7 @@ describe('the text the diagnostics view copies', () => {
 	});
 
 	it('says whether the JIT is on, as the latest engine to start found it, and what the probe took', () => {
-		const started = (jit: { state: JitState } | undefined) =>
+		const started = (jit: JitProbe | undefined, stop: EngineStop | null = null) =>
 			diagnosticsText(
 				snapshot({
 					engine: {
@@ -230,27 +231,44 @@ describe('the text the diagnostics view copies', () => {
 								totalMs: 46,
 								nativeInflate: true,
 								nativeBase64: true,
-								...(probe === undefined
-									? {}
-									: { jit: { ...probe, fastestMs: 3, attempts: 4, spentMs: 12 } }),
+								...(probe === undefined ? {} : { jit: probe }),
 							},
 							snapshots: null,
-							stop: null,
+							stop: probe === undefined ? null : stop,
 						})),
 						lastStop: null,
 						poolSize: 1,
 					},
 				}),
 			);
-		// An engine of a worker that does not time it says nothing, and the one before it does.
-		const off = started({ state: 'off' });
+		const probe = (state: JitState, again?: JitProbe): JitProbe => ({
+			state,
+			fastestMs: 3,
+			attempts: 4,
+			spentMs: 12,
+			...(again === undefined ? {} : { again }),
+		});
+		// An engine of a worker that does not time it says nothing, and the one before it does. Off at
+		// the start, it is taken again a second later, and that is what the start says (D38).
+		const off = started(probe('off', probe('off')));
 		expect(off).toContain('\nJIT: off (probably)\n');
 		expect(off).toContain(
-			'  1. started in 60 ms (in the worker 46 ms: decode 2 ms, inflate 30 ms, compile 1 ms, JIT probe 12 ms; ' +
-				'native gzip yes, native base64 yes; JIT off (probably)), running',
+			'  1. started in 60 ms (in the worker 46 ms: decode 2 ms, inflate 30 ms, compile 1 ms, JIT probe 12 ms, ' +
+				'again a second later 12 ms; native gzip yes, native base64 yes; JIT off (probably)), running',
 		);
-		expect(started({ state: 'on' })).toContain('\nJIT: on (probably)\n');
-		expect(started({ state: 'unclear' })).toContain('\nJIT: unclear\n');
+		// Until then, it is being checked; an engine stopped first never was.
+		const checking = started(probe('off'));
+		expect(checking).toContain('\nJIT: checking again\n');
+		expect(checking).toContain(
+			'JIT probe 12 ms; native gzip yes, native base64 yes; JIT checking again), running',
+		);
+		expect(started(probe('off'), 'background')).toContain('\nJIT: unclear\n');
+		// Taken again and found on, as a phone whose loop was not compiled yet at the start.
+		const later = started(probe('off', { ...probe('on'), attempts: 1, spentMs: 0.6 }));
+		expect(later).toContain('\nJIT: on (probably)\n');
+		expect(later).toContain('JIT probe 12 ms, again a second later 0.6 ms;');
+		expect(started(probe('on'))).toContain('\nJIT: on (probably)\n');
+		expect(started(probe('unclear', probe('unclear')))).toContain('\nJIT: unclear\n');
 		expect(started(undefined)).toContain('\nJIT: not measured yet\n');
 		expect(text).toContain('\nJIT: not measured yet\n');
 		// With no WebAssembly no engine starts to measure it, and the copy says why.

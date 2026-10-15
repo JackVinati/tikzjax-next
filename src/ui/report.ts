@@ -1,4 +1,4 @@
-import type { JitState } from '../../engine-src/protocol';
+import type { JitProbe, JitState } from '../../engine-src/protocol';
 import type { BlockOutcome } from '../block/render-child';
 import type { StoredRunStats } from '../cache/runs';
 import type { EngineReport } from '../engine/worker-host';
@@ -147,7 +147,13 @@ export function engineLife(life: EngineReport['lives'][number]): string {
 			? STRINGS.engineNeverStarted
 			: life.boot === null
 				? STRINGS.engineStartedIn(life.startMs)
-				: STRINGS.engineStartedWith(life.startMs, life.boot);
+				: STRINGS.engineStartedWith(
+						life.startMs,
+						life.boot,
+						life.boot.jit === undefined
+							? undefined
+							: jitOfStart(life.boot.jit, life.stop === null),
+					);
 	const saved = life.snapshots;
 	const start =
 		saved === null ? started : STRINGS.engineSaved(started, saved.runs, mb(saved.bytes), saved.failures);
@@ -158,14 +164,29 @@ function mb(bytes: number): string {
 	return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
+/** What the view says of the JIT: what a probe found, or that it is being taken again. */
+export type JitShown = JitState | 'checking';
+
+/**
+ * What an engine start says of the JIT (engine-src/jit.ts): on where the probe at its start found it
+ * on, which only compiled code does in time; else what the probe said when the worker took it again,
+ * a second later (JitProbe.again, internal/DECISIONS.md D38). Until then `checking` while the engine
+ * runs, and `unclear` once it has stopped without.
+ */
+export function jitOfStart(jit: JitProbe, running: boolean): JitShown {
+	if (jit.state === 'on') return 'on';
+	return jit.again?.state ?? (running ? 'checking' : 'unclear');
+}
+
 /**
  * Whether WebAssembly runs with a JIT, probably, as the latest engine to say found it
- * (engine-src/jit.ts): null until an engine that times it has started.
+ * (jitOfStart): null until an engine that times it has started.
  */
-export function jitOf(engine: EngineReport): JitState | null {
+export function jitOf(engine: EngineReport): JitShown | null {
 	for (let i = engine.lives.length - 1; i >= 0; i--) {
-		const jit = engine.lives[i]?.boot?.jit;
-		if (jit !== undefined) return jit.state;
+		const life = engine.lives[i];
+		const jit = life?.boot?.jit;
+		if (life !== undefined && jit !== undefined) return jitOfStart(jit, life.stop === null);
 	}
 	return null;
 }

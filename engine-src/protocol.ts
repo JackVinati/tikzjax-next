@@ -206,7 +206,7 @@ export interface JitProbe {
 	fastestMs: number;
 	/** How many attempts it took: 1 unless the first was slow. */
 	attempts: number;
-	/** What the probe took of the start, in all. */
+	/** What the probe took, in all: of the start, for the one taken then. */
 	spentMs: number;
 	/**
 	 * What a step of the loop took, in ns, at the fastest of the attempts, from the calls each
@@ -219,6 +219,12 @@ export interface JitProbe {
 	 * weighed against. Absent where pako inflated it, which is JavaScript.
 	 */
 	inflateNsPerByte?: number | undefined;
+	/**
+	 * The probe taken again a second after the start, where this one did not find the JIT on
+	 * (JitMessage), which is then what the start says (src/ui/report.ts jitOfStart). Set by the host
+	 * when the worker sends it; absent until then, and where the engine stopped first.
+	 */
+	again?: JitProbe | undefined;
 }
 
 export interface ReadyMessage {
@@ -380,8 +386,18 @@ export interface FlushedMessage {
 	type: 'flushed';
 }
 
+/**
+ * The JIT probe taken again (./jit JIT_RECHECK_MS), once, a second after `ready` and once no render
+ * was under way, by a worker whose probe at its start did not find the JIT on: what the start says
+ * of the JIT from then on (JitProbe.again).
+ */
+export interface JitMessage {
+	type: 'jit';
+	jit: JitProbe;
+}
+
 export type WorkerResponse =
-	ReadyMessage | LogMessage | OkMessage | ErrorMessage | SavedRunMessage | FlushedMessage;
+	ReadyMessage | LogMessage | OkMessage | ErrorMessage | SavedRunMessage | FlushedMessage | JitMessage;
 
 export interface EngineInventory {
 	engineId: string;

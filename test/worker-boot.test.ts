@@ -1,5 +1,6 @@
 import { gzip } from 'pako';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { JIT_RECHECK_MS } from '../engine-src/jit';
 import type { EngineAssets } from '../engine-src/protocol';
 import { buildWorker } from '../scripts/engine-assets.mjs';
 import { startWorker } from './support/start-worker.mjs';
@@ -30,6 +31,36 @@ const toBase64 = (bytes: Uint8Array): string => {
 	return btoa(binary);
 };
 
+/**
+ * Run in the worker before its source: the JIT probe's function, which the worker makes with
+ * `new WebAssembly.Instance` (engine-src/jit.ts), takes 45 ns a step for 300 ms from its first call, a
+ * loop not compiled yet on a phone slowed down 3.3 times, and runs as compiled after.
+ */
+const NOT_COMPILED_YET = `{
+	const RealInstance = WebAssembly.Instance;
+	let until = 0;
+	const Slowed = function (module, imports) {
+		const instance = new RealInstance(module, imports);
+		if (!WebAssembly.Module.exports(module).some((e) => e.name === 'spin')) return instance;
+		const spin = instance.exports.spin;
+		return {
+			exports: {
+				spin: (n, x) => {
+					const now = performance.now();
+					if (until === 0) until = now + 300;
+					if (now < until) {
+						const end = now + n * 45e-6;
+						while (performance.now() < end);
+					}
+					return spin(n, x);
+				},
+			},
+		};
+	};
+	Slowed.prototype = RealInstance.prototype;
+	WebAssembly.Instance = Slowed;
+}`;
+
 /** `text` with the four characters at its middle replaced by four others, still valid base64. */
 const corrupt = (text: string): string => {
 	const at = (text.length >> 3) * 4;
@@ -57,6 +88,29 @@ describe('the engine starting from the payload the host sends it', { timeout: 12
 		expect(boot.jit!.spentMs).toBeLessThanOrEqual(boot.totalMs + 1);
 		// What it is weighed against when its loop is slow: the platform's inflate of the dump, a byte.
 		expect(boot.jit!.inflateNsPerByte).toBeGreaterThan(0);
+	});
+
+	/*
+	 * One probe cannot tell a loop JavaScriptCore has not compiled yet from one without the JIT, and on
+	 * a phone slowed down the first can last all through it (engine-src/jit.ts, DECISIONS.md D38). So a
+	 * start that did not find the JIT on takes the probe again a second later, and says what it found.
+	 * Here the probe's loop is held to 45 ns a step for its first 300 ms, as such a phone's would be.
+	 */
+	it('takes the JIT probe again a second after a start that did not find it on, and says what it found', async () => {
+		const outcome = await startWorker(source, payload, { prelude: NOT_COMPILED_YET, againMs: 10_000 });
+		expect(outcome.type).toBe('ready');
+		if (outcome.type !== 'ready') return;
+		expect(outcome.boot?.jit?.state).not.toBe('on');
+		expect(outcome.boot?.jit?.nsPerStep).toBeGreaterThan(30);
+		expect(outcome.again).toMatchObject({ state: 'on', attempts: 1 });
+	});
+
+	it('does not take the probe again where it found the JIT on', async () => {
+		const outcome = await startWorker(source, payload, { againMs: JIT_RECHECK_MS + 1500 });
+		expect(outcome.type).toBe('ready');
+		if (outcome.type !== 'ready') return;
+		expect(outcome.boot?.jit?.state).toBe('on');
+		expect(outcome.again).toBeUndefined();
 	});
 
 	it('answers ready without DecompressionStream and Uint8Array.fromBase64, as on iOS 14.5 to 16.3', async () => {

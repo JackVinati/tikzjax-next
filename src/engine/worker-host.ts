@@ -3,6 +3,7 @@ import { buildInput, routeOf } from '../../engine-src/document';
 import type {
 	BootTimings,
 	EngineInventory,
+	JitState,
 	RenderOptions,
 	RenderTimings,
 	SavedRunMessage,
@@ -162,12 +163,13 @@ export interface WorkerHostOptions {
 	 */
 	snapshotBudget?: (() => number) | undefined;
 	/**
-	 * Told each time an engine has started, with what it said of its start: where the time went, and
-	 * whether WebAssembly runs with a JIT here (engine-src/protocol.ts BootTimings), null from a
-	 * worker that does not say. The plugin tells someone on an iPhone without one, once, why their
-	 * diagrams are slow (internal/DECISIONS.md D33).
+	 * Told, once for each engine start whose worker timed it, whether WebAssembly runs with a JIT here
+	 * (engine-src/jit.ts, src/ui/report.ts jitOfStart): at `ready` where its probe found the JIT on,
+	 * and else when the worker has taken the probe again, a second later (JitMessage), which an engine
+	 * stopped before then never does. The plugin tells someone on an iPhone without one, once, why
+	 * their diagrams are slow (internal/DECISIONS.md D33, D38).
 	 */
-	onStarted?: ((boot: BootTimings | null) => void) | undefined;
+	onJit?: ((state: JitState) => void) | undefined;
 	/**
 	 * Where the runs the engines save are kept across their stops (cache/runs.ts, internal/DECISIONS.md
 	 * D36): each run a worker saves is handed to it, and a job whose run no engine holds is sent with
@@ -323,7 +325,7 @@ export class WorkerHost implements TexHost {
 	private poolSize: number;
 	private readonly onSize: ((engines: number) => void) | undefined;
 	private readonly snapshotBudget: () => number;
-	private readonly onStarted: ((boot: BootTimings | null) => void) | undefined;
+	private readonly onJit: ((state: JitState) => void) | undefined;
 	private readonly runs: StoredRuns | undefined;
 
 	/**
@@ -361,7 +363,7 @@ export class WorkerHost implements TexHost {
 		this.poolSize = sizeOf(options.poolSize ?? 1);
 		this.onSize = options.onSize;
 		this.snapshotBudget = options.snapshotBudget ?? (() => 0);
-		this.onStarted = options.onStarted;
+		this.onJit = options.onJit;
 		this.runs = options.runs;
 		this.told = this.poolSize;
 	}
@@ -702,11 +704,17 @@ export class WorkerHost implements TexHost {
 			}
 			engine.resolveReady();
 			this.pump();
-			try {
-				this.onStarted?.(engine.life.boot);
-			} catch {
-				// The caller's business; the engine is up either way.
-			}
+			// Settled by the probe at the start only where it found the JIT on; else by the next one.
+			if (engine.life.boot?.jit?.state === 'on') this.toldJit('on');
+			return;
+		}
+
+		// The JIT probe taken again, where the one at the start did not find it on: what the start says.
+		if (message.type === 'jit') {
+			const boot = engine.life.boot;
+			if (boot?.jit === undefined || boot.jit.again !== undefined) return;
+			engine.life.boot = { ...boot, jit: { ...boot.jit, again: message.jit } };
+			this.toldJit(message.jit.state);
 			return;
 		}
 
@@ -1054,6 +1062,15 @@ export class WorkerHost implements TexHost {
 	private heldBy(engine: Engine, state: SnapshotState): void {
 		engine.held = new Set(state.held);
 		engine.life.snapshots = { runs: state.held.length, bytes: state.bytes, failures: state.failures };
+	}
+
+	/** Tell the plugin what an engine start says of the JIT (onJit). */
+	private toldJit(state: JitState): void {
+		try {
+			this.onJit?.(state);
+		} catch {
+			// The caller's business; the engine runs either way.
+		}
 	}
 
 	/** How many workers run at once now: the pool's size, or one once a worker failed to start. */

@@ -252,7 +252,8 @@ const warningsOf = (view: DebugView): HTMLElement[] => [
 ];
 
 describe('the JIT in the diagnostics view', () => {
-	const OFF = {
+	// Off at the start, and again a second later, which is what the start says (D38).
+	const FIRST_OFF = {
 		state: 'off',
 		fastestMs: 3,
 		attempts: 4,
@@ -260,8 +261,9 @@ describe('the JIT in the diagnostics view', () => {
 		nsPerStep: 12.5,
 		inflateNsPerByte: 1.51,
 	} as const;
+	const OFF = { ...FIRST_OFF, again: { ...FIRST_OFF, spentMs: 31 } } as const;
 	const ON = { state: 'on', fastestMs: 0.5, attempts: 1, spentMs: 0.7 } as const;
-	const UNCLEAR = {
+	const FIRST_UNCLEAR = {
 		state: 'unclear',
 		fastestMs: 3,
 		attempts: 4,
@@ -269,6 +271,7 @@ describe('the JIT in the diagnostics view', () => {
 		nsPerStep: 6,
 		inflateNsPerByte: 1.6,
 	} as const;
+	const UNCLEAR = { ...FIRST_UNCLEAR, again: FIRST_UNCLEAR } as const;
 
 	it('is not measured until an engine that times it has started', async () => {
 		expect(factsOf(await opened(source([])))['JIT']).toBe('not measured yet');
@@ -302,11 +305,24 @@ describe('the JIT in the diagnostics view', () => {
 	it('says what the probe measured when it was slow, and that it is unclear, with no hint', async () => {
 		const off = await opened(source([], startedOnce(OFF), { platform: 'phone', os: 'iOS' }));
 		expect(off.contentEl.querySelector('.tikzjax-debug-starts')?.textContent).toContain(
-			'JIT probe 30 ms (12.5 ns a step, inflate 1.51 ns a byte); native gzip yes, native base64 yes; JIT off (probably)',
+			'JIT probe 30 ms (12.5 ns a step, inflate 1.51 ns a byte), again a second later 31 ms (12.5 ns a step, ' +
+				'inflate 1.51 ns a byte); native gzip yes, native base64 yes; JIT off (probably)',
 		);
 		const unclear = await opened(source([], startedOnce(UNCLEAR), { platform: 'phone', os: 'iOS' }));
 		expect(factsOf(unclear)['JIT']).toBe('unclear');
 		expect(warningsOf(unclear)).toEqual([]);
+	});
+
+	it('says no more than that it is checking again until the probe has been taken again, with no hint', async () => {
+		// A phone whose loop was not compiled yet when it started reads as one without the JIT (D38).
+		const checking = await opened(source([], startedOnce(FIRST_OFF), { platform: 'phone', os: 'iOS' }));
+		expect(factsOf(checking)['JIT']).toBe('checking again');
+		expect(warningsOf(checking)).toEqual([]);
+		const on = await opened(
+			source([], startedOnce({ ...FIRST_OFF, again: ON }), { platform: 'phone', os: 'iOS' }),
+		);
+		expect(factsOf(on)['JIT']).toBe('on (probably)');
+		expect(warningsOf(on)).toEqual([]);
 	});
 
 	it('says only that it is off elsewhere, where Lockdown Mode is not the cause', async () => {

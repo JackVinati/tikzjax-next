@@ -3,7 +3,7 @@ import { COLD_FONT_CSS } from 'virtual:fonts';
 import { ENGINE_ID } from 'virtual:engine';
 
 import { TexError, type Budgets, type TexResult } from './types';
-import type { BootTimings, EngineInventory } from '../engine-src/protocol';
+import type { EngineInventory, JitState } from '../engine-src/protocol';
 import { WorkerHost } from './engine/worker-host';
 import { budgetsFor, engineCount, snapshotBytes, storedRunBytes } from './platform/budgets';
 import { ensureFonts } from './platform/context';
@@ -126,8 +126,8 @@ export default class TikzjaxNextPlugin extends Plugin {
 			// on a computer short of memory (platform/budgets.ts snapshotBytes).
 			snapshotBudget: () =>
 				this.settings.preambleSnapshots ? snapshotBytes(this.budgets, webViewFeatures()) : 0,
-			// Whether TeX runs without the JIT, which on an iPhone or iPad is said once (D33).
-			onStarted: (boot) => this.warnIfNoJit(boot),
+			// Whether TeX runs without the JIT, which on an iPhone or iPad is said once (D33, D38).
+			onJit: (state) => this.warnIfNoJit(state),
 			runs: this.runs,
 		});
 		this.preamble = new PreambleService(this.app, sha256Hex);
@@ -321,11 +321,12 @@ export default class TikzjaxNextPlugin extends Plugin {
 	/**
 	 * Say, once, on an iPhone or iPad, that TeX seems to run without the JIT there, which Lockdown Mode
 	 * is the likely cause of (engine-src/jit.ts, internal/DECISIONS.md D33), once two of this
-	 * session's engine starts have found it off and none on. Until it is tapped, since it is shown
-	 * once; the diagnostics view says it whenever it is opened.
+	 * session's engine starts have found it off and none on. A start is told of when its probe has
+	 * settled: one that did not find the JIT on at once only once it has been taken again, a second
+	 * later (D38). Until it is tapped, since it is shown once; the diagnostics view says it whenever it
+	 * is opened.
 	 */
-	private warnIfNoJit(boot: BootTimings | null): void {
-		const state = boot?.jit?.state;
+	private warnIfNoJit(state: JitState): void {
 		if (state === 'on' || state === 'off') this.jitStarts[state]++;
 		const message = noJitNotice(this.jitStarts, device().os, this.settings.jitNoticeShown);
 		if (message === null) return;

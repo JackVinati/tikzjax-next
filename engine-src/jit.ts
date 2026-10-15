@@ -34,6 +34,15 @@ import type { JitProbe, JitState } from './protocol';
  * 16. Its module is compiled beside tex.wasm, off the worker's thread, which also pays there for
  * what the first WebAssembly module of a process costs in JavaScriptCore, about 5 ms, and it runs once
  * both are compiled (compileProbeAsync).
+ *
+ * One probe is one moment, and weighing it against the inflate cannot tell a loop that is not compiled
+ * YET from one that never will be: on a phone three times slow, a loop still waiting for
+ * JavaScriptCore's compile threads all through the probe reads as an interpreter does, and says off
+ * (internal/DECISIONS.md D38). So a start whose probe did not find the JIT on takes it again
+ * JIT_RECHECK_MS later, once no render is under way, with the same function, which those threads have
+ * had all that time to compile, and that second probe is what the start says (src/ui/report.ts
+ * jitOfStart). It costs a device without the JIT the probe once more, 33 to 40 ms in WebKit on the
+ * desktop, between two diagrams; one with the JIT whose first probe was slow, about a millisecond.
  */
 
 /**
@@ -125,6 +134,14 @@ export const ON_MAX_NS = 10;
  * to 16 ns a step.
  */
 export const OFF_NS_ALONE = 20;
+
+/**
+ * How long after `ready` a start whose probe did not find the JIT on takes it again, once no render
+ * is under way (worker.ts recheckJit). JavaScriptCore compiles a hot function on threads of its own,
+ * which the probe's first attempts make the loop; a second gives them about eighty times what the
+ * probe's own pauses give them, 12 ms in all.
+ */
+export const JIT_RECHECK_MS = 1000;
 
 /** The probe's function: `n` steps of the generator from `x`. */
 export type Spin = (n: number, x: number) => number;

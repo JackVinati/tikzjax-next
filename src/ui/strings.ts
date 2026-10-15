@@ -41,28 +41,35 @@ export const README_OUT_OF_STEP = `${README}#out-of-step`;
 /**
  * What the probe of the JIT found (engine-src/jit.ts), as the diagnostics say it: it is a guess, and
  * `unclear` where the loop was slow and so was the rest of the start, or nothing native was there to
- * weigh it against.
+ * weigh it against; `checking` for the second a start that did not find it on waits to take it again.
  */
-const jitState = (state: JitState | null): string =>
+const jitState = (state: JitState | 'checking' | null): string =>
 	state === null
 		? 'not measured yet'
 		: state === 'on'
 			? 'on (probably)'
 			: state === 'off'
 				? 'off (probably)'
-				: 'unclear';
+				: state === 'checking'
+					? 'checking again'
+					: 'unclear';
 
 /**
- * What the probe took, and when its first attempt was slow, what a step of its loop took and what a
- * byte of the platform's inflate took in the same start, which it was weighed against.
+ * What a probe took, and when its first attempt was slow, what a step of its loop took and what a
+ * byte of the platform's inflate took in the start, which it was weighed against.
  */
-const jitProbe = (jit: JitProbe): string =>
-	`JIT probe ${jit.spentMs} ms` +
+const probeFigures = (jit: JitProbe): string =>
+	`${jit.spentMs} ms` +
 	(jit.nsPerStep === undefined
 		? ''
 		: ` (${jit.nsPerStep} ns a step` +
 			(jit.inflateNsPerByte === undefined ? '' : `, inflate ${jit.inflateNsPerByte} ns a byte`) +
 			')');
+
+/** The probe at the start, and the one taken again a second later where there was one (D38). */
+const jitProbe = (jit: JitProbe): string =>
+	`JIT probe ${probeFigures(jit)}` +
+	(jit.again === undefined ? '' : `, again a second later ${probeFigures(jit.again)}`);
 
 /**
  * main.js and manifest.json of different versions, and what to do about it (src/platform/version.ts):
@@ -170,14 +177,15 @@ export const STRINGS = {
 	engineStartedIn: (ms: number) => `started in ${ms} ms`,
 	/**
 	 * A start, with where it went once the worker had its payload, which native decoders it had, and
-	 * what its probe found of the JIT and took to find it.
+	 * what its probe found of the JIT and took to find it, `jit` being what the start says of it
+	 * (report.ts jitOfStart).
 	 */
-	engineStartedWith: (ms: number, boot: BootTimings) =>
+	engineStartedWith: (ms: number, boot: BootTimings, jit: JitState | 'checking' | undefined) =>
 		`started in ${ms} ms (in the worker ${boot.totalMs} ms: decode ${boot.decodeMs} ms, ` +
 		`inflate ${boot.inflateMs} ms, compile ${boot.compileMs} ms` +
 		(boot.jit === undefined ? '' : `, ${jitProbe(boot.jit)}`) +
 		`; native gzip ${yesNo(boot.nativeInflate)}, native base64 ${yesNo(boot.nativeBase64)}` +
-		(boot.jit === undefined ? '' : `; JIT ${jitState(boot.jit.state)}`) +
+		(jit === undefined ? '' : `; JIT ${jitState(jit)}`) +
 		')',
 	engineNeverStarted: 'never finished starting',
 	/** What an engine held of saved preambles after its last diagram, and its saves that failed. */

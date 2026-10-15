@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
 	BootTimings,
 	EngineInventory,
+	JitProbe,
+	JitState,
 	OkMessage,
 	SavedRunMessage,
 	StoredRun,
@@ -595,44 +597,70 @@ describe('what the diagnostics view is told about the engine', () => {
 		expect(host.report().lives).toEqual([{ startMs: 86, boot: timings, snapshots: null, stop: null }]);
 	});
 
-	it('tells the plugin each time an engine has started, with what the worker said of it', async () => {
-		// The plugin tells someone on an iPhone without the JIT, once, why diagrams are slow
-		// (main.ts, internal/DECISIONS.md D33): it hears of every start, the JIT probe with it.
-		const started: (BootTimings | null)[] = [];
-		const host = new WorkerHost({ poolSize: 2, onStarted: (boot) => started.push(boot) });
-		const off: BootTimings = {
+	it('tells the plugin what each start says of the JIT, once its probe has settled', async () => {
+		// The plugin tells someone on an iPhone without the JIT, once, why diagrams are slow (main.ts,
+		// internal/DECISIONS.md D33). A probe that did not find the JIT on is taken again a second later,
+		// and only that one counts (D38): one probe cannot tell a loop not compiled yet from no JIT.
+		const told: JitState[] = [];
+		const host = new WorkerHost({ poolSize: 2, onJit: (state) => told.push(state) });
+		const probe = (state: JitState, extra: Partial<JitProbe> = {}): JitProbe => ({
+			state,
+			fastestMs: 3,
+			attempts: 4,
+			spentMs: 30,
+			nsPerStep: 12.5,
+			inflateNsPerByte: 1.51,
+			...extra,
+		});
+		const started = (jit: JitProbe): BootTimings => ({
 			decodeMs: 3,
 			inflateMs: 45,
 			compileMs: 0,
 			totalMs: 61,
 			nativeInflate: true,
 			nativeBase64: true,
-			jit: {
-				state: 'off',
-				fastestMs: 3,
-				attempts: 4,
-				spentMs: 30,
-				nsPerStep: 12.5,
-				inflateNsPerByte: 1.51,
-			},
-		};
+			jit,
+		});
 		void host.ready();
-		worker(0).boot(off);
+		worker(0).boot(started(probe('off')));
 		await tick();
-		expect(started).toEqual([off]);
+		expect(told).toEqual([]);
+		const again = probe('on', { attempts: 1, spentMs: 0.6, nsPerStep: undefined });
+		worker(0).emit({ type: 'jit', jit: again });
+		expect(told).toEqual(['on']);
+		expect(host.report().lives[0]?.boot?.jit).toEqual({ ...probe('off'), again });
+		// Once: a second word is not another start.
+		worker(0).emit({ type: 'jit', jit: probe('off') });
+		expect(told).toEqual(['on']);
+		expect(host.report().lives[0]?.boot?.jit?.again).toEqual(again);
 
-		// A worker that says nothing of its start, and a listener that throws, change nothing else.
+		// A probe that found it on at the start is told of at once, and an engine that says nothing of
+		// its start, or a probe at all, is not told of.
+		host.kill();
+		void host.ready();
+		worker(1).boot(started(probe('on', { attempts: 1, spentMs: 0.5 })));
+		await tick();
+		expect(told).toEqual(['on', 'on']);
+		host.kill();
+		void host.ready();
+		worker(2).boot();
+		await tick();
+		worker(2).emit({ type: 'jit', jit: probe('off') });
+		expect(told).toEqual(['on', 'on']);
+		expect(host.report().lives[2]?.boot).toBeNull();
+
+		// A listener that throws changes nothing else.
 		host.kill();
 		const throwing = new WorkerHost({
-			onStarted: () => {
+			onJit: () => {
 				throw new Error('the listener failed');
 			},
 		});
 		const { result } = render(throwing, 'a');
-		worker(1).boot();
+		worker(3).boot(started(probe('on')));
 		await tick();
-		expect(worker(1).renders).toHaveLength(1);
-		worker(1).reply(worker(1).renders[0] ?? -1);
+		expect(worker(3).renders).toHaveLength(1);
+		worker(3).reply(worker(3).renders[0] ?? -1);
 		await tick();
 		expect(result.status).toBe('fulfilled');
 		throwing.dispose();

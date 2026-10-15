@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	compileProbe,
 	compileProbeAsync,
+	JIT_RECHECK_MS,
 	OFF_NS_ALONE,
 	OFF_RATIO,
 	ON_MAX_NS,
@@ -46,11 +47,16 @@ const inflated = (ms: number): number => (ms * 1e6) / DUMP_BYTES;
  * A clock and a stand-in for the module, in which `nsPerStep` is what a step costs: the clock moves
  * only when the loop runs or the thread is given up, but for `stall`, which moves it once, by that
  * much, at the n-th call. `tickMs` rounds what the clock says down to its ticks, as WebKit's moves a
- * millisecond at a time in a page that is not cross-origin isolated.
+ * millisecond at a time in a page that is not cross-origin isolated. `tierUp` makes a step cost
+ * another `nsPerStep` once the clock has reached `atMs`, as when the loop has been compiled.
  */
 function simulated(
 	nsPerStep: number,
-	options: { stall?: { atCall: number; ms: number }; tickMs?: number } = {},
+	options: {
+		stall?: { atCall: number; ms: number };
+		tickMs?: number;
+		tierUp?: { atMs: number; nsPerStep: number };
+	} = {},
 ) {
 	let ms = 0.37;
 	const calls: { n: number; x: number }[] = [];
@@ -58,7 +64,8 @@ function simulated(
 	const spin: Spin = (n, x) => {
 		calls.push({ n, x });
 		if (options.stall !== undefined && calls.length === options.stall.atCall) ms += options.stall.ms;
-		ms += (n * nsPerStep) / 1e6;
+		const tierUp = options.tierUp;
+		ms += (n * (tierUp !== undefined && ms >= tierUp.atMs ? tierUp.nsPerStep : nsPerStep)) / 1e6;
 		return lcg(n, x);
 	};
 	const pause: Pause = (wait) => {
@@ -154,13 +161,14 @@ describe('probeJit', () => {
 
 	/*
 	 * The maintainer's iPhone 16 Pro, with Obsidian excluded from Lockdown Mode, read twice on
-	 * 2026-10-15 with 0.2.1-beta.4 in the diagnostics view. Hot or in a low power state: the inflate
-	 * took 86 ms where it took 26 the day before, 3.3 times as long, and every one of the four
-	 * attempts reached 3 ms by WebKit's clock, a millisecond at a time, so that the loop ran at
-	 * 3.3 ns a step or slower where it runs at about 1. Closed and opened again: an inflate of 39 to
-	 * 47 ms, and a probe of 1 to 2 ms. Both had the JIT.
+	 * 2026-10-15 with 0.2.1-beta.4 in the diagnostics view. Apparently throttled, in a low power state
+	 * or warm: the inflate took 86 ms where it took 26 the day before, 3.3 times as long, and every one
+	 * of the four attempts reached 3 ms by WebKit's clock, a millisecond at a time, so that the loop
+	 * ran at 3.3 ns a step or slower where it runs at about 1. Closed and opened again: an inflate of 39
+	 * to 47 ms, and a probe of 1 to 2 ms. Both had the JIT. The first fits a loop compiled and slowed
+	 * down, below, as well as one not compiled yet, in the test after it.
 	 */
-	it("finds the JIT on for the maintainer's iPhone, hot and not, as 0.2.1-beta.4 did not", async () => {
+	it("finds the JIT on for the maintainer's iPhone, slowed down and not, as 0.2.1-beta.4 did not", async () => {
 		for (const nsPerStep of [3.3, 4, 5, 6.6])
 			expect(
 				await probe(nsPerStep, inflated(86), { tickMs: 1 }),
@@ -175,6 +183,44 @@ describe('probeJit', () => {
 		expect(hot?.nsPerStep).toBeLessThan(6.7);
 		for (const ms of [39, 47])
 			expect(await probe(1, inflated(ms), { tickMs: 1 })).toMatchObject({ state: 'on' });
+	});
+
+	/*
+	 * The same reading fits a loop that was not compiled yet on a phone slowed down 3.3 times: 13.75 ns
+	 * a step interpreted, 45 slowed, until JavaScriptCore's compile threads, short of a core, got to
+	 * it, and 3.3 after. Weighed against the inflate or not, one probe cannot tell that from no JIT,
+	 * as the review of beta.5's first build found (DECISIONS.md D38), and beta.4's could not either.
+	 * So a start that did not find the JIT on takes the probe again a second later, with the same
+	 * function, and that second probe is what it says.
+	 */
+	it("finds the JIT on a second later, where the maintainer's iPhone had not compiled the loop yet", async () => {
+		const notYet = (atMs: number) => simulated(45, { tickMs: 1, tierUp: { atMs, nsPerStep: 3.3 } });
+		for (const atMs of [36, 200, JIT_RECHECK_MS]) {
+			const sim = notYet(atMs);
+			const first = await probeJit(sim.now, sim.spin, inflated(86), sim.pause);
+			expect(first, `compiled at ${atMs} ms`).toMatchObject({ state: 'off', attempts: PROBE_ATTEMPTS });
+			// 45 ns a step against the inflate's 3.71 a byte: far slower, as an interpreter is.
+			expect(first?.nsPerStep).toBeGreaterThan(OFF_RATIO * inflated(86));
+			await sim.pause(JIT_RECHECK_MS);
+			expect(
+				await probeJit(sim.now, sim.spin, inflated(86), sim.pause),
+				`compiled at ${atMs} ms, a second later`,
+			).toMatchObject({ state: 'on', attempts: 1 });
+		}
+		// Compiled within the probe's own pauses, the first says on already: here up to 28 ms into it.
+		for (const atMs of [8, 20, 28]) {
+			const sim = notYet(atMs);
+			expect(await probeJit(sim.now, sim.spin, inflated(86), sim.pause), `at ${atMs} ms`).toMatchObject(
+				{
+					state: 'on',
+				},
+			);
+		}
+		// Not compiled a second later either, both say off: the limit of this, on a phone not measured.
+		const late = notYet(5000);
+		expect(await probeJit(late.now, late.spin, inflated(86), late.pause)).toMatchObject({ state: 'off' });
+		await late.pause(JIT_RECHECK_MS);
+		expect(await probeJit(late.now, late.spin, inflated(86), late.pause)).toMatchObject({ state: 'off' });
 	});
 
 	it('finds a processor slowed down all over the JIT on, however slow, where the loop is compiled', async () => {
