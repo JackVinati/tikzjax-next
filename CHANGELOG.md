@@ -3,6 +3,24 @@
 What changed in each release, newest first. The release workflow puts a version's section at the
 top of its notes on GitHub, and will not publish a version that has none.
 
+## 0.2.2 — 2026-10-16
+
+No diagram draws differently, and every diagram 0.2.1 cached is shown from the cache.
+
+- The plugin's settings are in Obsidian's settings search, from Obsidian 1.13 on: searching for
+  "saved preambles", for instance, finds the row in TikZJax Next's tab. The tab has the same rows as
+  before, under the same headings. Below 1.13 it is drawn as in 0.2.1.
+- Clear, under Cache, counts the cached diagrams again in place once it has emptied the cache, where
+  it drew the whole tab again. From Obsidian 1.13 on its button is painted the way Obsidian paints
+  its own buttons that delete something.
+- Printing and exporting to PDF give the same black-on-white diagrams as before, without
+  `!important` in the plugin's styles. A CSS snippet that sets `--tikz-ink` or `--tikz-paper` now
+  applies in print as well; put it inside `@media screen` to keep print black on white.
+- With Obsidian Sync Standard carrying installed plugins, this is the first update that 0.2.1 can
+  tell was only half carried: a device left with 0.2.1's `main.js` and this release's
+  `manifest.json` says so once, with what to do.
+  [The README](https://github.com/JackVinati/tikzjax-next#out-of-step) says the same.
+
 ## 0.2.1 — 2026-10-15
 
 The figures below were measured on my Windows desktop, in headless Chromium, the browser engine of

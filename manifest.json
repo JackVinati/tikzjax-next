@@ -1,7 +1,7 @@
 {
   "id": "tikzjax-next",
   "name": "TikZJax Next",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "minAppVersion": "1.7.2",
   "description": "Render TikZ and LaTeX diagrams in your notes.",
   "author": "JackVinati",
