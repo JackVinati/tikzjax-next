@@ -12,8 +12,6 @@ it comes into view, takes about a third off TeX's time on a desktop, and lets a 
 preamble an earlier diagram has already compiled. Labels in Chinese, Greek, Cyrillic and other
 scripts are drawn as well.
 
-<!-- IPHONE-FIGURES: once 0.2.1's phone figures exist (see the marker under "## 0.2.1"), add here in one clause what 0.2.1 does on an iPhone, with the device named there. Until then this paragraph speaks only of the desktop. -->
-
 <div align="center">
 
 [![Latest release](https://img.shields.io/github/v/release/JackVinati/tikzjax-next?label=release)](https://github.com/JackVinati/tikzjax-next/releases/latest)
@@ -146,8 +144,6 @@ On my iPhone 16 Pro, on iOS 27.0.1 with Obsidian 1.14.5, 0.2.0's engine started 
 small diagram took 15 to 40 ms of TeX after the 500 ms wait, read off the diagnostics view on 14
 October 2026. I will add 0.2.1's figures from the same phone here once I have read them off it the
 same way; until then, every figure on this page that compares 0.2.1 with 0.2.0 is from the desktop.
-
-<!-- IPHONE-FIGURES: 0.2.1 on the maintainer's iPhone. When the readings are in: fill the null entries of `texTimeIphone` and `wait.iphone` in scripts/readme-charts.mjs (each 0.2.1 value and `date021`), run `node scripts/readme-charts.mjs`, and add the two charts it then writes, docs/images/new-diagram-iphone-0.2.1.svg and docs/images/tex-time-iphone-0.2.1.svg, here, each as an <img> inside <div align="center"> like the desktop ones, with alt text that gives its figures. Then replace "I will add 0.2.1's figures ... is from the desktop." with a sentence giving them, with the device, iOS version, Obsidian version and date, say in the introduction at the top what 0.2.1 does there, and in Platforms add the build that was read to "0.2.1's betas, from beta.2 to beta.4". -->
 
 Also in 0.2.1:
 
@@ -388,16 +384,15 @@ libraries, from 247 TeX files. The lists below are taken from the build itself, 
 them in step with it.
 
 **Packages**, for `\usepackage` or `%!tikz packages=`, including the ones the others load:
-<!-- bundled:packages -->
+
 `amsbsy` `amsfonts` `amsgen` `amsmath` `amsopn` `amssymb` `amstext` `array` `atveryend`
 `atveryend-ltx` `calc` `chemfig` `circuitikz` `color` `elocalloc` `environ` `etoolbox` `eufrak`
 `expl3` `forest` `hf-tikz` `ifthen` `infwarerr` `inlinedef` `keyval` `ltxcmds` `mathrsfs`
 `mathtools` `mhsetup` `pdftexcmds` `pgfcalendar` `pgfopts` `pgfplots` `pgfplotstable` `preview`
 `siunitx` `tikz-3dplot` `tikz-cd` `tikz-feynhand` `translations` `trimspaces` `xparse`
-<!-- /bundled:packages -->
 
 **TikZ libraries**, for `\usetikzlibrary` or `%!tikz libraries=`:
-<!-- bundled:tikz-libraries -->
+
 `3d` `angles` `animations` `arrows` `arrows.meta` `automata` `babel` `backgrounds` `bbox` `bending`
 `calc` `calendar` `cd` `chains` `circuits` `circuits.ee` `circuits.ee.IEC` `circuits.logic`
 `circuits.logic.CDH` `circuits.logic.IEC` `circuits.logic.US` `curvilinear` `datavisualization`
@@ -412,14 +407,12 @@ them in step with it.
 `shapes.gates.ee.IEC` `shapes.gates.logic` `shapes.gates.logic.IEC` `shapes.gates.logic.US`
 `shapes.geometric` `shapes.misc` `shapes.multipart` `shapes.symbols` `snakes` `spy` `svg.path`
 `through` `trees` `turtle` `views`
-<!-- /bundled:tikz-libraries -->
 
 **pgfplots libraries**, for `\usepgfplotslibrary`:
-<!-- bundled:pgfplots-libraries -->
+
 `clickable` `colorbrewer` `colormaps` `colortol` `contourlua` `dateplot` `decorations.softclip`
 `fillbetween` `groupplots` `patchplots` `polar` `smithchart` `statistics` `surfshading` `ternary`
 `units`
-<!-- /bundled:pgfplots-libraries -->
 
 Being in the list means the file is there, not that everything in it can work: `contourlua` needs
 LuaTeX and `external` needs to run programs, and this engine has neither. What a fixture in
@@ -464,8 +457,6 @@ build; I have not checked it separately. 0.2.1's engine uses only WebAssembly 1.
 so it compiles in the same WebViews as before, iOS 14.5's among them; a check in CI decodes the
 engine to make sure. Before iOS 16.4, which has no decompression of its own for the engine to use,
 the engine unpacks itself in JavaScript, as 0.2.0 did.
-
-<!-- DEVICE-CHECK: still to try on a phone: a note with twenty diagrams that are not cached, scrolling it, and a PDF export; and anything on an iPad. When they are done, replace "The iPad runs the same build; I have not checked it separately." with what was checked on it, and drop from "Not tried there yet" whatever has now been tried. -->
 
 Not tried there yet: a note with twenty diagrams that are not cached, and PDF export on the phone.
 If something gives out on a phone, it is probably one of those, and an issue with the device, the iOS
@@ -537,8 +528,6 @@ off the diagnostics view on 14 October 2026, with Obsidian excluded from Lockdow
 first diagram of each preamble also saves it, which costs it a few milliseconds and spares the
 diagrams after it their packages. Later diagrams in the session are faster, and a diagram you have
 already seen comes from the cache without running TeX at all.
-
-<!-- IPHONE-FIGURES: the iPhone engine start above is one reading of 0.2.0 on the maintainer's iPhone 16 Pro (iOS 27.0.1, Obsidian 1.14.5, diagnostics view, 14 October 2026). Add 0.2.1's from the same phone once `wait.iphone` in scripts/readme-charts.mjs is filled in. -->
 
 **Why is the second diagram with the same packages faster?** Since 0.2.1 the engine keeps where TeX
 stands once a diagram's `\begin{document}` is done, with its packages and preamble loaded, and a
@@ -658,8 +647,6 @@ means the engine's test could not tell, and "checking again" that it is taking t
 second after the engine started, so that a phone that is only slow is not taken for one without the
 JIT. "no WebAssembly" means the engine cannot run at all. When two engine starts in a session find
 the JIT off on an iPhone or iPad, a notice says so once.
-
-<!-- IPHONE-FIGURES: the 7.3 s, 0.27 s, 1.3 s and 0.13 s above are one reading each of 0.2.0 on the maintainer's iPhone 16 Pro (iOS 27.0.1, Obsidian 1.14.5, diagnostics view, 14 October 2026). The Low Power Mode figures are his readings of 0.2.1-beta.4 on 15 October 2026 against 0.2.1-beta.3 on 14 October (internal/DECISIONS.md D38; the inflate took 86 ms against 26). Add 0.2.1's own figures with Lockdown Mode on, from TODO.md §9's JIT probe check, once they exist. -->
 
 <a id="out-of-step"></a>**After an update, another device shows the new version but nothing changed.**
 Obsidian Sync Standard does not copy a file over 5 MB, and `main.js` is about 12 MB. When Sync

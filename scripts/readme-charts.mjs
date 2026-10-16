@@ -220,7 +220,7 @@ const DATA_021 = {
 	// TeX step of a diagram that says "preamble saved in N ms", `saved` of one that says "resumed
 	// from a saved preamble" or "resumed from a stored preamble". Give each as a number or [lo, hi],
 	// fill in `date021`, and run this script: it then draws tex-time-iphone-0.2.1.svg, which the
-	// README's IPHONE-FIGURES comment says where to put. Until every value is filled in it is left
+	// item in TODO.md §9 says where to put in the README. Until every value is filled in it is left
 	// out. Nothing here may be guessed or carried over from the desktop.
 	texTimeIphone: {
 		platform: 'iPhone 16 Pro, iOS 27.0.1, Obsidian 1.14.5',

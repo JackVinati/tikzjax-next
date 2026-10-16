@@ -20,12 +20,20 @@ const texFiles = Object.keys(import.meta.glob('../engine-build/out/dist/tex_file
 
 const readme = texts['../README.md'] ?? '';
 
-/** The backticked names between `<!-- bundled:<what> -->` and `<!-- /bundled:<what> -->`. */
-function listed(what: string): string[] {
-	const start = readme.indexOf(`<!-- bundled:${what} -->`);
-	const end = readme.indexOf(`<!-- /bundled:${what} -->`);
-	if (start === -1 || end === -1 || end < start) return [];
-	return [...readme.slice(start, end).matchAll(/`([^`]+)`/g)].map((m) => m[1] ?? '');
+/**
+ * The backticked names of the paragraph under the README line that starts with `**<heading>**`.
+ * Found by its heading rather than by comment markers: the store's review counts a comment left in
+ * a README as unfilled template text.
+ */
+function listed(heading: string): string[] {
+	const lines = readme.split(/\r?\n/);
+	const at = lines.findIndex((line) => line.startsWith(`**${heading}**`));
+	if (at === -1) return [];
+	let start = at + 1;
+	while (lines[start] === '') start++;
+	const end = lines.indexOf('', start);
+	const paragraph = lines.slice(start, end === -1 ? undefined : end).join('\n');
+	return [...paragraph.matchAll(/`([^`]+)`/g)].map((m) => m[1] ?? '');
 }
 
 function shipped(): { packages: string[]; tikz: string[]; pgfplots: string[] } {
@@ -51,15 +59,15 @@ describe('README', () => {
 
 	it('lists exactly the packages the engine bundles', () => {
 		expect(engine.packages.length).toBeGreaterThan(30);
-		expect(sorted(listed('packages'))).toEqual(sorted(engine.packages));
+		expect(sorted(listed('Packages'))).toEqual(sorted(engine.packages));
 	});
 
 	it('lists exactly the TikZ libraries the engine bundles', () => {
-		expect(sorted(listed('tikz-libraries'))).toEqual(sorted(engine.tikz));
+		expect(sorted(listed('TikZ libraries'))).toEqual(sorted(engine.tikz));
 	});
 
 	it('lists exactly the pgfplots libraries the engine bundles', () => {
-		expect(sorted(listed('pgfplots-libraries'))).toEqual(sorted(engine.pgfplots));
+		expect(sorted(listed('pgfplots libraries'))).toEqual(sorted(engine.pgfplots));
 	});
 
 	it('quotes the package versions the engine reports', () => {
