@@ -695,8 +695,8 @@ pgf paint arrives as `#rrggbb`, shortened to `#rgb`. dvi2html's colour-special m
                               background:#fff; padding:.5em; border-radius:4px; }
 .theme-dark .tikzjax-figure.is-invert svg { filter: invert(1) hue-rotate(180deg); }
 
-@media print { .tikzjax-figure { --tikz-ink:#000 !important; --tikz-paper:#fff !important;
-                                 break-inside: avoid; page-break-inside: avoid; } }
+@media print { .tikzjax-figure { --tikz-ink:#000; --tikz-paper:#fff; page-break-inside: avoid; }
+               .theme-dark .tikzjax-figure.is-invert svg { filter: none; } }
 .print .tikzjax-figure { --tikz-ink:#000; --tikz-paper:#fff; }
 ```
 

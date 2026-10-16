@@ -51,9 +51,8 @@ npm run build
 npm run scan:native -- --check   # about a minute
 ```
 
-`lint:store` reports a set of known warnings: sentence-case false positives on names like TikZ and
-TeX, deprecations that the 1.7.2 floor requires (`setWarning`, `display`), and the declarative
-settings API the floor rules out. A change should add none.
+`lint:store` reports a set of known warnings, all sentence-case false positives on names like TikZ
+and TeX. A change should add none.
 
 ## Rules a change has to keep
 

@@ -233,6 +233,10 @@ Two calls were holding the floor at 1.13 for no benefit, and both are gone:
 - `SettingTab.update()` refreshes the settings pane after the cache is cleared. `display()` does the
   same thing and is as old as the class.
 
+**Amended by D41 (2026-10-16):** the store's linter reads `requireApiVersion('1.13.0')` in an `if`
+as a guard, so `setDestructive` and the declarative settings are used from 1.13 on and the floor
+stays 1.7.2. The two paragraphs below are what this decision said until then.
+
 The consequence is that the declarative settings API stays unimplemented and the store keeps warning
 about it. That is the right trade: it costs settings-search discoverability on 1.13+, and it buys
 every user between 1.5.7 and 1.13 — which today includes every iPhone.
@@ -4117,6 +4121,67 @@ cache does not hold, 147 for the times on screen kept apart, 23 for the `nocache
 to 12,234,493. The worker does not change,
 nor does anything `test/fixtures/golden/REVISION.json` records: diagrams draw as before, and stay
 cached.
+
+## D41 — The store's review of 0.2.1: settings in Obsidian's search, print rules without `!important`, a README without notes
+
+**Amends D6 (the floor ruled out the declarative settings) and DESIGN.md's print rules. Date of
+record: 2026-10-16.**
+
+The community store reviews every release automatically. On 16 October it showed 0.2.1's review as
+failed, "could not be completed", and at 13:29 UTC its list, `community-plugins.json` in
+`obsidianmd/obsidian-releases`, dropped the plugin, with 87 others in the same commit. Eight of the
+88, picked at random, had all published a release on 15 or 16 October. The checks missing from the
+report are the long ones, the build reproduced, obfuscation and vulnerable dependencies, while 0.2.0
+passed all three with the same build. So the review did not finish, and nothing in it asks for a
+change. The warnings it gave, and 0.2.0's before them, were these:
+
+- **`!important` (6) and `break-inside` (2)**: three declarations and one in `src/styles/base.css`,
+  and the same in `styles.css`. The print rules beat the plugin's own without `!important`: the base
+  rule sets the two tokens with the same selector, earlier; the colour modes set them with a more
+  specific one, but to the same `#000` and `#fff`; and the invert filter is now taken off in print
+  with the selector that puts it on, `.theme-dark .tikzjax-figure.is-invert svg`, after it. What
+  gives way is a snippet that sets the tokens, which now wins in print as well. doiuse, run here,
+  reports `break-inside` as partly supported (it also covers breaks between columns) and not
+  `page-break-inside`, which browsers read as `break-inside`; only the latter is kept. Checked in
+  Obsidian 1.14.4: the computed ink, paper, colour, `break-inside` and SVG filter of the four colour
+  modes, in the dark and light themes, on screen, in print and under `.print`, are the same as
+  0.2.1's, in all 24 cases.
+- **`getSettingDefinitions` not implemented, `display` and `setWarning` deprecated.** D6 kept them
+  because a feature test of `setDestructive` was reported against the floor either way.
+  `requireApiVersion('1.13.0')` as the condition of an `if` is not, as checked against
+  `eslint-plugin-obsidianmd` on 12 October and again here. The tab's rows are now written once, each
+  a name, a description and a `render` that puts its control on the row, which is how Obsidian's own
+  tabs (backlinks, the web viewer) use the API. Obsidian 1.13 and later read them through
+  `getSettingDefinitions` when the tab is added, index them for the settings search, and draw them
+  in groups; `display()` draws the same rows below 1.13, where Obsidian calls it, and 1.13 does not
+  call it when the definitions are not empty (read in the 1.14.4 bundle: `renderTab` is
+  `settingItems.length > 0 ? f4(this) : this.display()`). Clear paints its button with
+  `setDestructive().setCta()` from 1.13 on, which is what `setWarning` became there, and with the
+  `mod-warning` class before, which is all `setWarning` did in 1.12.7, read in its bundle. After
+  Clear only the count is read again, where the tab used to be drawn again with `display()`.
+  Obsidian keeps the definitions and draws from them later, and draws a row again when data.json
+  changes under it, so each `render` reads the settings when it runs, and a preamble path being
+  typed is applied when its row is taken down. In Obsidian 1.14.4: the tab is drawn from the
+  definitions, seven groups and fourteen rows; searching "saved preambles" finds TikZJax Next's
+  row; a toggle saves; Clear counts again in place. With the definitions emptied at run time,
+  Obsidian calls `display()`, once, which draws the same rows, and a path field saves only when it
+  is left. `test/settings-tab.test.ts` runs every earlier test both ways, and checks that both draw
+  the same rows, on a computer and on a phone.
+- **README placeholder text.** The README's notes for later, three `IPHONE-FIGURES` comments and a
+  `DEVICE-CHECK`, are now in `TODO.md` §9, and `test/readme.test.ts` finds the bundled lists by
+  their headings instead of by comment markers. On `main` since 2e75b8b, so the next release's
+  review reads it; 0.2.1's stays tied to its own commit.
+
+What stays, and why:
+
+- **`main.js` is over Sync Standard's 5 MB.** The size is the engine; the README says so and what to
+  do. TeX Live 2026 (0.3.0) should bring it to about 8.3 MB.
+- **Vault enumeration and clipboard** are reported for what they are, not as faults: `vault.getFiles`
+  lists the TeX files the preamble field suggests, and the clipboard is only written, by Copy SVG,
+  the TeX log's Copy and the diagnostics view's Copy.
+- **GPL-3.0** is the licence (D9), and the malware scan is the store's to run.
+
+Diagrams draw as before, and nothing `test/fixtures/golden/REVISION.json` records changes.
 
 ---
 
