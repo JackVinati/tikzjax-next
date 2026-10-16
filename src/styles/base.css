@@ -86,20 +86,23 @@
  * independently of both @media print emulation and the theme class. That is the mechanism behind
  * "switch to light mode and export works", reported independently by three people on upstream #45.
  *
- * The `!important`s are the point of the block, not an accident: print has to beat the theme, the
- * per-figure colour classes and anything a snippet has added, and it gets exactly one chance
- * because the export is not interactive. `break-inside` is flagged as only partly supported, which
- * is why the legacy `page-break-inside` sits next to it rather than instead of it.
+ * Neither has to be marked important to beat the rules above. The base rule sets the two tokens
+ * with the same selector, earlier; the colour modes set them with a more specific one, but to the
+ * same black and white. The invert filter is taken off with the selector that puts it on, after
+ * it. A snippet of your own that sets them wins in print as well, which is what a snippet is for.
+ *
+ * `page-break-inside` keeps a diagram on one page. Browsers read it as `break-inside`, which is
+ * not written out because the store's review reports it as only partly supported: it also covers
+ * breaks between the columns of a multi-column layout, where Chromium's support is partial.
  */
 @media print {
 	.tikzjax-figure {
-		--tikz-ink: #000 !important;
-		--tikz-paper: #fff !important;
-		break-inside: avoid;
+		--tikz-ink: #000;
+		--tikz-paper: #fff;
 		page-break-inside: avoid;
 	}
-	.tikzjax-figure.is-invert svg {
-		filter: none !important;
+	.theme-dark .tikzjax-figure.is-invert svg {
+		filter: none;
 	}
 }
 .print .tikzjax-figure {
