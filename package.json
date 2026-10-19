@@ -60,7 +60,7 @@
     "eslint-plugin-obsidianmd": "0.4.2",
     "happy-dom": "21.0.1",
     "obsidian": "1.14.4",
-    "oxlint": "1.87.0",
+    "oxlint": "1.88.0",
     "prettier": "3.9.10",
     "tsgo": "npm:typescript@7.0.2",
     "typescript": "5.9.3",
