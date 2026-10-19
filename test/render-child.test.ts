@@ -2,6 +2,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { installObsidianDom } from './stubs/obsidian-dom';
 import { TikzBlock, type BlockDeps, type BlockOutcome, type TexJobSpec } from '../src/block/render-child';
+import { BOUNDS_RULE } from '../src/block/mount';
 import { isQueueError, RenderQueue } from '../src/queue/queue';
 import type { Artifact, BlockOptions, EngineCapabilities, TexHost, TexResult } from '../src/types';
 import { InterruptedError, TexError } from '../src/types';
@@ -833,6 +834,87 @@ describe('the first measurement', () => {
 				'K',
 				expect.objectContaining({ viewBox: '0 0 40 20', w: 40 }),
 			);
+		} finally {
+			restore();
+		}
+	});
+});
+
+describe('a cached diagram whose box was measured before 0.2.3', () => {
+	/**
+	 * That box counted what clip paths hide, and a pgfplots curve that runs past its axis made it
+	 * mostly empty (svg/measure.ts). Such a diagram is measured again from the cache, not compiled.
+	 */
+	const CLIPPED =
+		'<svg xmlns="http://www.w3.org/2000/svg" width="100pt" height="50pt" viewBox="-72 -72 100 50">' +
+		'<clipPath id="__TZ__0"><rect width="40" height="20"/></clipPath>' +
+		'<g clip-path="url(#__TZ__0)"><rect width="40" height="900"/></g></svg>';
+
+	/** Every element measures 40 by 20 where it stands, which is what the walk needs of them. */
+	function measurableShapes(): () => void {
+		const restoreRoot = measurable();
+		const w = window as unknown as Record<string, { prototype: object } | undefined>;
+		const protos = ['SVGElement', 'SVGGraphicsElement', 'SVGSVGElement']
+			.map((name) => w[name]?.prototype)
+			.filter((p): p is object => p !== undefined);
+		const saved = protos.map((p) => Object.getOwnPropertyDescriptors(p));
+		for (const p of protos) {
+			Object.defineProperty(p, 'getBBox', {
+				configurable: true,
+				value: () => ({ x: 0, y: 0, width: 40, height: 20 }),
+			});
+			Object.defineProperty(p, 'getScreenCTM', {
+				configurable: true,
+				value: () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }),
+			});
+		}
+		return () => {
+			protos.forEach((p, i) => {
+				for (const name of ['getBBox', 'getScreenCTM']) {
+					const before = saved[i]?.[name];
+					if (before) Object.defineProperty(p, name, before);
+					else delete (p as Record<string, unknown>)[name];
+				}
+			});
+			restoreRoot();
+		};
+	}
+
+	it('is measured again where it has a clip path, and the new box is stored', async () => {
+		const restore = measurableShapes();
+		try {
+			const stale = { ...artifact(CLIPPED), viewBox: '0 0 40 900', w: 40, h: 900 };
+			const cache = fakeCache(stale);
+			const put = vi.spyOn(cache, 'put');
+			const el = container();
+			const child = new TikzBlock(el, spec(), deps({ cache }));
+			child.onload();
+			await child.settled;
+
+			await vi.waitFor(() =>
+				expect(put).toHaveBeenLastCalledWith(
+					'K',
+					expect.objectContaining({ viewBox: '0 0 40 20', h: 20, bounds: BOUNDS_RULE }),
+				),
+			);
+			expect(el.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 40 20');
+		} finally {
+			restore();
+		}
+	});
+
+	it('keeps its box without a clip path, where both rules measure the same', async () => {
+		const restore = measurableShapes();
+		try {
+			const cache = fakeCache(artifact(SVG));
+			const put = vi.spyOn(cache, 'put');
+			const el = container();
+			const child = new TikzBlock(el, spec(), deps({ cache }));
+			child.onload();
+			await child.settled;
+
+			expect(el.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 100 50');
+			expect(put).not.toHaveBeenCalled();
 		} finally {
 			restore();
 		}

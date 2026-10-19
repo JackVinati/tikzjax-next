@@ -664,6 +664,8 @@ try { const b = svg.getBBox(); … } catch { /* display:none in some engines */ 
 
 `await document.fonts.ready` is not a nicety. dvi2html emits real `<text font-family="cmr10">` elements; a bbox measured before those faces resolve is wrong, and because the corrected viewBox is **persisted into the artifact** it would be wrong *forever* — the bbox is an output, not a key input, so no input change would ever invalidate it. A cache that poisons itself is worse than no cache. If any referenced face reports unloaded, we mount with the engine's viewBox and retry the measurement on the next mount rather than persisting a guess.
 
+**Clipping (D42, 0.2.3).** `getBBox()` is geometry before clipping, so a pgfplots curve that runs past its axis made the frame as tall as the curve. A diagram with a `clip-path` in it is measured by `svg/measure.ts`'s `visibleBox`, which cuts the box of each clipped element down to the box of its clip path; one without is measured by `getBBox()` as before. The artifact records the rule with its box (`bounds`), and a stored box measured before 0.2.3, of a template with a clip path in it, is measured again on its next mount, without a compile.
+
 Every subsequent mount and every export is pure arithmetic. Complementary opt-in knob: `%!tikz border=4pt` injects `\standaloneconfig{border=…}` via `addToPreamble` — `standalone` is already the preloaded class, so this needs no rebuild (#29). Default `null`.
 
 ### 7.5 Colour model

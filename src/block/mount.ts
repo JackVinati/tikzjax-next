@@ -2,6 +2,7 @@ import type { Artifact, Presentation } from '../types';
 import { stampIds } from '../svg/ids';
 import { parseSvg, serializeSvg } from '../svg/serialize';
 import { applyInkBoundsTo, parseViewBox, formatViewBox, formatNumber, type InkBounds } from '../svg/geometry';
+import { visibleBox } from '../svg/measure';
 
 /**
  * Putting a finished artifact into the document. See internal/DESIGN.md §7.2 steps 7-9.
@@ -62,10 +63,13 @@ export function mountArtifact(
  */
 export function standaloneMarkup(artifact: Artifact): string {
 	const markup = stampIds(artifact.template, String(++instanceCounter));
-	if (artifact.viewBox === null) return markup;
+	// Not measured again until it is mounted: until then, the engine's frame, not a box that may be
+	// mostly empty.
+	const viewBox = withCurrentBounds(artifact).viewBox;
+	if (viewBox === null) return markup;
 	try {
 		const doc = parseSvg(markup);
-		applyBounds(doc.documentElement, artifact.viewBox);
+		applyBounds(doc.documentElement, viewBox);
 		return serializeSvg(doc);
 	} catch {
 		// The template parsed once already, on its way through the pipeline. Should it not now, the
@@ -193,7 +197,9 @@ export async function measureInk(svg: SVGSVGElement, doc: Document): Promise<Ink
 	}
 
 	try {
-		const box = svg.getBBox();
+		// The root's box counts what clip paths hide (svg/measure.ts); without one, it is the box.
+		const box = svg.querySelector('[clip-path]') === null ? svg.getBBox() : visibleBox(svg);
+		if (box === null) return null;
 		if (!Number.isFinite(box.width) || !Number.isFinite(box.height)) return null;
 		if (box.width <= 0 || box.height <= 0) return null;
 		return { x: box.x, y: box.y, width: box.width, height: box.height };
@@ -204,10 +210,21 @@ export async function measureInk(svg: SVGSVGElement, doc: Document): Promise<Ink
 	}
 }
 
+/**
+ * The rule `measureInk` measures by, stored with the box as `Artifact.bounds`. 2 is what is visible
+ * (0.2.3). Before, the box was the whole drawing, what clip paths hide included.
+ */
+export const BOUNDS_RULE = 2;
+
 /** Fold a measured bbox into the artifact so every later mount is pure arithmetic. */
 export function withMeasuredBounds(artifact: Artifact, bounds: InkBounds): Artifact {
 	const existing = parseViewBox(artifact.viewBox);
-	if (existing && existing.width === bounds.width && existing.height === bounds.height) {
+	if (
+		existing &&
+		existing.width === bounds.width &&
+		existing.height === bounds.height &&
+		artifact.bounds === BOUNDS_RULE
+	) {
 		return artifact;
 	}
 	return {
@@ -215,5 +232,18 @@ export function withMeasuredBounds(artifact: Artifact, bounds: InkBounds): Artif
 		viewBox: formatViewBox(bounds),
 		w: bounds.width,
 		h: bounds.height,
+		bounds: BOUNDS_RULE,
 	};
+}
+
+/**
+ * A stored artifact as it is to be mounted: one whose box an earlier rule measured, with a clip
+ * path in it, goes back to the engine's frame, and the mount measures it again and stores the new
+ * box. Its box may be far too large (svg/measure.ts), and the measurement is all it takes, not a
+ * compile. Without a clip path both rules give the same box, so those keep theirs.
+ */
+export function withCurrentBounds(artifact: Artifact): Artifact {
+	if (artifact.viewBox === null || (artifact.bounds ?? 1) >= BOUNDS_RULE) return artifact;
+	if (!artifact.template.includes('clip-path')) return artifact;
+	return { ...artifact, viewBox: null, w: 0, h: 0 };
 }

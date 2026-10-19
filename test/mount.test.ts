@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeAll, describe, expect, it } from 'vitest';
 import { installObsidianDom } from './stubs/obsidian-dom';
-import { mountArtifact } from '../src/block/mount';
+import { BOUNDS_RULE, mountArtifact, withCurrentBounds, withMeasuredBounds } from '../src/block/mount';
 import { renderPlaceholder } from '../src/block/placeholder';
 import type { Artifact, Presentation } from '../src/types';
 
@@ -138,6 +138,38 @@ describe('mountArtifact: the measured frame', () => {
 
 		expect(svg.getAttribute('width')).toBe('100%');
 		expect(svg.getAttribute('viewBox')).toBe('0 0 10 5');
+	});
+});
+
+describe('the rule a stored box was measured by', () => {
+	const CLIPPED = ENGINE_SVG.split('</svg>').join(
+		'<clipPath id="__TZ__0"><rect width="9" height="9"/></clipPath><g clip-path="url(#__TZ__0)"/></svg>',
+	);
+
+	it('is stored with every box measured', () => {
+		const measured = withMeasuredBounds(stored({}), { x: 1, y: 2, width: 30, height: 40 });
+
+		expect(measured).toMatchObject({ viewBox: '1 2 30 40', w: 30, h: 40, bounds: BOUNDS_RULE });
+	});
+
+	it('sends a box measured before 0.2.3 back to be measured, where a clip path could have grown it', () => {
+		const stale = stored({ template: CLIPPED, viewBox: '0 -500 30 900', w: 30, h: 900 });
+
+		expect(withCurrentBounds(stale)).toMatchObject({ viewBox: null, w: 0, h: 0 });
+	});
+
+	it('keeps a box measured now, and one measured before without a clip path to grow it', () => {
+		const current = stored({
+			template: CLIPPED,
+			viewBox: '0 0 30 40',
+			w: 30,
+			h: 40,
+			bounds: BOUNDS_RULE,
+		});
+		const unclipped = stored({ viewBox: '0 0 30 40', w: 30, h: 40 });
+
+		expect(withCurrentBounds(current)).toBe(current);
+		expect(withCurrentBounds(unclipped)).toBe(unclipped);
 	});
 });
 

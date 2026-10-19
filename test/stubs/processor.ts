@@ -3,6 +3,7 @@ import type { MarkdownPostProcessorContext, MarkdownSectionInformation } from 'o
 import { Component } from './obsidian';
 import { FakeTimers } from './timers';
 import { fakeApp } from './vault';
+import { BOUNDS_RULE } from '../../src/block/mount';
 import { createProcessor, type ProcessorDeps } from '../../src/block/processor';
 import type { TexJobSpec } from '../../src/block/render-child';
 import { PreambleService } from '../../src/preamble/vault';
@@ -37,6 +38,7 @@ export function artifact(over: Partial<Artifact> = {}): Artifact {
 		w: 40,
 		h: 20,
 		viewBox: '0 0 40 20',
+		bounds: BOUNDS_RULE,
 		fonts: [],
 		bytes: 200,
 		engineId: 'test-engine',

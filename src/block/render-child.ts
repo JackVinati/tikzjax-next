@@ -20,7 +20,14 @@ import {
 } from './machine';
 import { renderPlaceholder, renderManualTrigger } from './placeholder';
 import { renderErrorCard, renderWarningChip } from './error-card';
-import { applyBounds, applyScale, measureInk, mountArtifact, withMeasuredBounds } from './mount';
+import {
+	applyBounds,
+	applyScale,
+	measureInk,
+	mountArtifact,
+	withCurrentBounds,
+	withMeasuredBounds,
+} from './mount';
 import type { DiagramCache } from '../cache';
 import type { RenderQueue } from '../queue/queue';
 import { isQueueError } from '../queue/queue';
@@ -416,7 +423,7 @@ export class TikzBlock extends MarkdownRenderChild {
 
 		const hot = this.spec.options.nocache ? undefined : this.deps.cache.peek(this.spec.key);
 		if (hot) {
-			this.artifact = hot;
+			this.artifact = withCurrentBounds(hot);
 			this.origin = { tier: 'l1' };
 			this.dispatch({ type: 'l1Hit' });
 			return;
@@ -439,7 +446,7 @@ export class TikzBlock extends MarkdownRenderChild {
 		if (this.state.phase === 'DISPOSED') return;
 
 		if (found) {
-			this.artifact = found.artifact;
+			this.artifact = withCurrentBounds(found.artifact);
 			this.origin = { tier: found.tier };
 			this.dispatch({ type: 'hit', tier: found.tier === 'l1' ? 'l2' : found.tier });
 			return;

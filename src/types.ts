@@ -92,6 +92,11 @@ export interface Artifact {
 	h: number;
 	/** Ink-bounds-corrected viewBox. `null` until a mount has measured it with fonts loaded. */
 	viewBox: string | null;
+	/**
+	 * The rule that measured `viewBox`, block/mount.ts's BOUNDS_RULE when it was measured. Absent
+	 * on a box measured before 0.2.3, which counted what clip paths hide.
+	 */
+	bounds?: number | undefined;
 	fonts: string[];
 	bytes: number;
 	engineId: string;

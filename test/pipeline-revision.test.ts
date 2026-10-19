@@ -18,10 +18,10 @@ import { readText } from './support/read-text';
  * template can now come out differently, bump PIPELINE_REVISION, once per release; then record the
  * new fingerprint below, with the revision it belongs to.
  *
- * Not fingerprinted: freeze.ts and geometry.ts, which run at export and mount time on an artifact
- * already stored, and render-child.ts's `transform`, which assembles the pipeline from outside
- * src/svg/ and changes for reasons that have nothing to do with its output. A change there that
- * alters the template needs the bump without the reminder.
+ * Not fingerprinted: freeze.ts, geometry.ts and measure.ts, which run at export and mount time on
+ * an artifact already stored, and render-child.ts's `transform`, which assembles the pipeline from
+ * outside src/svg/ and changes for reasons that have nothing to do with its output. A change there
+ * that alters the template needs the bump without the reminder.
  */
 const RECORDED = {
 	revision: 2,
@@ -31,7 +31,7 @@ const RECORDED = {
 /** Read at runtime rather than at build time, so this tracks the files as they are now. */
 const STAGE_FILES = Object.keys(import.meta.glob('../src/svg/*.ts'))
 	.map((path) => path.slice('../'.length))
-	.filter((path) => path !== 'src/svg/freeze.ts' && path !== 'src/svg/geometry.ts')
+	.filter((path) => !['src/svg/freeze.ts', 'src/svg/geometry.ts', 'src/svg/measure.ts'].includes(path))
 	.sort();
 
 function fingerprint(): string {

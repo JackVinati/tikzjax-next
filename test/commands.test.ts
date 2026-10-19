@@ -151,6 +151,19 @@ describe('renderedMarkup', () => {
 		expect(svg.getAttribute('width')).toBe('40pt');
 	});
 
+	it('hands out the engine frame for a box measured before 0.2.3, with clipping in it', async () => {
+		const { deps, seen, l1 } = processorDeps();
+		const note = '```tikz\n\\draw (0,0);\n```\n';
+		const span = only(findTikzBlocks(note));
+		const stale = artifact({ bounds: undefined });
+		l1.set(await processedKey(deps, seen, readingView(note, span), 'note.md'), stale);
+
+		// That box may be mostly empty; the engine's frame stands until a mount measures again.
+		const markup = (await renderedMarkup(span.source, 'note.md', deps))?.markup ?? '';
+		const svg = new DOMParser().parseFromString(markup, 'image/svg+xml').documentElement;
+		expect(svg.getAttribute('viewBox')).toBe('-72 -72 100 50');
+	});
+
 	it('gives two takes of the same diagram different ids, so two copies on one page cannot collide', async () => {
 		const { deps, seen, l1 } = processorDeps();
 		const note = '```tikz\n\\draw (0,0);\n```\n';

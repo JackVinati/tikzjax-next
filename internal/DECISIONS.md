@@ -4122,6 +4122,8 @@ to 12,234,493. The worker does not change,
 nor does anything `test/fixtures/golden/REVISION.json` records: diagrams draw as before, and stay
 cached.
 
+---
+
 ## D41 — The store's review of 0.2.1: settings in Obsidian's search, print rules without `!important`, a README without notes
 
 **Amends D6 (the floor ruled out the declarative settings) and DESIGN.md's print rules. Date of
@@ -4182,6 +4184,54 @@ What stays, and why:
 - **GPL-3.0** is the licence (D9), and the malware scan is the store's to run.
 
 Diagrams draw as before, and nothing `test/fixtures/golden/REVISION.json` records changes.
+
+---
+
+## D42 — The frame of a diagram with clipping in it: what shows, not everything drawn
+
+**Amends DESIGN.md §7.4. Date of record: 2026-10-19.**
+
+Discussion #4 (0.2.2, Windows, Obsidian 1.14.4) showed pgfplots diagrams with a large empty space
+above or below them. The axis ran from -8 to 8, and the plots, `x^2`, `-x^2` and `x^2+1`, over the
+domain -8:8, so each curve ran on to 64 or -64, past the axis, where pgfplots clips it. TeX's own
+box was right: the engine drew 299 by 297 pt. The mount-time measurement (§7.4) was not.
+`getBBox()` is the geometry of a drawing before clipping, so it took in the whole curve and framed
+`x^2` 1,284 pt tall, of which 295 were the axis and its labels. TikZJax never measured, which is
+why the same note looked right there.
+
+The measurement now takes clip paths into account where there are any. `visibleBox` in
+`src/svg/measure.ts` walks the subtrees that have a `clip-path` in them, measures every other
+subtree whole with `getBBox()`, and cuts the box of each clipped element down to the box of its clip
+path. The clip path is measured where it applies: copied into a hidden group beside the element,
+with the element's transform and its own, and taken out again at once, since a shape inside
+`<clipPath>` is never drawn and not every engine measures it there. Boxes rather than shapes, so a
+frame can come out a little larger than what shows, never smaller. A group with nothing drawn in it,
+which pgf writes round each shading, at the picture's origin, is left out, as `getBBox()` leaves it
+out; the first version of this counted it, and framed the fill-between fixture 3 pt wider than
+before. A diagram with no `clip-path` is measured by `getBBox()` alone, as before.
+
+Checked in headless Chromium 148 and WebKit 26.6 on the ten engine outputs here with a clip path,
+five test fixtures and five variants of the reported diagram. The three whose curve runs past the
+axis, `x^2`, `-x^2` and `x^2` with `clip bounding box=upper bound` (which changes nothing here), came
+out 295 by 295 pt where `getBBox()` gave up to 1,284 tall. The shading fixture came out 142 by 57
+where it gave 199 by 114: a shading is drawn as a square larger than its shape and clipped to it,
+and the square made a 28 pt margin on every side. The other six came out exactly as `getBBox()`
+measured them, in both engines, and the document was left as it was found. In Obsidian 1.14.4 with
+the reported note, 0.2.2 drew `-x^2` 1,710 px tall and `x^2+1` 1,744; with this change, from the
+same cache, all four plots were 399 px and the shading 142 by 57 pt, and the cache's records kept
+their dates, so nothing was compiled again.
+
+A box is stored with the rule that measured it, `Artifact.bounds`, which is 2 from this release. A
+stored box with no rule, on a template with a `clip-path` in it, is dropped when the artifact is
+taken from the cache, so its next mount measures it again and stores the new box. A box without a
+clip path is kept, since both rules measure it the same. Until such a diagram is mounted again,
+Copy SVG and the other commands that take it out of the note give it the engine's frame rather than
+the old box. The templates are as they were, so neither `REVISION.json` nor `PIPELINE_REVISION`
+moves; `src/svg/measure.ts` runs at mount time on a stored artifact and is left out of the
+pipeline's fingerprint, as `geometry.ts` and `freeze.ts` are.
+
+The reply to the discussion gave 0.2.2's users a way round it: a domain that stays inside the axis,
+`-sqrt(8):sqrt(8)` for `x^2`.
 
 ---
 
