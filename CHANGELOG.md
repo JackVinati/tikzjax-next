@@ -3,6 +3,18 @@
 What changed in each release, newest first. The release workflow puts a version's section at the
 top of its notes on GitHub, and will not publish a version that has none.
 
+## 0.2.3 — 2026-10-19
+
+No diagram draws differently, and none is compiled again after the update.
+
+- A diagram with clipping in it is framed by what shows. A pgfplots curve that runs past its axis,
+  such as `x^2` over `domain=-8:8` in an axis that stops at 8, is clipped at the axis, but the
+  plugin framed the whole curve, so the diagram had a large empty space above or below it: 1,284 pt
+  tall for an axis of 295. Shadings had an empty margin round them for the same reason. Diagrams
+  without clipping are framed as before. Reported in
+  [discussion #4](https://github.com/JackVinati/tikzjax-next/discussions/4).
+- Diagrams already cached get the new frame the first time they are shown, from the cache.
+
 ## 0.2.2 — 2026-10-16
 
 No diagram draws differently, and every diagram 0.2.1 cached is shown from the cache.
