@@ -10,3 +10,5 @@ xparse.sty             2023-10-10
 amsmath.sty            2023/05/13 v2.17o AMS math features
 standalone.cls         2022/10/10 v1.3b Class to compile TeX sub-files standalone
 tikz-cd.sty            2021/05/04 v1.0 Commutative diagrams with TikZ
+xargs.sty              2008/03/22 v1.1 extended macro definitions
+verbatim.sty           1997/09/25 v1.5q Reimplementing the verbatim environment
