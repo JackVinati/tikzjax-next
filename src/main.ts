@@ -1,5 +1,7 @@
 import { Notice, Platform, Plugin } from 'obsidian';
 import { COLD_FONT_CSS } from 'virtual:fonts';
+import { freezeSvg } from './svg/freeze';
+import { findTikzBlocks, findTikzBlockAt } from './note/finalize';
 import { ENGINE_ID } from 'virtual:engine';
 
 import { TexError, type Budgets, type TexResult } from './types';
@@ -413,6 +415,126 @@ export default class TikzjaxNextPlugin extends Plugin {
 	 */
 	private rerenderOpenViews(): void {
 		this.app.workspace.trigger('post-processor-change');
+	}
+
+
+	/**
+	 * Export a single TikZ diagram from a note as a standalone SVG string.
+	 *
+	 * @param notePath  Vault-relative path of the note.
+	 * @param mode      'auto' | 'index' | 'line' | 'match' | 'list'
+	 * @param value     Selector value (1-based index, line number, or match text).
+	 * @param timeoutMs How long to wait for a diagram to render (default 90000).
+	 * @returns         { svg } on success, { error } on failure, or { blocks } for list mode.
+	 */
+	async exportDiagramAsSvg(
+		notePath: string,
+		mode: string,
+		value: string,
+		timeoutMs: number = 90000,
+	): Promise<{ svg?: string; error?: string; blocks?: Array<{ index: number; range: string; preview: string }> }> {
+		notePath = notePath.replace(/\\/g, '/');
+		const file = this.app.vault.getAbstractFileByPath(notePath);
+		if (!file || !(file instanceof TFile)) {
+			return { error: `Note not found in the vault: ${notePath}` };
+		}
+
+		const text = await this.app.vault.read(file);
+		const blocks = findTikzBlocks(text);
+
+		// List mode: return block info without exporting.
+		if (mode === 'list') {
+			if (blocks.length === 0) return { error: `No \`\`\`tikz blocks found in ${file.path}.` };
+			const rows = blocks.map((block, i) => {
+				const range = block.start === block.end
+					? `line ${block.start + 1}`
+					: `lines ${block.start + 1}-${block.end + 1}`;
+				const preview = block.source.split(/\r?\n/).filter((l) => l.trim()).slice(0, 2).join(' / ').slice(0, 110);
+				return { index: i + 1, range, preview };
+			});
+			return { blocks: rows };
+		}
+
+		// Select a block.
+		let selected: (typeof blocks)[number] | null = null;
+		if (mode === 'auto') {
+			if (blocks.length === 0) return { error: `No \`\`\`tikz blocks found in ${file.path}.` };
+			if (blocks.length > 1) return { error: `This note has ${blocks.length} TikZ diagrams. Use --list, then choose one with --index, --line, or --match.` };
+			selected = blocks[0] ?? null;
+		} else if (mode === 'index') {
+			const n = parseInt(value, 10);
+			if (!isFinite(n) || n < 1 || n > blocks.length) {
+				return { error: `Index ${value} is out of range; this note has ${blocks.length} TikZ diagram(s).` };
+			}
+			selected = blocks[n - 1] ?? null;
+		} else if (mode === 'line') {
+			const lines = text.split('\n');
+			const n = parseInt(value, 10);
+			if (!isFinite(n) || n < 1 || n > lines.length) {
+				return { error: `Line ${value} is outside the note (1-${lines.length}).` };
+			}
+			const lineIndex = n - 1;
+			// Find the block whose span covers this line. Convert line number to char offset.
+			let offset = 0;
+			for (let i = 0; i < lineIndex; i++) offset += (lines[i]?.length ?? 0) + 1;
+			const found = findTikzBlockAt(text, offset);
+			if (!found) return { error: `Line ${n} is not inside a \`\`\`tikz block.` };
+			selected = found;
+		} else if (mode === 'match') {
+			if (!value) return { error: '--match needs a non-empty piece of text from the diagram.' };
+			const found = blocks.filter((b) => b.source.indexOf(value) !== -1);
+			if (found.length === 0) return { error: 'No \`\`\`tikz block contains that text.' };
+			if (found.length > 1) return { error: `That text occurs in ${found.length} diagrams. Use --index or --line instead.` };
+			selected = found[0] ?? null;
+		} else {
+			return { error: `Unknown selector mode: ${mode}` };
+		}
+
+		if (!selected) return { error: 'No diagram selected.' };
+
+		const deps = {
+			settings: () => this.settings,
+			budgets: this.budgets,
+			host: this.host!,
+			preamble: this.preamble!,
+			cache: this.cache!,
+		};
+
+		const EXPORT_INK = '#000000';
+		const EXPORT_PAPER = '#ffffff';
+
+		// Try to get the rendered markup from cache.
+		let rendered = await renderedMarkup(selected.source, file.path, deps);
+		if (!rendered) {
+			// Warm the note to render all diagrams.
+			const controller = new AbortController();
+			const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+			try {
+				await this.warmNote(file, controller.signal);
+			} catch {
+				// ignore warm errors
+			} finally {
+				window.clearTimeout(timer);
+			}
+			rendered = await renderedMarkup(selected.source, file.path, deps);
+		}
+
+		if (!rendered) {
+			return { error: `The diagram did not render within ${Math.round(timeoutMs / 1000)}s. Open the note in Obsidian, check for a TikZ error card, and try again.` };
+		}
+
+		const svg = freezeSvg(rendered.markup, {
+			ink: EXPORT_INK,
+			paper: EXPORT_PAPER,
+			opaque: true,
+			fontCss: COLD_FONT_CSS,
+		});
+
+		if (!svg || svg.indexOf('<svg') === -1) {
+			return { error: 'The exported file does not contain SVG markup.' };
+		}
+
+		return { svg };
 	}
 
 	override onunload(): void {
