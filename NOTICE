@@ -98,6 +98,8 @@ amsfonts: amsfonts.sty amssymb.sty eufrak.sty, and its .fd files
   Copyright (C) American Mathematical Society.
 l3kernel, l3backend, l3packages: expl3.sty xparse.sty         LPPL-1.3c
 etoolbox: etoolbox.sty                                        LPPL-1.3c
+xargs: xargs.sty                                              LPPL-1.3c
+verbatim (LaTeX tools bundle): verbatim.sty                   LPPL-1.2 or later
 Oberdiek bundle: atveryend.sty atveryend-ltx.sty infwarerr.sty ltxcmds.sty
   pdftexcmds.sty                                              LPPL-1.3c
 standalone: standalone.cls, in the format                     LPPL-1.3

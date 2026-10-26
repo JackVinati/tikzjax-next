@@ -34,5 +34,8 @@
 
   "pgfplotstable.sty",
   "pgfplotstable.code.tex",
-  "pgfplotstable.coltype.code.tex"
+  "pgfplotstable.coltype.code.tex",
+
+  "xargs.sty",
+  "verbatim.sty"
 ]

@@ -2,6 +2,7 @@ import { builtinModules } from 'node:module';
 import { mkdir, copyFile, writeFile, access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import esbuild from 'esbuild';
 import { buildWorker as buildEngineWorker, engineIsBuilt } from './engine-assets.mjs';
 import { buildStyles, fontsPlugin } from './gen-styles.mjs';
@@ -10,7 +11,7 @@ import { banners } from './banner.mjs';
 import { versionDefine } from './plugin-version.mjs';
 
 const prod = process.argv[2] === 'production';
-const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const root = fileURLToPath(new URL('..', import.meta.url));
 
 // Where the source is and what is embedded under which licence: scripts/banner.mjs.
 const banner = banners(root);

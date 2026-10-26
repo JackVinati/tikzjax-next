@@ -1,0 +1,4 @@
+{
+  "dataset": { "texPackages": { "xargs": "", "verbatim": "" } },
+  "note": "xargs.sty and verbatim.sty, hand-listed in engine-build/tex-files.extra.json for stanli (whose \\newcommandx comes from xargs) and for preambles that \\usepackage{verbatim}. There is no fixture closure for them: the LaTeX that collects tex_files never loads these two unless a preamble asks, so the list carries them forever only as extras. This fixture exercises the load."
+}
